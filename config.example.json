@@ -1,0 +1,26 @@
+{
+  "google_ads": {
+    "developer_token": "YOUR_DEVELOPER_TOKEN",
+    "client_id": "YOUR_CLIENT_ID.apps.googleusercontent.com",
+    "client_secret": "YOUR_CLIENT_SECRET",
+    "refresh_token": "YOUR_REFRESH_TOKEN",
+    "mcc_customer_id": "123-456-7890"
+  },
+  "clients": {
+    "neon-one": {
+      "customer_id": "111-222-3333",
+      "name": "Neon One",
+      "folder": "/Users/mark/claude-code/neon-one"
+    },
+    "client-two": {
+      "customer_id": "444-555-6666",
+      "name": "Client Two",
+      "folder": "/Users/mark/claude-code/client-two"
+    }
+  },
+  "defaults": {
+    "create_paused": true,
+    "label_prefix": "claude-",
+    "require_approval_for_enable": true
+  }
+}
