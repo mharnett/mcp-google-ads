@@ -25,6 +25,7 @@ interface ClientConfig {
   folder: string;
   mcc_customer_id?: string;
   refresh_token_env?: string;
+  direct_access?: boolean; // Skip MCC routing when user has direct admin access
 }
 
 interface Config {
@@ -87,16 +88,25 @@ class GoogleAdsManager {
 
   getCustomer(customerId: string) {
     const client = this.getClientForCustomerId(customerId);
-    const mccId = client?.mcc_customer_id || this.config.google_ads.mcc_customer_id;
     let refreshToken = this.defaultRefreshToken;
     if (client?.refresh_token_env && process.env[client.refresh_token_env]) {
       refreshToken = process.env[client.refresh_token_env]!;
     }
-    return this.api.Customer({
+
+    const customerOpts: any = {
       customer_id: customerId.replace(/-/g, ""),
-      login_customer_id: mccId.replace(/-/g, ""),
       refresh_token: refreshToken,
-    });
+    };
+
+    // Only route through MCC if the client doesn't have direct admin access.
+    // Direct access is needed for accounts where the authenticated user has
+    // admin rights but the MCC manager link doesn't permit mutations.
+    if (!client?.direct_access) {
+      const mccId = client?.mcc_customer_id || this.config.google_ads.mcc_customer_id;
+      customerOpts.login_customer_id = mccId.replace(/-/g, "");
+    }
+
+    return this.api.Customer(customerOpts);
   }
 
   // List all campaigns for a customer
