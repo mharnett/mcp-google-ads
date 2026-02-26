@@ -429,6 +429,45 @@ class GoogleAdsManager {
     return result;
   }
 
+  // Pause ads
+  async pauseAds(customerId: string, adIds: string[]) {
+    const customer = this.getCustomer(customerId);
+
+    const operations = adIds.map(adId => ({
+      resource_name: `customers/${customerId.replace(/-/g, "")}/adGroupAds/${adId}`,
+      status: enums.AdGroupAdStatus.PAUSED,
+    }));
+
+    const result = await customer.adGroupAds.update(operations);
+    return result;
+  }
+
+  // Pause ad groups
+  async pauseAdGroups(customerId: string, adGroupIds: string[]) {
+    const customer = this.getCustomer(customerId);
+
+    const operations = adGroupIds.map(id => ({
+      resource_name: `customers/${customerId.replace(/-/g, "")}/adGroups/${id}`,
+      status: enums.AdGroupStatus.PAUSED,
+    }));
+
+    const result = await customer.adGroups.update(operations);
+    return result;
+  }
+
+  // Pause campaigns
+  async pauseCampaigns(customerId: string, campaignIds: string[]) {
+    const customer = this.getCustomer(customerId);
+
+    const operations = campaignIds.map(id => ({
+      resource_name: `customers/${customerId.replace(/-/g, "")}/campaigns/${id}`,
+      status: enums.CampaignStatus.PAUSED,
+    }));
+
+    const result = await customer.campaigns.update(operations);
+    return result;
+  }
+
   // ============================================
   // REPORTING METHODS
   // ============================================
@@ -1147,6 +1186,19 @@ const tools: Tool[] = [
       },
     },
   },
+  {
+    name: "google_ads_pause_items",
+    description: "Pause enabled campaigns, ad groups, or ads. REQUIRES USER APPROVAL. This will stop items from serving.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        customer_id: { type: "string" },
+        campaign_ids: { type: "array", items: { type: "string" } },
+        ad_group_ids: { type: "array", items: { type: "string" } },
+        ad_ids: { type: "array", items: { type: "string" } },
+      },
+    },
+  },
   // ============================================
   // REPORTING TOOLS
   // ============================================
@@ -1523,6 +1575,32 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             text: JSON.stringify({
               success: true,
               message: "Items enabled and now LIVE",
+              results,
+            }, null, 2),
+          }],
+        };
+      }
+
+      case "google_ads_pause_items": {
+        const customerId = args?.customer_id as string || "";
+        const results: any = {};
+
+        if (args?.campaign_ids) {
+          results.campaigns = await adsManager.pauseCampaigns(customerId, args.campaign_ids as string[]);
+        }
+        if (args?.ad_group_ids) {
+          results.adGroups = await adsManager.pauseAdGroups(customerId, args.ad_group_ids as string[]);
+        }
+        if (args?.ad_ids) {
+          results.ads = await adsManager.pauseAds(customerId, args.ad_ids as string[]);
+        }
+
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              success: true,
+              message: "Items paused and no longer serving",
               results,
             }, null, 2),
           }],
