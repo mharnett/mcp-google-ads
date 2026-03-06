@@ -11,9 +11,18 @@ import {
   ListToolsRequestSchema,
   Tool,
 } from "@modelcontextprotocol/sdk/types.js";
-import { GoogleAdsApi, enums } from "google-ads-api";
+import { GoogleAdsApi, enums, resources, MutateOperation } from "google-ads-api";
 import { readFileSync, existsSync } from "fs";
 import { z } from "zod";
+
+// Log build fingerprint at startup
+try {
+  const __buildInfoDir = dirname(new URL(import.meta.url).pathname);
+  const buildInfo = JSON.parse(readFileSync(join(__buildInfoDir, "build-info.json"), "utf-8"));
+  console.error(`[build] SHA: ${buildInfo.sha} (${buildInfo.builtAt})`);
+} catch {
+  // build-info.json not present (dev mode)
+}
 
 // ============================================
 // CONFIGURATION
@@ -325,41 +334,63 @@ class GoogleAdsManager {
   async createResponsiveSearchAd(customerId: string, ad: {
     ad_group_id: string;
     final_urls: string[];
-    headlines: string[]; // max 15
-    descriptions: string[]; // max 4
+    headlines: Array<string | { text: string; pinned_position?: number }>; // max 15
+    descriptions: Array<string | { text: string; pinned_position?: number }>; // max 4
     path1?: string;
     path2?: string;
   }) {
     const customer = this.getCustomer(customerId);
 
+    // Normalize to { text, pinned_position? } format
+    const normalizedHeadlines = ad.headlines.map(h =>
+      typeof h === "string" ? { text: h } : h
+    );
+    const normalizedDescriptions = ad.descriptions.map(d =>
+      typeof d === "string" ? { text: d } : d
+    );
+
     // Validate
-    if (ad.headlines.length < 3 || ad.headlines.length > 15) {
+    if (normalizedHeadlines.length < 3 || normalizedHeadlines.length > 15) {
       throw new Error("RSA requires 3-15 headlines");
     }
-    if (ad.descriptions.length < 2 || ad.descriptions.length > 4) {
+    if (normalizedDescriptions.length < 2 || normalizedDescriptions.length > 4) {
       throw new Error("RSA requires 2-4 descriptions");
     }
 
     // Check headline lengths
-    for (const h of ad.headlines) {
-      if (h.length > 30) {
-        throw new Error(`Headline too long (${h.length} chars, max 30): "${h}"`);
+    for (const h of normalizedHeadlines) {
+      if (h.text.length > 30) {
+        throw new Error(`Headline too long (${h.text.length} chars, max 30): "${h.text}"`);
       }
     }
     // Check description lengths
-    for (const d of ad.descriptions) {
-      if (d.length > 90) {
-        throw new Error(`Description too long (${d.length} chars, max 90): "${d}"`);
+    for (const d of normalizedDescriptions) {
+      if (d.text.length > 90) {
+        throw new Error(`Description too long (${d.text.length} chars, max 90): "${d.text}"`);
       }
     }
+
+    // Map pinned_position to ServedAssetFieldType enum values
+    const HEADLINE_PIN_MAP: Record<number, number> = { 1: 2, 2: 3, 3: 4 }; // HEADLINE_1=2, HEADLINE_2=3, HEADLINE_3=4
+    const DESCRIPTION_PIN_MAP: Record<number, number> = { 1: 5, 2: 6 }; // DESCRIPTION_1=5, DESCRIPTION_2=6
 
     const result = await customer.adGroupAds.create([{
       ad_group: `customers/${customerId.replace(/-/g, "")}/adGroups/${ad.ad_group_id}`,
       status: enums.AdGroupAdStatus.PAUSED, // Always create paused
       ad: {
         responsive_search_ad: {
-          headlines: ad.headlines.map(text => ({ text })),
-          descriptions: ad.descriptions.map(text => ({ text })),
+          headlines: normalizedHeadlines.map(h => ({
+            text: h.text,
+            ...(h.pinned_position && HEADLINE_PIN_MAP[h.pinned_position]
+              ? { pinned_field: HEADLINE_PIN_MAP[h.pinned_position] }
+              : {}),
+          })),
+          descriptions: normalizedDescriptions.map(d => ({
+            text: d.text,
+            ...(d.pinned_position && DESCRIPTION_PIN_MAP[d.pinned_position]
+              ? { pinned_field: DESCRIPTION_PIN_MAP[d.pinned_position] }
+              : {}),
+          })),
           path1: ad.path1,
           path2: ad.path2,
         },
@@ -387,6 +418,60 @@ class GoogleAdsManager {
     }));
 
     const result = await customer.adGroupCriteria.create(keywordCriteria);
+    return result;
+  }
+
+  // Pause keywords (ad group criteria)
+  async pauseKeywords(customerId: string, criterionResourceNames: string[]) {
+    const customer = this.getCustomer(customerId);
+
+    const operations = criterionResourceNames.map(rn => ({
+      resource_name: rn,
+      status: enums.AdGroupCriterionStatus.PAUSED,
+    }));
+
+    const result = await customer.adGroupCriteria.update(operations);
+    return result;
+  }
+
+  // Add keywords to a shared negative keyword list
+  // Uses the unified GoogleAdsService.Mutate endpoint instead of the dedicated
+  // SharedCriterionService, which fails with RESOURCE_NOT_FOUND through MCC routing.
+  async addSharedNegativeKeywords(customerId: string, sharedSetId: string, keywords: Array<{ text: string; match_type: "BROAD" | "PHRASE" | "EXACT" }>) {
+    const customer = this.getCustomer(customerId);
+    const cleanId = customerId.replace(/-/g, "");
+
+    const mutations: MutateOperation<resources.ISharedCriterion>[] = keywords.map(kw => ({
+      entity: "shared_criterion" as const,
+      operation: "create" as const,
+      resource: {
+        shared_set: `customers/${cleanId}/sharedSets/${sharedSetId}`,
+        keyword: {
+          text: kw.text,
+          match_type: enums.KeywordMatchType[kw.match_type],
+        },
+      },
+    }));
+
+    const result = await customer.mutateResources(mutations);
+    return result;
+  }
+
+  // Add campaign-level negative keywords
+  async addCampaignNegativeKeywords(customerId: string, campaignId: string, keywords: Array<{ text: string; match_type: "BROAD" | "PHRASE" | "EXACT" }>) {
+    const customer = this.getCustomer(customerId);
+    const cleanId = customerId.replace(/-/g, "");
+
+    const criteria = keywords.map(kw => ({
+      campaign: `customers/${cleanId}/campaigns/${campaignId}`,
+      negative: true,
+      keyword: {
+        text: kw.text,
+        match_type: enums.KeywordMatchType[kw.match_type],
+      },
+    }));
+
+    const result = await customer.campaignCriteria.create(criteria);
     return result;
   }
 
@@ -1135,15 +1220,45 @@ const tools: Tool[] = [
   },
   {
     name: "google_ads_create_responsive_search_ad",
-    description: "Create a responsive search ad (will be PAUSED until approved). Validates before creating.",
+    description: "Create a responsive search ad (will be PAUSED until approved). Validates before creating. Headlines/descriptions can be plain strings or objects with pinned_position (1-3 for headlines, 1-2 for descriptions).",
     inputSchema: {
       type: "object",
       properties: {
         customer_id: { type: "string" },
         ad_group_id: { type: "string" },
         final_urls: { type: "array", items: { type: "string" } },
-        headlines: { type: "array", items: { type: "string" } },
-        descriptions: { type: "array", items: { type: "string" } },
+        headlines: {
+          type: "array",
+          items: {
+            oneOf: [
+              { type: "string" },
+              {
+                type: "object",
+                properties: {
+                  text: { type: "string" },
+                  pinned_position: { type: "number", description: "Pin to position 1, 2, or 3" },
+                },
+                required: ["text"],
+              },
+            ],
+          },
+        },
+        descriptions: {
+          type: "array",
+          items: {
+            oneOf: [
+              { type: "string" },
+              {
+                type: "object",
+                properties: {
+                  text: { type: "string" },
+                  pinned_position: { type: "number", description: "Pin to position 1 or 2" },
+                },
+                required: ["text"],
+              },
+            ],
+          },
+        },
         path1: { type: "string" },
         path2: { type: "string" },
       },
@@ -1197,6 +1312,64 @@ const tools: Tool[] = [
         ad_group_ids: { type: "array", items: { type: "string" } },
         ad_ids: { type: "array", items: { type: "string" } },
       },
+    },
+  },
+  {
+    name: "google_ads_add_shared_negatives",
+    description: "Add negative keywords to a shared negative keyword list. Keywords will immediately block matching queries across all campaigns the list is applied to.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        customer_id: { type: "string" },
+        shared_set_id: { type: "string", description: "The shared set ID to add keywords to" },
+        keywords: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              text: { type: "string" },
+              match_type: { type: "string", enum: ["BROAD", "PHRASE", "EXACT"] },
+            },
+            required: ["text", "match_type"],
+          },
+        },
+      },
+      required: ["shared_set_id", "keywords"],
+    },
+  },
+  {
+    name: "google_ads_add_campaign_negatives",
+    description: "Add negative keywords at the campaign level. Use for campaign-specific negatives that shouldn't be in a shared list.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        customer_id: { type: "string" },
+        campaign_id: { type: "string" },
+        keywords: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              text: { type: "string" },
+              match_type: { type: "string", enum: ["BROAD", "PHRASE", "EXACT"] },
+            },
+            required: ["text", "match_type"],
+          },
+        },
+      },
+      required: ["campaign_id", "keywords"],
+    },
+  },
+  {
+    name: "google_ads_pause_keywords",
+    description: "Pause active keywords by their criterion resource names.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        customer_id: { type: "string" },
+        criterion_resource_names: { type: "array", items: { type: "string" }, description: "Full resource names like customers/123/adGroupCriteria/456~789" },
+      },
+      required: ["criterion_resource_names"],
     },
   },
   // ============================================
@@ -1496,10 +1669,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "google_ads_create_responsive_search_ad": {
         const customerId = args?.customer_id as string || "";
 
+        // Normalize headlines/descriptions for validation (extract text strings)
+        const rawHeadlines = args?.headlines as Array<string | { text: string; pinned_position?: number }>;
+        const rawDescriptions = args?.descriptions as Array<string | { text: string; pinned_position?: number }>;
+        const headlineTexts = rawHeadlines.map(h => typeof h === "string" ? h : h.text);
+        const descriptionTexts = rawDescriptions.map(d => typeof d === "string" ? d : d.text);
+
         // Validate first
         const validation = await adsManager.validateAd(customerId, {
-          headlines: args?.headlines as string[],
-          descriptions: args?.descriptions as string[],
+          headlines: headlineTexts,
+          descriptions: descriptionTexts,
           final_urls: args?.final_urls as string[],
         });
 
@@ -1519,8 +1698,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const result = await adsManager.createResponsiveSearchAd(customerId, {
           ad_group_id: args?.ad_group_id as string,
           final_urls: args?.final_urls as string[],
-          headlines: args?.headlines as string[],
-          descriptions: args?.descriptions as string[],
+          headlines: rawHeadlines,
+          descriptions: rawDescriptions,
           path1: args?.path1 as string,
           path2: args?.path2 as string,
         });
@@ -1602,6 +1781,62 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               success: true,
               message: "Items paused and no longer serving",
               results,
+            }, null, 2),
+          }],
+        };
+      }
+
+      case "google_ads_add_shared_negatives": {
+        const customerId = args?.customer_id as string || "";
+        const result = await adsManager.addSharedNegativeKeywords(
+          customerId,
+          args?.shared_set_id as string,
+          args?.keywords as Array<{ text: string; match_type: "BROAD" | "PHRASE" | "EXACT" }>,
+        );
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              success: true,
+              message: "Negative keywords added to shared list",
+              results: result,
+            }, null, 2),
+          }],
+        };
+      }
+
+      case "google_ads_add_campaign_negatives": {
+        const customerId = args?.customer_id as string || "";
+        const result = await adsManager.addCampaignNegativeKeywords(
+          customerId,
+          args?.campaign_id as string,
+          args?.keywords as Array<{ text: string; match_type: "BROAD" | "PHRASE" | "EXACT" }>,
+        );
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              success: true,
+              message: "Campaign-level negative keywords added",
+              results: result,
+            }, null, 2),
+          }],
+        };
+      }
+
+      case "google_ads_pause_keywords": {
+        const customerId = args?.customer_id as string || "";
+        const result = await adsManager.pauseKeywords(
+          customerId,
+          args?.criterion_resource_names as string[],
+        );
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              success: true,
+              message: "Keywords paused",
+              results: result,
             }, null, 2),
           }],
         };
