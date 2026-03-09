@@ -67,6 +67,96 @@ function getClientFromWorkingDir(config: Config, cwd: string): ClientConfig | nu
 }
 
 // ============================================
+// TYPED ERRORS (mirrors motion-mcp pattern)
+// ============================================
+
+class GoogleAdsAuthError extends Error {
+  constructor(message: string, public readonly cause?: unknown) {
+    super(message);
+    this.name = "GoogleAdsAuthError";
+  }
+}
+
+class GoogleAdsRateLimitError extends Error {
+  constructor(
+    public readonly retryAfterMs: number,
+    cause?: unknown,
+  ) {
+    super(`Rate limited, retry after ${retryAfterMs}ms`);
+    this.name = "GoogleAdsRateLimitError";
+    this.cause = cause;
+  }
+}
+
+class GoogleAdsServiceError extends Error {
+  constructor(message: string, public readonly cause?: unknown) {
+    super(message);
+    this.name = "GoogleAdsServiceError";
+  }
+}
+
+// ============================================
+// STARTUP CREDENTIAL VALIDATION
+// ============================================
+
+function validateCredentials(): { valid: boolean; missing: string[] } {
+  const required = [
+    "GOOGLE_ADS_DEVELOPER_TOKEN",
+    "GOOGLE_ADS_CLIENT_ID",
+    "GOOGLE_ADS_CLIENT_SECRET",
+    "GOOGLE_ADS_REFRESH_TOKEN",
+  ];
+  const missing = required.filter(
+    (key) => !process.env[key] || process.env[key]!.trim() === "",
+  );
+  return { valid: missing.length === 0, missing };
+}
+
+function classifyError(error: any): Error {
+  const message = error?.message || String(error);
+  const code = error?.errors?.[0]?.error_code;
+  const status = error?.status;
+
+  // Auth failures: expired tokens, invalid credentials, permission denied
+  if (
+    status === 401 ||
+    status === 403 ||
+    message.includes("AUTHENTICATION_ERROR") ||
+    message.includes("AUTHORIZATION_ERROR") ||
+    message.includes("invalid_grant") ||
+    message.includes("Token has been expired") ||
+    message.includes("refresh token") ||
+    code?.authentication_error ||
+    code?.authorization_error
+  ) {
+    return new GoogleAdsAuthError(
+      `Auth failed: ${message}. Check refresh token in Keychain (security find-generic-password -a google-ads-drak -s GOOGLE_ADS_REFRESH_TOKEN -w)`,
+      error,
+    );
+  }
+
+  // Rate limiting
+  if (
+    status === 429 ||
+    message.includes("RESOURCE_EXHAUSTED") ||
+    code?.quota_error
+  ) {
+    const retryMs = error?.retryAfter ? error.retryAfter * 1000 : 60_000;
+    return new GoogleAdsRateLimitError(retryMs, error);
+  }
+
+  // Server errors
+  if (status >= 500 || message.includes("INTERNAL_ERROR")) {
+    return new GoogleAdsServiceError(
+      `Google Ads API server error: ${message}`,
+      error,
+    );
+  }
+
+  return error;
+}
+
+// ============================================
 // GOOGLE ADS CLIENT
 // ============================================
 
@@ -77,11 +167,21 @@ class GoogleAdsManager {
 
   constructor(config: Config) {
     this.config = config;
-    this.defaultRefreshToken = process.env.GOOGLE_ADS_REFRESH_TOKEN || "";
+
+    // Validate credentials at startup — fail fast
+    const creds = validateCredentials();
+    if (!creds.valid) {
+      const msg = `[STARTUP ERROR] Missing required credentials: ${creds.missing.join(", ")}. MCP will not function. Check run-mcp.sh and Keychain entries.`;
+      console.error(msg);
+      throw new GoogleAdsAuthError(msg);
+    }
+    console.error("[startup] Credentials validated: all required env vars present");
+
+    this.defaultRefreshToken = process.env.GOOGLE_ADS_REFRESH_TOKEN!;
     this.api = new GoogleAdsApi({
-      client_id: process.env.GOOGLE_ADS_CLIENT_ID || "",
-      client_secret: process.env.GOOGLE_ADS_CLIENT_SECRET || "",
-      developer_token: process.env.GOOGLE_ADS_DEVELOPER_TOKEN || "",
+      client_id: process.env.GOOGLE_ADS_CLIENT_ID!,
+      client_secret: process.env.GOOGLE_ADS_CLIENT_SECRET!,
+      developer_token: process.env.GOOGLE_ADS_DEVELOPER_TOKEN!,
     });
   }
 
@@ -2007,15 +2107,34 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       default:
         throw new Error(`Unknown tool: ${name}`);
     }
-  } catch (error: any) {
+  } catch (rawError: any) {
+    const error = classifyError(rawError);
+
+    // Log classified error type to stderr for debugging
+    console.error(`[error] ${error.name}: ${error.message}`);
+
+    const response: Record<string, unknown> = {
+      error: true,
+      error_type: error.name,
+      message: error.message,
+    };
+
+    if (error instanceof GoogleAdsAuthError) {
+      response.action_required = "Re-authenticate: check refresh token in macOS Keychain. Token may be expired or revoked.";
+      response.hint = "Run: security find-generic-password -a google-ads-drak -s GOOGLE_ADS_REFRESH_TOKEN -w";
+    } else if (error instanceof GoogleAdsRateLimitError) {
+      response.retry_after_ms = error.retryAfterMs;
+      response.action_required = `Rate limited. Retry after ${Math.ceil(error.retryAfterMs / 1000)} seconds.`;
+    } else if (error instanceof GoogleAdsServiceError) {
+      response.action_required = "Google Ads API server error. This is transient — retry in a few minutes.";
+    } else {
+      response.details = rawError.errors || rawError.stack;
+    }
+
     return {
       content: [{
         type: "text",
-        text: JSON.stringify({
-          error: true,
-          message: error.message,
-          details: error.errors || error.stack,
-        }, null, 2),
+        text: JSON.stringify(response, null, 2),
       }],
       isError: true,
     };
@@ -2024,9 +2143,27 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
 // Start server
 async function main() {
+  // Startup health check: verify credentials work with a lightweight API call
+  try {
+    const firstClient = Object.values(config.clients)[0];
+    if (firstClient) {
+      const customer = adsManager.getCustomer(firstClient.customer_id);
+      await customer.query(`SELECT customer.id FROM customer LIMIT 1`);
+      console.error(`[startup] Auth verified: successfully queried account ${firstClient.customer_id} (${firstClient.name})`);
+    }
+  } catch (err: any) {
+    const classified = classifyError(err);
+    if (classified instanceof GoogleAdsAuthError) {
+      console.error(`[STARTUP WARNING] Auth check FAILED: ${classified.message}`);
+      console.error(`[STARTUP WARNING] MCP will start but ALL API calls will fail until auth is fixed.`);
+    } else {
+      console.error(`[startup] Auth check returned non-auth error (may be OK): ${err.message}`);
+    }
+  }
+
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error("MCP Google Ads server running");
+  console.error("[startup] MCP Google Ads server running");
 }
 
 main().catch(console.error);
