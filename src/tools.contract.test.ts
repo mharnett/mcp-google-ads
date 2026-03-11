@@ -19,6 +19,7 @@ describe("Tool Schema Contract", () => {
     "google_ads_add_shared_negatives",
     "google_ads_add_campaign_negatives",
     "google_ads_pause_keywords",
+    "google_ads_update_campaign_tracking",
     "google_ads_keyword_performance",
     "google_ads_keyword_performance_by_conversion",
     "google_ads_search_term_report",

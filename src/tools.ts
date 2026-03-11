@@ -266,6 +266,32 @@ export const tools: Tool[] = [
       required: ["criterion_resource_names"],
     },
   },
+  {
+    name: "google_ads_update_campaign_tracking",
+    description: "Update campaign tracking parameters: final URL suffix, tracking URL template, and/or custom URL parameters. Use google_ads_get_campaign_tracking first to see current values.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        customer_id: { type: "string" },
+        campaign_id: { type: "string", description: "The campaign ID to update" },
+        final_url_suffix: { type: "string", description: "New final URL suffix (appended to landing page URLs). Set to empty string to clear." },
+        tracking_url_template: { type: "string", description: "New tracking URL template. Set to empty string to clear." },
+        url_custom_parameters: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              key: { type: "string", description: "Parameter name (without {_ } wrapper)" },
+              value: { type: "string", description: "Parameter value (can include ValueTrack macros)" },
+            },
+            required: ["key", "value"],
+          },
+          description: "Custom URL parameters (replaces all existing custom params)",
+        },
+      },
+      required: ["campaign_id"],
+    },
+  },
   // ============================================
   // REPORTING TOOLS
   // ============================================

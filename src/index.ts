@@ -458,25 +458,19 @@ class GoogleAdsManager {
   }
 
   // Add keywords to a shared negative keyword list
-  // Uses the unified GoogleAdsService.Mutate endpoint instead of the dedicated
-  // SharedCriterionService, which fails with RESOURCE_NOT_FOUND through MCC routing.
   async addSharedNegativeKeywords(customerId: string, sharedSetId: string, keywords: Array<{ text: string; match_type: "BROAD" | "PHRASE" | "EXACT" }>) {
     const customer = this.getCustomer(customerId);
     const cleanId = customerId.replace(/-/g, "");
 
-    const mutations: MutateOperation<resources.ISharedCriterion>[] = keywords.map(kw => ({
-      entity: "shared_criterion" as const,
-      operation: "create" as const,
-      resource: {
-        shared_set: `customers/${cleanId}/sharedSets/${sharedSetId}`,
-        keyword: {
-          text: kw.text,
-          match_type: enums.KeywordMatchType[kw.match_type],
-        },
+    const sharedCriteria: resources.ISharedCriterion[] = keywords.map(kw => ({
+      shared_set: `customers/${cleanId}/sharedSets/${sharedSetId}`,
+      keyword: {
+        text: kw.text,
+        match_type: enums.KeywordMatchType[kw.match_type],
       },
     }));
 
-    const result = await customer.mutateResources(mutations);
+    const result = await customer.sharedCriteria.create(sharedCriteria);
     return result;
   }
 
@@ -573,6 +567,33 @@ class GoogleAdsManager {
     }));
 
     const result = await customer.campaigns.update(operations);
+    return result;
+  }
+
+  // Update campaign tracking parameters (final_url_suffix, tracking_url_template, custom params)
+  async updateCampaignTracking(customerId: string, campaignId: string, updates: {
+    final_url_suffix?: string;
+    tracking_url_template?: string;
+    url_custom_parameters?: Array<{ key: string; value: string }>;
+  }) {
+    const customer = this.getCustomer(customerId);
+    const cleanId = customerId.replace(/-/g, "");
+
+    const campaignUpdate: any = {
+      resource_name: `customers/${cleanId}/campaigns/${campaignId}`,
+    };
+
+    if (updates.final_url_suffix !== undefined) {
+      campaignUpdate.final_url_suffix = updates.final_url_suffix;
+    }
+    if (updates.tracking_url_template !== undefined) {
+      campaignUpdate.tracking_url_template = updates.tracking_url_template;
+    }
+    if (updates.url_custom_parameters !== undefined) {
+      campaignUpdate.url_custom_parameters = updates.url_custom_parameters;
+    }
+
+    const result = await customer.campaigns.update([campaignUpdate]);
     return result;
   }
 
@@ -1383,6 +1404,45 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               success: true,
               message: "Items paused and no longer serving",
               results,
+            }, null, 2),
+          }],
+        };
+      }
+
+      case "google_ads_update_campaign_tracking": {
+        const customerId = args?.customer_id as string || "";
+        const campaignId = args?.campaign_id as string;
+
+        // Get current values for the response diff
+        const currentTracking = await adsManager.getCampaignTracking(customerId, campaignId);
+
+        const updates: any = {};
+        if (args?.final_url_suffix !== undefined) updates.final_url_suffix = args.final_url_suffix as string;
+        if (args?.tracking_url_template !== undefined) updates.tracking_url_template = args.tracking_url_template as string;
+        if (args?.url_custom_parameters !== undefined) updates.url_custom_parameters = args.url_custom_parameters as Array<{ key: string; value: string }>;
+
+        const result = await adsManager.updateCampaignTracking(customerId, campaignId, updates);
+
+        // Get updated values
+        const updatedTracking = await adsManager.getCampaignTracking(customerId, campaignId);
+
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              success: true,
+              campaign_id: campaignId,
+              campaign_name: currentTracking.campaign_name,
+              before: {
+                final_url_suffix: currentTracking.final_url_suffix,
+                tracking_url_template: currentTracking.tracking_url_template,
+                url_custom_parameters: currentTracking.url_custom_parameters,
+              },
+              after: {
+                final_url_suffix: updatedTracking.final_url_suffix,
+                tracking_url_template: updatedTracking.tracking_url_template,
+                url_custom_parameters: updatedTracking.url_custom_parameters,
+              },
             }, null, 2),
           }],
         };
