@@ -457,6 +457,34 @@ class GoogleAdsManager {
     return result;
   }
 
+  // Create a new shared negative keyword list at account level
+  async createSharedSet(customerId: string, name: string) {
+    const customer = this.getCustomer(customerId);
+
+    const sharedSet: resources.ISharedSet = {
+      name,
+      type: enums.SharedSetType.NEGATIVE_KEYWORDS,
+      status: enums.SharedSetStatus.ENABLED,
+    };
+
+    const result = await customer.sharedSets.create([sharedSet]);
+    return result;
+  }
+
+  // Link a shared set to campaigns
+  async linkSharedSetToCampaigns(customerId: string, sharedSetId: string, campaignIds: string[]) {
+    const customer = this.getCustomer(customerId);
+    const cleanId = customerId.replace(/-/g, "");
+
+    const campaignSharedSets = campaignIds.map(cid => ({
+      campaign: `customers/${cleanId}/campaigns/${cid}`,
+      shared_set: `customers/${cleanId}/sharedSets/${sharedSetId}`,
+    }));
+
+    const result = await customer.campaignSharedSets.create(campaignSharedSets);
+    return result;
+  }
+
   // Add keywords to a shared negative keyword list
   async addSharedNegativeKeywords(customerId: string, sharedSetId: string, keywords: Array<{ text: string; match_type: "BROAD" | "PHRASE" | "EXACT" }>) {
     const customer = this.getCustomer(customerId);
@@ -471,6 +499,13 @@ class GoogleAdsManager {
     }));
 
     const result = await customer.sharedCriteria.create(sharedCriteria);
+    return result;
+  }
+
+  // Remove negative keywords from a shared negative keyword list
+  async removeSharedNegativeKeywords(customerId: string, resourceNames: string[]) {
+    const customer = this.getCustomer(customerId);
+    const result = await customer.sharedCriteria.remove(resourceNames);
     return result;
   }
 
@@ -489,6 +524,13 @@ class GoogleAdsManager {
     }));
 
     const result = await customer.campaignCriteria.create(criteria);
+    return result;
+  }
+
+  // Remove campaign-level negative keywords by resource name
+  async removeCampaignNegativeKeywords(customerId: string, resourceNames: string[]) {
+    const customer = this.getCustomer(customerId);
+    const result = await customer.campaignCriteria.remove(resourceNames);
     return result;
   }
 
@@ -1448,6 +1490,48 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
       }
 
+      case "google_ads_create_shared_set": {
+        const customerId = args?.customer_id as string || "";
+        const result = await adsManager.createSharedSet(
+          customerId,
+          args?.name as string,
+        );
+        // Extract the shared set ID from the resource name
+        const resourceName = result?.results?.[0]?.resource_name || "";
+        const newSetId = resourceName.split("/").pop() || "";
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              success: true,
+              message: `Shared negative keyword list created: ${args?.name}`,
+              shared_set_id: newSetId,
+              resource_name: resourceName,
+              results: result,
+            }, null, 2),
+          }],
+        };
+      }
+
+      case "google_ads_link_shared_set": {
+        const customerId = args?.customer_id as string || "";
+        const result = await adsManager.linkSharedSetToCampaigns(
+          customerId,
+          args?.shared_set_id as string,
+          args?.campaign_ids as string[],
+        );
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              success: true,
+              message: `Shared set linked to ${(args?.campaign_ids as string[]).length} campaigns`,
+              results: result,
+            }, null, 2),
+          }],
+        };
+      }
+
       case "google_ads_add_shared_negatives": {
         const customerId = args?.customer_id as string || "";
         const result = await adsManager.addSharedNegativeKeywords(
@@ -1467,6 +1551,25 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
       }
 
+      case "google_ads_remove_shared_negatives": {
+        const customerId = args?.customer_id as string || "";
+        const resourceNames = args?.resource_names as string[];
+        const result = await adsManager.removeSharedNegativeKeywords(
+          customerId,
+          resourceNames,
+        );
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              success: true,
+              message: `Removed ${resourceNames.length} negative keywords from shared list`,
+              results: result,
+            }, null, 2),
+          }],
+        };
+      }
+
       case "google_ads_add_campaign_negatives": {
         const customerId = args?.customer_id as string || "";
         const result = await adsManager.addCampaignNegativeKeywords(
@@ -1480,6 +1583,25 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             text: JSON.stringify({
               success: true,
               message: "Campaign-level negative keywords added",
+              results: result,
+            }, null, 2),
+          }],
+        };
+      }
+
+      case "google_ads_remove_campaign_negatives": {
+        const customerId = args?.customer_id as string || "";
+        const resourceNames = args?.resource_names as string[];
+        const result = await adsManager.removeCampaignNegativeKeywords(
+          customerId,
+          resourceNames,
+        );
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              success: true,
+              message: `Removed ${resourceNames.length} campaign-level negative keywords`,
               results: result,
             }, null, 2),
           }],
