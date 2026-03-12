@@ -209,6 +209,31 @@ export const tools: Tool[] = [
     },
   },
   {
+    name: "google_ads_create_shared_set",
+    description: "Create a new shared negative keyword list at account level. Returns the new shared set ID.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        customer_id: { type: "string" },
+        name: { type: "string", description: "Name for the new shared negative keyword list" },
+      },
+      required: ["name"],
+    },
+  },
+  {
+    name: "google_ads_link_shared_set",
+    description: "Link a shared negative keyword list to one or more campaigns. Once linked, all negatives in the list will apply to those campaigns.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        customer_id: { type: "string" },
+        shared_set_id: { type: "string", description: "The shared set ID to link" },
+        campaign_ids: { type: "array", items: { type: "string" }, description: "Campaign IDs to link the shared set to" },
+      },
+      required: ["shared_set_id", "campaign_ids"],
+    },
+  },
+  {
     name: "google_ads_add_shared_negatives",
     description: "Add negative keywords to a shared negative keyword list. Keywords will immediately block matching queries across all campaigns the list is applied to.",
     inputSchema: {
@@ -232,6 +257,22 @@ export const tools: Tool[] = [
     },
   },
   {
+    name: "google_ads_remove_shared_negatives",
+    description: "Remove negative keywords from a shared negative keyword list by their resource names. Get resource names from a GAQL query on shared_criterion.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        customer_id: { type: "string" },
+        resource_names: {
+          type: "array",
+          items: { type: "string" },
+          description: "Resource names of the shared criteria to remove (e.g. customers/1234/sharedCriteria/5678~9012)",
+        },
+      },
+      required: ["resource_names"],
+    },
+  },
+  {
     name: "google_ads_add_campaign_negatives",
     description: "Add negative keywords at the campaign level. Use for campaign-specific negatives that shouldn't be in a shared list.",
     inputSchema: {
@@ -252,6 +293,22 @@ export const tools: Tool[] = [
         },
       },
       required: ["campaign_id", "keywords"],
+    },
+  },
+  {
+    name: "google_ads_remove_campaign_negatives",
+    description: "Remove campaign-level negative keywords by their resource names. Get resource names from a GAQL query on campaign_criterion.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        customer_id: { type: "string" },
+        resource_names: {
+          type: "array",
+          items: { type: "string" },
+          description: "Resource names of the campaign criteria to remove (e.g. customers/1234/campaignCriteria/5678~9012)",
+        },
+      },
+      required: ["resource_names"],
     },
   },
   {

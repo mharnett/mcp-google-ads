@@ -5,39 +5,27 @@ const https = require('https');
 const { exec } = require('child_process');
 const url = require('url');
 
-const CLIENT_ID = '557294086068-rcl0jp9f2vndi2raqehvegbkcq94bc4l.apps.googleusercontent.com';
-const CLIENT_SECRET = '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';
+// Desktop OAuth client (installed app) from gcp-oauth.keys.json
+const CLIENT_ID = 'REDACTED_OAUTH_CLIENT_ID';
+const CLIENT_SECRET = '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';
 const SCOPE = 'https://www.googleapis.com/auth/adwords';
 const PORT = 8085;
-const REDIRECT_URI = `http://localhost:${PORT}/callback`;
+const REDIRECT_URI = `http://localhost:${PORT}`;
 
-console.log('\n=== Google Ads OAuth Token Generator ===\n');
-console.log('IMPORTANT: First add this redirect URI to your OAuth client in Google Cloud Console:');
-console.log(`\n  ${REDIRECT_URI}\n`);
-console.log('Go to: https://console.cloud.google.com/apis/credentials');
-console.log('Click your OAuth client > Add URI > Save\n');
-console.log('Press Enter when ready...');
+console.log('\n=== Google Ads OAuth Token Generator (Desktop Client) ===\n');
+console.log('Using desktop OAuth client. Opening browser...\n');
 
-process.stdin.once('data', () => {
-  startServer();
-});
+startServer();
 
 function startServer() {
   const server = http.createServer((req, res) => {
     const parsedUrl = url.parse(req.url, true);
 
-    if (parsedUrl.pathname === '/callback') {
-      const code = parsedUrl.query.code;
-
-      if (code) {
-        res.writeHead(200, { 'Content-Type': 'text/html' });
-        res.end('<h1>Success!</h1><p>You can close this window and check the terminal.</p>');
-
-        exchangeCode(code, server);
-      } else {
-        res.writeHead(400, { 'Content-Type': 'text/html' });
-        res.end('<h1>Error</h1><p>No code received</p>');
-      }
+    const code = parsedUrl.query.code;
+    if (code) {
+      res.writeHead(200, { 'Content-Type': 'text/html' });
+      res.end('<h1>Success!</h1><p>You can close this window and check the terminal.</p>');
+      exchangeCode(code, server);
     }
   });
 
