@@ -79,6 +79,8 @@ import {
   classifyError,
 } from "./errors.js";
 
+import { withResilience, safeResponse, logger } from "./resilience.js";
+
 // ============================================
 // GOOGLE ADS CLIENT
 // ============================================
@@ -144,7 +146,9 @@ class GoogleAdsManager {
   // List all campaigns for a customer
   async listCampaigns(customerId: string) {
     const customer = this.getCustomer(customerId);
-    const campaigns = await customer.query(`
+    const campaigns = await withResilience(
+      () =>
+        customer.query(`
       SELECT
         campaign.id,
         campaign.name,
@@ -156,8 +160,10 @@ class GoogleAdsManager {
       FROM campaign
       WHERE campaign.status != 'REMOVED'
       ORDER BY campaign.name
-    `);
-    return campaigns;
+    `),
+      "listCampaigns"
+    );
+    return safeResponse(campaigns, "listCampaigns");
   }
 
   // Get campaign tracking parameters
