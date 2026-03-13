@@ -234,6 +234,19 @@ export const tools: Tool[] = [
     },
   },
   {
+    name: "google_ads_unlink_shared_set",
+    description: "Unlink a shared negative keyword list from one or more campaigns. The list's negatives will no longer apply to those campaigns.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        customer_id: { type: "string" },
+        shared_set_id: { type: "string", description: "The shared set ID to unlink" },
+        campaign_ids: { type: "array", items: { type: "string" }, description: "Campaign IDs to unlink the shared set from" },
+      },
+      required: ["shared_set_id", "campaign_ids"],
+    },
+  },
+  {
     name: "google_ads_add_shared_negatives",
     description: "Add negative keywords to a shared negative keyword list. Keywords will immediately block matching queries across all campaigns the list is applied to.",
     inputSchema: {
@@ -306,6 +319,22 @@ export const tools: Tool[] = [
           type: "array",
           items: { type: "string" },
           description: "Resource names of the campaign criteria to remove (e.g. customers/1234/campaignCriteria/5678~9012)",
+        },
+      },
+      required: ["resource_names"],
+    },
+  },
+  {
+    name: "google_ads_remove_adgroup_negatives",
+    description: "Remove ad-group-level negative keywords by their resource names. Get resource names from a GAQL query on ad_group_criterion.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        customer_id: { type: "string" },
+        resource_names: {
+          type: "array",
+          items: { type: "string" },
+          description: "Resource names of the ad group criteria to remove (e.g. customers/1234/adGroupCriteria/5678~9012)",
         },
       },
       required: ["resource_names"],
@@ -487,6 +516,20 @@ export const tools: Tool[] = [
         end_date: { type: "string", description: "End date in YYYY-MM-DD format" },
       },
       required: ["campaign_id", "insight_id", "start_date", "end_date"],
+    },
+  },
+  {
+    name: "google_ads_update_campaign_budget",
+    description: "Update the daily budget for a campaign. Can update the existing budget amount or create a new solo budget and reassign the campaign to it (useful for breaking shared budgets).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        customer_id: { type: "string" },
+        campaign_id: { type: "string", description: "The campaign ID to update" },
+        daily_budget: { type: "number", description: "New daily budget in dollars" },
+        create_new_budget: { type: "boolean", description: "If true, creates a new budget and reassigns this campaign to it (breaks shared budgets). If false, updates the existing budget amount in place (affects all campaigns sharing it)." },
+      },
+      required: ["campaign_id", "daily_budget"],
     },
   },
   {
