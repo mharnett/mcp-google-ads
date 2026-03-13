@@ -20,7 +20,7 @@ import { z } from "zod";
 try {
   const __buildInfoDir = dirname(new URL(import.meta.url).pathname);
   const buildInfo = JSON.parse(readFileSync(join(__buildInfoDir, "build-info.json"), "utf-8"));
-  console.error(`[build] SHA: ${buildInfo.sha} (${buildInfo.builtAt})`);
+  logger.info({ sha: buildInfo.sha, builtAt: buildInfo.builtAt }, "Build fingerprint");
 } catch {
   // build-info.json not present (dev mode)
 }
@@ -96,11 +96,11 @@ class GoogleAdsManager {
     // Validate credentials at startup — fail fast
     const creds = validateCredentials();
     if (!creds.valid) {
-      const msg = `[STARTUP ERROR] Missing required credentials: ${creds.missing.join(", ")}. MCP will not function. Check run-mcp.sh and Keychain entries.`;
-      console.error(msg);
+      const msg = `Missing required credentials: ${creds.missing.join(", ")}. MCP will not function. Check run-mcp.sh and Keychain entries.`;
+      logger.error({ missing: creds.missing }, msg);
       throw new GoogleAdsAuthError(msg);
     }
-    console.error("[startup] Credentials validated: all required env vars present");
+    logger.info("Credentials validated: all required env vars present");
 
     this.defaultRefreshToken = process.env.GOOGLE_ADS_REFRESH_TOKEN!;
     this.api = new GoogleAdsApi({
@@ -169,7 +169,9 @@ class GoogleAdsManager {
   // Get campaign tracking parameters
   async getCampaignTracking(customerId: string, campaignId: string) {
     const customer = this.getCustomer(customerId);
-    const result = await customer.query(`
+    const result = await withResilience(
+      () =>
+        customer.query(`
       SELECT
         campaign.id,
         campaign.name,
@@ -178,20 +180,22 @@ class GoogleAdsManager {
         campaign.url_custom_parameters
       FROM campaign
       WHERE campaign.id = ${campaignId}
-    `);
+    `),
+      "getCampaignTracking"
+    );
 
     if (result.length === 0) {
       throw new Error(`Campaign ${campaignId} not found`);
     }
 
     const campaign = result[0].campaign;
-    return {
+    return safeResponse({
       campaign_id: campaign?.id,
       campaign_name: campaign?.name,
       tracking_url_template: campaign?.tracking_url_template || null,
       final_url_suffix: campaign?.final_url_suffix || null,
       url_custom_parameters: campaign?.url_custom_parameters || [],
-    };
+    }, "getCampaignTracking");
   }
 
   // List ad groups for a campaign
@@ -211,7 +215,8 @@ class GoogleAdsManager {
       query += ` AND campaign.id = ${campaignId}`;
     }
     query += ` ORDER BY campaign.name, ad_group.name`;
-    return await customer.query(query);
+    const result = await withResilience(() => customer.query(query), "listAdGroups");
+    return safeResponse(result, "listAdGroups");
   }
 
   // List ads with their status
@@ -240,7 +245,8 @@ class GoogleAdsManager {
       query += ` AND ad_group.id = ${options.adGroupId}`;
     }
     query += ` ORDER BY campaign.name, ad_group.name`;
-    return await customer.query(query);
+    const result = await withResilience(() => customer.query(query), "listAds");
+    return safeResponse(result, "listAds");
   }
 
   // List pending changes (paused items with claude- label)
@@ -248,7 +254,9 @@ class GoogleAdsManager {
     const customer = this.getCustomer(customerId);
 
     // Get paused campaigns with claude label
-    const campaigns = await customer.query(`
+    const campaigns = await withResilience(
+      () =>
+        customer.query(`
       SELECT
         campaign.id,
         campaign.name,
@@ -257,10 +265,14 @@ class GoogleAdsManager {
       FROM campaign
       WHERE campaign.status = 'PAUSED'
         AND label.name LIKE 'claude-%'
-    `);
+    `),
+      "listPendingChanges.campaigns"
+    );
 
     // Get paused ad groups with claude label
-    const adGroups = await customer.query(`
+    const adGroups = await withResilience(
+      () =>
+        customer.query(`
       SELECT
         ad_group.id,
         ad_group.name,
@@ -270,10 +282,14 @@ class GoogleAdsManager {
       FROM ad_group
       WHERE ad_group.status = 'PAUSED'
         AND label.name LIKE 'claude-%'
-    `);
+    `),
+      "listPendingChanges.adGroups"
+    );
 
     // Get paused ads with claude label
-    const ads = await customer.query(`
+    const ads = await withResilience(
+      () =>
+        customer.query(`
       SELECT
         ad_group_ad.ad.id,
         ad_group_ad.ad.type,
@@ -285,9 +301,11 @@ class GoogleAdsManager {
       FROM ad_group_ad
       WHERE ad_group_ad.status = 'PAUSED'
         AND label.name LIKE 'claude-%'
-    `);
+    `),
+      "listPendingChanges.ads"
+    );
 
-    return { campaigns, adGroups, ads };
+    return safeResponse({ campaigns, adGroups, ads }, "listPendingChanges");
   }
 
   // Create a label
@@ -299,7 +317,7 @@ class GoogleAdsManager {
     };
 
     try {
-      const result = await customer.labels.create([label]);
+      const result = await withResilience(() => customer.labels.create([label]), "createLabel");
       return result;
     } catch (e: any) {
       // Label might already exist
@@ -316,11 +334,15 @@ class GoogleAdsManager {
     const cleanId = customerId.replace(/-/g, "");
 
     // Get current campaign and budget info
-    const [currentCampaign] = await customer.query(`
+    const [currentCampaign] = await withResilience(
+      () =>
+        customer.query(`
       SELECT campaign.name, campaign.id, campaign_budget.id, campaign_budget.amount_micros, campaign_budget.name
       FROM campaign
       WHERE campaign.id = ${campaignId}
-    `);
+    `),
+      "updateCampaignBudget.query"
+    );
 
     if (!currentCampaign?.campaign?.name || !currentCampaign?.campaign_budget?.id) {
       throw new Error(`Campaign ${campaignId} not found or has no budget`);
@@ -333,19 +355,27 @@ class GoogleAdsManager {
 
     if (createNewBudget) {
       // Create a new budget and reassign the campaign to it
-      const budgetResult = await customer.campaignBudgets.create([{
-        name: `${campaignName} Budget`,
-        amount_micros: newAmountMicros,
-        delivery_method: enums.BudgetDeliveryMethod.STANDARD,
-      }]);
+      const budgetResult = await withResilience(
+        () =>
+          customer.campaignBudgets.create([{
+            name: `${campaignName} Budget`,
+            amount_micros: newAmountMicros,
+            delivery_method: enums.BudgetDeliveryMethod.STANDARD,
+          }]),
+        "updateCampaignBudget.createBudget"
+      );
 
       const newBudgetResourceName = budgetResult.results[0].resource_name;
 
       // Update the campaign to use the new budget
-      await customer.campaigns.update([{
-        resource_name: `customers/${cleanId}/campaigns/${campaignId}`,
-        campaign_budget: newBudgetResourceName,
-      }]);
+      await withResilience(
+        () =>
+          customer.campaigns.update([{
+            resource_name: `customers/${cleanId}/campaigns/${campaignId}`,
+            campaign_budget: newBudgetResourceName,
+          }]),
+        "updateCampaignBudget.reassignCampaign"
+      );
 
       return {
         campaign_id: campaignId,
@@ -358,10 +388,14 @@ class GoogleAdsManager {
       };
     } else {
       // Update existing budget amount in place
-      await customer.campaignBudgets.update([{
-        resource_name: `customers/${cleanId}/campaignBudgets/${oldBudgetId}`,
-        amount_micros: newAmountMicros,
-      }]);
+      await withResilience(
+        () =>
+          customer.campaignBudgets.update([{
+            resource_name: `customers/${cleanId}/campaignBudgets/${oldBudgetId}`,
+            amount_micros: newAmountMicros,
+          }]),
+        "updateCampaignBudget.updateInPlace"
+      );
 
       return {
         campaign_id: campaignId,
@@ -385,22 +419,30 @@ class GoogleAdsManager {
     const customer = this.getCustomer(customerId);
 
     // First create a budget
-    const budgetResult = await customer.campaignBudgets.create([{
-      name: `${campaign.name} Budget`,
-      amount_micros: campaign.budget_amount_micros,
-      delivery_method: enums.BudgetDeliveryMethod.STANDARD,
-    }]);
+    const budgetResult = await withResilience(
+      () =>
+        customer.campaignBudgets.create([{
+          name: `${campaign.name} Budget`,
+          amount_micros: campaign.budget_amount_micros,
+          delivery_method: enums.BudgetDeliveryMethod.STANDARD,
+        }]),
+      "createCampaign.budget"
+    );
 
     const budgetResourceName = budgetResult.results[0].resource_name;
 
     // Then create the campaign
-    const campaignResult = await customer.campaigns.create([{
-      name: campaign.name,
-      status: enums.CampaignStatus.PAUSED, // Always create paused
-      advertising_channel_type: enums.AdvertisingChannelType.SEARCH,
-      campaign_budget: budgetResourceName,
-      manual_cpc: {}, // Default to manual CPC
-    }]);
+    const campaignResult = await withResilience(
+      () =>
+        customer.campaigns.create([{
+          name: campaign.name,
+          status: enums.CampaignStatus.PAUSED, // Always create paused
+          advertising_channel_type: enums.AdvertisingChannelType.SEARCH,
+          campaign_budget: budgetResourceName,
+          manual_cpc: {}, // Default to manual CPC
+        }]),
+      "createCampaign"
+    );
 
     return campaignResult;
   }
@@ -413,13 +455,17 @@ class GoogleAdsManager {
   }) {
     const customer = this.getCustomer(customerId);
 
-    const result = await customer.adGroups.create([{
-      name: adGroup.name,
-      campaign: `customers/${customerId.replace(/-/g, "")}/campaigns/${adGroup.campaign_id}`,
-      status: enums.AdGroupStatus.PAUSED, // Always create paused
-      cpc_bid_micros: adGroup.cpc_bid_micros || 1000000, // $1.00 default
-      type: enums.AdGroupType.SEARCH_STANDARD,
-    }]);
+    const result = await withResilience(
+      () =>
+        customer.adGroups.create([{
+          name: adGroup.name,
+          campaign: `customers/${customerId.replace(/-/g, "")}/campaigns/${adGroup.campaign_id}`,
+          status: enums.AdGroupStatus.PAUSED, // Always create paused
+          cpc_bid_micros: adGroup.cpc_bid_micros || 1000000, // $1.00 default
+          type: enums.AdGroupType.SEARCH_STANDARD,
+        }]),
+      "createAdGroup"
+    );
 
     return result;
   }
@@ -468,29 +514,33 @@ class GoogleAdsManager {
     const HEADLINE_PIN_MAP: Record<number, number> = { 1: 2, 2: 3, 3: 4 }; // HEADLINE_1=2, HEADLINE_2=3, HEADLINE_3=4
     const DESCRIPTION_PIN_MAP: Record<number, number> = { 1: 5, 2: 6 }; // DESCRIPTION_1=5, DESCRIPTION_2=6
 
-    const result = await customer.adGroupAds.create([{
-      ad_group: `customers/${customerId.replace(/-/g, "")}/adGroups/${ad.ad_group_id}`,
-      status: enums.AdGroupAdStatus.PAUSED, // Always create paused
-      ad: {
-        responsive_search_ad: {
-          headlines: normalizedHeadlines.map(h => ({
-            text: h.text,
-            ...(h.pinned_position && HEADLINE_PIN_MAP[h.pinned_position]
-              ? { pinned_field: HEADLINE_PIN_MAP[h.pinned_position] }
-              : {}),
-          })),
-          descriptions: normalizedDescriptions.map(d => ({
-            text: d.text,
-            ...(d.pinned_position && DESCRIPTION_PIN_MAP[d.pinned_position]
-              ? { pinned_field: DESCRIPTION_PIN_MAP[d.pinned_position] }
-              : {}),
-          })),
-          path1: ad.path1,
-          path2: ad.path2,
-        },
-        final_urls: ad.final_urls,
-      },
-    }]);
+    const result = await withResilience(
+      () =>
+        customer.adGroupAds.create([{
+          ad_group: `customers/${customerId.replace(/-/g, "")}/adGroups/${ad.ad_group_id}`,
+          status: enums.AdGroupAdStatus.PAUSED, // Always create paused
+          ad: {
+            responsive_search_ad: {
+              headlines: normalizedHeadlines.map(h => ({
+                text: h.text,
+                ...(h.pinned_position && HEADLINE_PIN_MAP[h.pinned_position]
+                  ? { pinned_field: HEADLINE_PIN_MAP[h.pinned_position] }
+                  : {}),
+              })),
+              descriptions: normalizedDescriptions.map(d => ({
+                text: d.text,
+                ...(d.pinned_position && DESCRIPTION_PIN_MAP[d.pinned_position]
+                  ? { pinned_field: DESCRIPTION_PIN_MAP[d.pinned_position] }
+                  : {}),
+              })),
+              path1: ad.path1,
+              path2: ad.path2,
+            },
+            final_urls: ad.final_urls,
+          },
+        }]),
+      "createResponsiveSearchAd"
+    );
 
     return result;
   }
@@ -511,7 +561,7 @@ class GoogleAdsManager {
       },
     }));
 
-    const result = await customer.adGroupCriteria.create(keywordCriteria);
+    const result = await withResilience(() => customer.adGroupCriteria.create(keywordCriteria), "createKeywords");
     return result;
   }
 
@@ -524,7 +574,7 @@ class GoogleAdsManager {
       status: enums.AdGroupCriterionStatus.PAUSED,
     }));
 
-    const result = await customer.adGroupCriteria.update(operations);
+    const result = await withResilience(() => customer.adGroupCriteria.update(operations), "pauseKeywords");
     return result;
   }
 
@@ -538,7 +588,7 @@ class GoogleAdsManager {
       status: enums.SharedSetStatus.ENABLED,
     };
 
-    const result = await customer.sharedSets.create([sharedSet]);
+    const result = await withResilience(() => customer.sharedSets.create([sharedSet]), "createSharedSet");
     return result;
   }
 
@@ -552,7 +602,7 @@ class GoogleAdsManager {
       shared_set: `customers/${cleanId}/sharedSets/${sharedSetId}`,
     }));
 
-    const result = await customer.campaignSharedSets.create(campaignSharedSets);
+    const result = await withResilience(() => customer.campaignSharedSets.create(campaignSharedSets), "linkSharedSetToCampaigns");
     return result;
   }
 
@@ -569,7 +619,7 @@ class GoogleAdsManager {
       },
     }));
 
-    const result = await customer.sharedCriteria.create(sharedCriteria);
+    const result = await withResilience(() => customer.sharedCriteria.create(sharedCriteria), "addSharedNegativeKeywords");
     return result;
   }
 
@@ -582,14 +632,14 @@ class GoogleAdsManager {
       `customers/${cleanId}/campaignSharedSets/${cid}~${sharedSetId}`
     );
 
-    const result = await customer.campaignSharedSets.remove(resourceNames);
+    const result = await withResilience(() => customer.campaignSharedSets.remove(resourceNames), "unlinkSharedSetFromCampaigns");
     return result;
   }
 
   // Remove negative keywords from a shared negative keyword list
   async removeSharedNegativeKeywords(customerId: string, resourceNames: string[]) {
     const customer = this.getCustomer(customerId);
-    const result = await customer.sharedCriteria.remove(resourceNames);
+    const result = await withResilience(() => customer.sharedCriteria.remove(resourceNames), "removeSharedNegativeKeywords");
     return result;
   }
 
@@ -607,21 +657,21 @@ class GoogleAdsManager {
       },
     }));
 
-    const result = await customer.campaignCriteria.create(criteria);
+    const result = await withResilience(() => customer.campaignCriteria.create(criteria), "addCampaignNegativeKeywords");
     return result;
   }
 
   // Remove campaign-level negative keywords by resource name
   async removeCampaignNegativeKeywords(customerId: string, resourceNames: string[]) {
     const customer = this.getCustomer(customerId);
-    const result = await customer.campaignCriteria.remove(resourceNames);
+    const result = await withResilience(() => customer.campaignCriteria.remove(resourceNames), "removeCampaignNegativeKeywords");
     return result;
   }
 
   // Remove ad-group-level negative keywords by resource name
   async removeAdGroupNegativeKeywords(customerId: string, resourceNames: string[]) {
     const customer = this.getCustomer(customerId);
-    const result = await customer.adGroupCriteria.remove(resourceNames);
+    const result = await withResilience(() => customer.adGroupCriteria.remove(resourceNames), "removeAdGroupNegativeKeywords");
     return result;
   }
 
@@ -634,7 +684,7 @@ class GoogleAdsManager {
       status: enums.AdGroupAdStatus.ENABLED,
     }));
 
-    const result = await customer.adGroupAds.update(operations);
+    const result = await withResilience(() => customer.adGroupAds.update(operations), "enableAds");
     return result;
   }
 
@@ -647,7 +697,7 @@ class GoogleAdsManager {
       status: enums.AdGroupStatus.ENABLED,
     }));
 
-    const result = await customer.adGroups.update(operations);
+    const result = await withResilience(() => customer.adGroups.update(operations), "enableAdGroups");
     return result;
   }
 
@@ -660,7 +710,7 @@ class GoogleAdsManager {
       status: enums.CampaignStatus.ENABLED,
     }));
 
-    const result = await customer.campaigns.update(operations);
+    const result = await withResilience(() => customer.campaigns.update(operations), "enableCampaigns");
     return result;
   }
 
@@ -673,7 +723,7 @@ class GoogleAdsManager {
       status: enums.AdGroupAdStatus.PAUSED,
     }));
 
-    const result = await customer.adGroupAds.update(operations);
+    const result = await withResilience(() => customer.adGroupAds.update(operations), "pauseAds");
     return result;
   }
 
@@ -686,7 +736,7 @@ class GoogleAdsManager {
       status: enums.AdGroupStatus.PAUSED,
     }));
 
-    const result = await customer.adGroups.update(operations);
+    const result = await withResilience(() => customer.adGroups.update(operations), "pauseAdGroups");
     return result;
   }
 
@@ -699,7 +749,7 @@ class GoogleAdsManager {
       status: enums.CampaignStatus.PAUSED,
     }));
 
-    const result = await customer.campaigns.update(operations);
+    const result = await withResilience(() => customer.campaigns.update(operations), "pauseCampaigns");
     return result;
   }
 
@@ -726,7 +776,7 @@ class GoogleAdsManager {
       campaignUpdate.url_custom_parameters = updates.url_custom_parameters;
     }
 
-    const result = await customer.campaigns.update([campaignUpdate]);
+    const result = await withResilience(() => customer.campaigns.update([campaignUpdate]), "updateCampaignTracking");
     return result;
   }
 
@@ -790,7 +840,8 @@ class GoogleAdsManager {
 
     query += ` ORDER BY metrics.cost_micros DESC`;
 
-    return await customer.query(query);
+    const result = await withResilience(() => customer.query(query), "getKeywordPerformance");
+    return safeResponse(result, "getKeywordPerformance");
   }
 
   // Get keyword performance with conversion breakdowns
@@ -840,7 +891,8 @@ class GoogleAdsManager {
 
     query += ` ORDER BY ad_group_criterion.keyword.text, segments.conversion_action_name`;
 
-    return await customer.query(query);
+    const result = await withResilience(() => customer.query(query), "getKeywordPerformanceWithConversions");
+    return safeResponse(result, "getKeywordPerformanceWithConversions");
   }
 
   // Get search term report
@@ -888,7 +940,8 @@ class GoogleAdsManager {
 
     query += ` ORDER BY metrics.impressions DESC`;
 
-    return await customer.query(query);
+    const result = await withResilience(() => customer.query(query), "getSearchTermReport");
+    return safeResponse(result, "getSearchTermReport");
   }
 
   // Get search term report with conversion breakdowns
@@ -935,7 +988,8 @@ class GoogleAdsManager {
 
     query += ` ORDER BY search_term_view.search_term, segments.conversion_action_name`;
 
-    return await customer.query(query);
+    const result = await withResilience(() => customer.query(query), "getSearchTermReportWithConversions");
+    return safeResponse(result, "getSearchTermReportWithConversions");
   }
 
   // Get ad performance report
@@ -989,7 +1043,8 @@ class GoogleAdsManager {
 
     query += ` ORDER BY metrics.impressions DESC`;
 
-    return await customer.query(query);
+    const result = await withResilience(() => customer.query(query), "getAdPerformance");
+    return safeResponse(result, "getAdPerformance");
   }
 
   // Get ad performance with conversion breakdowns
@@ -1041,7 +1096,8 @@ class GoogleAdsManager {
 
     query += ` ORDER BY ad_group_ad.ad.id, segments.conversion_action_name`;
 
-    return await customer.query(query);
+    const result = await withResilience(() => customer.query(query), "getAdPerformanceWithConversions");
+    return safeResponse(result, "getAdPerformanceWithConversions");
   }
 
   // List available conversion actions
@@ -1060,7 +1116,8 @@ class GoogleAdsManager {
       ORDER BY conversion_action.name
     `;
 
-    return await customer.query(query);
+    const result = await withResilience(() => customer.query(query), "listConversionActions");
+    return safeResponse(result, "listConversionActions");
   }
 
   // Validate an ad without creating it
@@ -1137,7 +1194,7 @@ class GoogleAdsManager {
         AND segments.date BETWEEN '${options.startDate}' AND '${options.endDate}'
     `;
 
-    const currentResults = await customer.query(currentQuery);
+    const currentResults = await withResilience(() => customer.query(currentQuery), "getSearchTermInsights.current");
 
     // If comparison dates provided, get previous period too
     let previousResults: any[] = [];
@@ -1155,7 +1212,7 @@ class GoogleAdsManager {
         WHERE campaign_search_term_insight.campaign_id = '${options.campaignId}'
           AND segments.date BETWEEN '${options.compareStartDate}' AND '${options.compareEndDate}'
       `;
-      previousResults = await customer.query(prevQuery);
+      previousResults = await withResilience(() => customer.query(prevQuery), "getSearchTermInsights.previous");
     }
 
     // Build previous period lookup by category label
@@ -1219,13 +1276,13 @@ class GoogleAdsManager {
     // Sort by clicks descending
     categories.sort((a, b) => b.current_period.clicks - a.current_period.clicks);
 
-    return {
+    return safeResponse({
       campaign_id: options.campaignId,
       current_period: { start: options.startDate, end: options.endDate },
       compare_period: options.compareStartDate ? { start: options.compareStartDate, end: options.compareEndDate } : null,
       total_categories: categories.length,
       categories,
-    };
+    }, "getSearchTermInsights");
   }
 
   // Get individual search terms within a specific insight category
@@ -1253,13 +1310,15 @@ class GoogleAdsManager {
         AND segments.date BETWEEN '${options.startDate}' AND '${options.endDate}'
     `;
 
-    return await customer.query(query);
+    const result = await withResilience(() => customer.query(query), "getSearchTermInsightTerms");
+    return safeResponse(result, "getSearchTermInsightTerms");
   }
 
   // Execute a raw GAQL query
   async executeGaql(customerId: string, query: string) {
     const customer = this.getCustomer(customerId);
-    return await customer.query(query);
+    const result = await withResilience(() => customer.query(query), "executeGaql");
+    return safeResponse(result, "executeGaql");
   }
 }
 
@@ -1942,8 +2001,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   } catch (rawError: any) {
     const error = classifyError(rawError);
 
-    // Log classified error type to stderr for debugging
-    console.error(`[error] ${error.name}: ${error.message}`);
+    // Log classified error type for debugging
+    logger.error({ errorType: error.name, tool: name }, error.message);
 
     const response: Record<string, unknown> = {
       error: true,
@@ -1980,22 +2039,21 @@ async function main() {
     const firstClient = Object.values(config.clients)[0];
     if (firstClient) {
       const customer = adsManager.getCustomer(firstClient.customer_id);
-      await customer.query(`SELECT customer.id FROM customer LIMIT 1`);
-      console.error(`[startup] Auth verified: successfully queried account ${firstClient.customer_id} (${firstClient.name})`);
+      await withResilience(() => customer.query(`SELECT customer.id FROM customer LIMIT 1`), "startup.authCheck");
+      logger.info({ customerId: firstClient.customer_id, clientName: firstClient.name }, "Auth verified: successfully queried account");
     }
   } catch (err: any) {
     const classified = classifyError(err);
     if (classified instanceof GoogleAdsAuthError) {
-      console.error(`[STARTUP WARNING] Auth check FAILED: ${classified.message}`);
-      console.error(`[STARTUP WARNING] MCP will start but ALL API calls will fail until auth is fixed.`);
+      logger.error({ error: classified.message }, "Auth check FAILED — MCP will start but ALL API calls will fail until auth is fixed");
     } else {
-      console.error(`[startup] Auth check returned non-auth error (may be OK): ${err.message}`);
+      logger.warn({ error: err.message }, "Auth check returned non-auth error (may be OK)");
     }
   }
 
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error("[startup] MCP Google Ads server running");
+  logger.info("MCP Google Ads server running");
 }
 
-main().catch(console.error);
+main().catch((err) => logger.error({ error: err.message, stack: err.stack }, "Fatal startup error"));
