@@ -304,6 +304,71 @@ class GoogleAdsManager {
     }
   }
 
+  // Update campaign budget — either in-place or by creating a new solo budget
+  async updateCampaignBudget(customerId: string, campaignId: string, dailyBudgetDollars: number, createNewBudget: boolean = false) {
+    const customer = this.getCustomer(customerId);
+    const cleanId = customerId.replace(/-/g, "");
+
+    // Get current campaign and budget info
+    const [currentCampaign] = await customer.query(`
+      SELECT campaign.name, campaign.id, campaign_budget.id, campaign_budget.amount_micros, campaign_budget.name
+      FROM campaign
+      WHERE campaign.id = ${campaignId}
+    `);
+
+    if (!currentCampaign?.campaign?.name || !currentCampaign?.campaign_budget?.id) {
+      throw new Error(`Campaign ${campaignId} not found or has no budget`);
+    }
+
+    const campaignName = currentCampaign.campaign.name;
+    const oldBudgetId = currentCampaign.campaign_budget.id;
+    const oldAmountMicros = currentCampaign.campaign_budget.amount_micros ?? 0;
+    const newAmountMicros = Math.round(dailyBudgetDollars * 1_000_000);
+
+    if (createNewBudget) {
+      // Create a new budget and reassign the campaign to it
+      const budgetResult = await customer.campaignBudgets.create([{
+        name: `${campaignName} Budget`,
+        amount_micros: newAmountMicros,
+        delivery_method: enums.BudgetDeliveryMethod.STANDARD,
+      }]);
+
+      const newBudgetResourceName = budgetResult.results[0].resource_name;
+
+      // Update the campaign to use the new budget
+      await customer.campaigns.update([{
+        resource_name: `customers/${cleanId}/campaigns/${campaignId}`,
+        campaign_budget: newBudgetResourceName,
+      }]);
+
+      return {
+        campaign_id: campaignId,
+        campaign_name: campaignName,
+        action: "created_new_budget",
+        old_budget_id: oldBudgetId,
+        old_daily_budget: Number(oldAmountMicros) / 1_000_000,
+        new_budget_resource: newBudgetResourceName,
+        new_daily_budget: dailyBudgetDollars,
+      };
+    } else {
+      // Update existing budget amount in place
+      await customer.campaignBudgets.update([{
+        resource_name: `customers/${cleanId}/campaignBudgets/${oldBudgetId}`,
+        amount_micros: newAmountMicros,
+      }]);
+
+      return {
+        campaign_id: campaignId,
+        campaign_name: campaignName,
+        action: "updated_in_place",
+        budget_id: oldBudgetId,
+        old_daily_budget: Number(oldAmountMicros) / 1_000_000,
+        new_daily_budget: dailyBudgetDollars,
+        warning: "This update affects ALL campaigns sharing this budget",
+      };
+    }
+  }
+
   // Create a campaign (paused by default)
   async createCampaign(customerId: string, campaign: {
     name: string;
@@ -502,6 +567,19 @@ class GoogleAdsManager {
     return result;
   }
 
+  // Unlink a shared set from campaigns
+  async unlinkSharedSetFromCampaigns(customerId: string, sharedSetId: string, campaignIds: string[]) {
+    const customer = this.getCustomer(customerId);
+    const cleanId = customerId.replace(/-/g, "");
+
+    const resourceNames = campaignIds.map(cid =>
+      `customers/${cleanId}/campaignSharedSets/${cid}~${sharedSetId}`
+    );
+
+    const result = await customer.campaignSharedSets.remove(resourceNames);
+    return result;
+  }
+
   // Remove negative keywords from a shared negative keyword list
   async removeSharedNegativeKeywords(customerId: string, resourceNames: string[]) {
     const customer = this.getCustomer(customerId);
@@ -531,6 +609,13 @@ class GoogleAdsManager {
   async removeCampaignNegativeKeywords(customerId: string, resourceNames: string[]) {
     const customer = this.getCustomer(customerId);
     const result = await customer.campaignCriteria.remove(resourceNames);
+    return result;
+  }
+
+  // Remove ad-group-level negative keywords by resource name
+  async removeAdGroupNegativeKeywords(customerId: string, resourceNames: string[]) {
+    const customer = this.getCustomer(customerId);
+    const result = await customer.adGroupCriteria.remove(resourceNames);
     return result;
   }
 
@@ -1532,6 +1617,25 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
       }
 
+      case "google_ads_unlink_shared_set": {
+        const customerId = args?.customer_id as string || "";
+        const result = await adsManager.unlinkSharedSetFromCampaigns(
+          customerId,
+          args?.shared_set_id as string,
+          args?.campaign_ids as string[],
+        );
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              success: true,
+              message: `Shared set unlinked from ${(args?.campaign_ids as string[]).length} campaigns`,
+              results: result,
+            }, null, 2),
+          }],
+        };
+      }
+
       case "google_ads_add_shared_negatives": {
         const customerId = args?.customer_id as string || "";
         const result = await adsManager.addSharedNegativeKeywords(
@@ -1602,6 +1706,25 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             text: JSON.stringify({
               success: true,
               message: `Removed ${resourceNames.length} campaign-level negative keywords`,
+              results: result,
+            }, null, 2),
+          }],
+        };
+      }
+
+      case "google_ads_remove_adgroup_negatives": {
+        const customerId = args?.customer_id as string || "";
+        const resourceNames = args?.resource_names as string[];
+        const result = await adsManager.removeAdGroupNegativeKeywords(
+          customerId,
+          resourceNames,
+        );
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              success: true,
+              message: `Removed ${resourceNames.length} ad-group-level negative keywords`,
               results: result,
             }, null, 2),
           }],
@@ -1772,6 +1895,25 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           content: [{
             type: "text",
             text: JSON.stringify(result, null, 2),
+          }],
+        };
+      }
+
+      case "google_ads_update_campaign_budget": {
+        const customerId = args?.customer_id as string || "";
+        const campaignId = args?.campaign_id as string;
+        const dailyBudget = args?.daily_budget as number;
+        const createNew = (args?.create_new_budget as boolean) || false;
+
+        const result = await adsManager.updateCampaignBudget(customerId, campaignId, dailyBudget, createNew);
+
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              success: true,
+              ...result,
+            }, null, 2),
           }],
         };
       }

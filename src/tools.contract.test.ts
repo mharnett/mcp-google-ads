@@ -18,10 +18,12 @@ describe("Tool Schema Contract", () => {
     "google_ads_pause_items",
     "google_ads_create_shared_set",
     "google_ads_link_shared_set",
+    "google_ads_unlink_shared_set",
     "google_ads_add_shared_negatives",
     "google_ads_remove_shared_negatives",
     "google_ads_add_campaign_negatives",
     "google_ads_remove_campaign_negatives",
+    "google_ads_remove_adgroup_negatives",
     "google_ads_pause_keywords",
     "google_ads_update_campaign_tracking",
     "google_ads_keyword_performance",
@@ -33,6 +35,7 @@ describe("Tool Schema Contract", () => {
     "google_ads_list_conversion_actions",
     "google_ads_search_term_insights",
     "google_ads_search_term_insight_terms",
+    "google_ads_update_campaign_budget",
     "google_ads_gaql_query",
   ];
 
