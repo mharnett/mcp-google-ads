@@ -106,7 +106,20 @@ export async function withResilience<T>(
     logger.debug({ operation: operationName }, "API call succeeded");
     return result;
   } catch (err) {
-    const error = err instanceof Error ? err : new Error(String(err));
+    // Extract a useful message from gRPC/google-ads-api errors
+    // where String(err) produces "[object Object]"
+    let error: Error;
+    if (err instanceof Error) {
+      error = err;
+    } else {
+      // Try to get message from nested errors array (google-ads-api pattern)
+      const nested = (err as any)?.errors?.[0];
+      const msg = nested?.message
+        || (typeof (err as any)?.message === "string" ? (err as any).message : null)
+        || (() => { try { return JSON.stringify(err); } catch { return String(err); } })();
+      error = new Error(msg);
+      (error as any).cause = err;
+    }
     logger.error(
       { operation: operationName, error: error.message, stack: error.stack },
       "API call failed after retries"

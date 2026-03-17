@@ -44,8 +44,44 @@ export function validateCredentials(): { valid: boolean; missing: string[] } {
   return { valid: missing.length === 0, missing };
 }
 
+/**
+ * Extract a human-readable message from a Google Ads API / gRPC error.
+ * The google-ads-api library throws objects where the real message lives
+ * in `error.errors[0].message`, not on the top-level `.message` property.
+ */
+function extractErrorMessage(error: any): string {
+  // 1. Nested errors array (google-ads-api gRPC errors)
+  if (Array.isArray(error?.errors) && error.errors.length > 0) {
+    const nested = error.errors[0];
+    if (typeof nested?.message === "string" && nested.message) {
+      return nested.message;
+    }
+    // Some errors have error_code as an object like { query_error: 'UNRECOGNIZED_FIELD' }
+    if (nested?.error_code) {
+      const codeEntries = Object.entries(nested.error_code).filter(([, v]) => v !== 0 && v !== "UNSPECIFIED");
+      if (codeEntries.length > 0) {
+        return codeEntries.map(([k, v]) => `${k}: ${v}`).join(", ");
+      }
+    }
+  }
+  // 2. Top-level message (if it's a real string, not "[object Object]")
+  if (typeof error?.message === "string" && error.message && !error.message.includes("[object Object]")) {
+    return error.message;
+  }
+  // 3. Fallback: try JSON serialization for useful output
+  try {
+    const json = JSON.stringify(error, null, 0);
+    if (json && json !== "{}" && json.length < 500) {
+      return json;
+    }
+  } catch {
+    // ignore
+  }
+  return String(error);
+}
+
 export function classifyError(error: any): Error {
-  const message = error?.message || String(error);
+  const message = extractErrorMessage(error);
   const code = error?.errors?.[0]?.error_code;
   const status = error?.status;
 
@@ -85,5 +121,16 @@ export function classifyError(error: any): Error {
     );
   }
 
+  // Unclassified: wrap in a proper Error so .message is always a string
+  if (!(error instanceof Error)) {
+    const wrapped = new Error(message);
+    wrapped.name = "GoogleAdsError";
+    (wrapped as any).cause = error;
+    return wrapped;
+  }
+  // If original error.message was "[object Object]", replace it
+  if (error.message.includes("[object Object]")) {
+    error.message = message;
+  }
   return error;
 }
