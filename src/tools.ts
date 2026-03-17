@@ -161,7 +161,7 @@ export const tools: Tool[] = [
   },
   {
     name: "google_ads_create_keywords",
-    description: "Create keywords for an ad group (will be PAUSED until approved)",
+    description: "Create keywords for an ad group (will be PAUSED until approved). Keywords are auto-labeled for easy discovery via google_ads_list_pending_changes.",
     inputSchema: {
       type: "object",
       properties: {
@@ -177,6 +177,10 @@ export const tools: Tool[] = [
             },
             required: ["text", "match_type"],
           },
+        },
+        label: {
+          type: "string",
+          description: "Label to apply to created keywords (default: 'claude-pending'). Use to group and find paused keywords later.",
         },
       },
       required: ["ad_group_id", "keywords"],
