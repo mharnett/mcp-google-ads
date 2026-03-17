@@ -328,6 +328,57 @@ class GoogleAdsManager {
     }
   }
 
+  // Ensure a label exists, returning its resource name
+  async ensureLabelExists(customerId: string, labelName: string): Promise<string> {
+    const customer = this.getCustomer(customerId);
+    const cleanId = customerId.replace(/-/g, "");
+
+    // Check if label already exists
+    const existing = await withResilience(
+      () => customer.query(`
+        SELECT label.resource_name, label.name
+        FROM label
+        WHERE label.name = '${labelName}'
+          AND label.status = 'ENABLED'
+      `),
+      "ensureLabelExists.query"
+    );
+
+    if (existing.length > 0) {
+      return (existing[0] as any).label.resource_name;
+    }
+
+    // Create it
+    const result = await this.createLabel(customerId, labelName);
+    if ((result as any).existing) {
+      // Race condition: re-query
+      const requery = await withResilience(
+        () => customer.query(`
+          SELECT label.resource_name FROM label WHERE label.name = '${labelName}' AND label.status = 'ENABLED'
+        `),
+        "ensureLabelExists.requery"
+      );
+      return (requery[0] as any).label.resource_name;
+    }
+    return (result as any).results[0].resource_name;
+  }
+
+  // Apply a label to ad group criteria (keywords)
+  async labelAdGroupCriteria(customerId: string, criterionResourceNames: string[], labelResourceName: string) {
+    const customer = this.getCustomer(customerId);
+
+    const operations = criterionResourceNames.map(rn => ({
+      ad_group_criterion: rn,
+      label: labelResourceName,
+    }));
+
+    const result = await withResilience(
+      () => customer.adGroupCriterionLabels.create(operations),
+      "labelAdGroupCriteria"
+    );
+    return result;
+  }
+
   // Update campaign budget — either in-place or by creating a new solo budget
   async updateCampaignBudget(customerId: string, campaignId: string, dailyBudgetDollars: number, createNewBudget: boolean = false) {
     const customer = this.getCustomer(customerId);
@@ -545,15 +596,17 @@ class GoogleAdsManager {
     return result;
   }
 
-  // Create keywords (paused by default)
+  // Create keywords (paused by default, auto-labeled for discoverability)
   async createKeywords(customerId: string, keywords: {
     ad_group_id: string;
     keywords: Array<{ text: string; match_type: "BROAD" | "PHRASE" | "EXACT" }>;
+    label?: string;
   }) {
     const customer = this.getCustomer(customerId);
+    const cleanId = customerId.replace(/-/g, "");
 
     const keywordCriteria = keywords.keywords.map(kw => ({
-      ad_group: `customers/${customerId.replace(/-/g, "")}/adGroups/${keywords.ad_group_id}`,
+      ad_group: `customers/${cleanId}/adGroups/${keywords.ad_group_id}`,
       status: enums.AdGroupCriterionStatus.PAUSED, // Always create paused
       keyword: {
         text: kw.text,
@@ -562,6 +615,18 @@ class GoogleAdsManager {
     }));
 
     const result = await withResilience(() => customer.adGroupCriteria.create(keywordCriteria), "createKeywords");
+
+    // Auto-label created keywords for discoverability
+    const labelName = keywords.label || `${this.config.defaults.label_prefix}pending`;
+    try {
+      const labelRN = await this.ensureLabelExists(customerId, labelName);
+      const criterionRNs = (result as any).results.map((r: any) => r.resource_name);
+      await this.labelAdGroupCriteria(customerId, criterionRNs, labelRN);
+    } catch (e: any) {
+      // Labeling is best-effort — don't fail the keyword creation
+      console.error(`[WARN] Failed to label keywords with '${labelName}': ${e.message}`);
+    }
+
     return result;
   }
 
@@ -1536,13 +1601,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const result = await adsManager.createKeywords(customerId, {
           ad_group_id: args?.ad_group_id as string,
           keywords: args?.keywords as Array<{ text: string; match_type: "BROAD" | "PHRASE" | "EXACT" }>,
+          label: args?.label as string | undefined,
         });
         return {
           content: [{
             type: "text",
             text: JSON.stringify({
               success: true,
-              message: "Keywords created (PAUSED). Review in Google Ads before enabling.",
+              message: "Keywords created (PAUSED) and labeled. Review in Google Ads before enabling.",
               result,
             }, null, 2),
           }],
