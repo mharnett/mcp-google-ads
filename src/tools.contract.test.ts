@@ -37,6 +37,7 @@ describe("Tool Schema Contract", () => {
     "google_ads_search_term_insight_terms",
     "google_ads_update_campaign_budget",
     "google_ads_gaql_query",
+    "google_ads_keyword_volume",
   ];
 
   it("exports the expected number of tools", () => {

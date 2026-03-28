@@ -1,6 +1,6 @@
 # MCP Google Ads Server
 
-An MCP (Model Context Protocol) server that lets Claude Code interact with Google Ads API directly, with built-in safeguards for review before changes go live.
+An MCP (Model Context Protocol) server for the Google Ads API with built-in safeguards for review before changes go live. Production-proven with MCC (Manager Account) support, 35 tools for campaign management, reporting, and optimization.
 
 ## Features
 
@@ -9,6 +9,8 @@ An MCP (Model Context Protocol) server that lets Claude Code interact with Googl
 - **Safe by Default**: All new items created in PAUSED state
 - **Approval Workflow**: Enable items only after manual review
 - **Validation**: Validates ads before creating to catch errors early
+- **Resilience**: Circuit breakers, retry with backoff, and timeout handling (cockatiel)
+- **Structured Logging**: Pino-based logging with build fingerprinting
 
 ## Setup
 
@@ -33,25 +35,32 @@ You need:
 Use the Google OAuth playground or run:
 
 ```bash
-# Install google-ads-api tools
 pip install google-ads
-
-# Generate refresh token
 google-ads-auth
 ```
 
-### 2. Configure the MCP Server
+### 2. Install
 
 ```bash
-cd /Users/mark/claude-code/mcp-google-ads
-
-# Copy example config
-cp config.example.json config.json
-
-# Edit with your credentials
+npm install mcp-google-ads
 ```
 
-Fill in `config.json`:
+Or clone and build from source:
+
+```bash
+git clone https://github.com/mharnett/mcp-google-ads.git
+cd mcp-google-ads
+npm install
+npm run build
+```
+
+### 3. Configure
+
+```bash
+cp config.example.json config.json
+```
+
+Edit `config.json` with your credentials:
 
 ```json
 {
@@ -63,10 +72,15 @@ Fill in `config.json`:
     "mcc_customer_id": "123-456-7890"
   },
   "clients": {
-    "neon-one": {
+    "my-client": {
       "customer_id": "111-222-3333",
-      "name": "Neon One",
-      "folder": "/Users/mark/claude-code/neon-one"
+      "name": "My Client",
+      "folder": "/path/to/client/workspace"
+    },
+    "another-client": {
+      "customer_id": "444-555-6666",
+      "name": "Another Client",
+      "folder": "/path/to/another/workspace"
     }
   },
   "defaults": {
@@ -75,14 +89,6 @@ Fill in `config.json`:
     "require_approval_for_enable": true
   }
 }
-```
-
-### 3. Install Dependencies
-
-```bash
-cd /Users/mark/claude-code/mcp-google-ads
-npm install
-npm run build
 ```
 
 ### 4. Add to Claude Code
@@ -94,7 +100,20 @@ Add to your Claude Code MCP settings (`~/.claude/settings.json` or project setti
   "mcpServers": {
     "google-ads": {
       "command": "node",
-      "args": ["/Users/mark/claude-code/mcp-google-ads/dist/index.js"]
+      "args": ["node_modules/mcp-google-ads/dist/index.js"]
+    }
+  }
+}
+```
+
+Or if installed from source:
+
+```json
+{
+  "mcpServers": {
+    "google-ads": {
+      "command": "node",
+      "args": ["/path/to/mcp-google-ads/dist/index.js"]
     }
   }
 }
@@ -107,35 +126,72 @@ Restart Claude Code.
 ### Workflow
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│  1. cd into client folder (e.g., /Users/mark/claude-code/neon-one)
-│                         ↓
-│  2. Claude auto-detects client context
-│                         ↓
-│  3. Claude creates campaigns/ads (all PAUSED)
-│                         ↓
-│  4. You review in Google Ads UI or Editor
-│                         ↓
-│  5. Tell Claude to enable approved items
-│                         ↓
-│  6. Claude enables (requires your approval prompt)
-└─────────────────────────────────────────────────────────────┘
+1. cd into client folder → auto-detects account context
+2. Ask Claude to create campaigns/ads → all created PAUSED
+3. Review in Google Ads UI or Editor
+4. Tell Claude to enable approved items
+5. Claude enables (requires your approval prompt)
 ```
 
-### Available Tools
+### Available Tools (35)
 
-| Tool | Description | Auto-Approved |
-|------|-------------|---------------|
-| `google_ads_get_client_context` | Detect which account from working dir | Yes |
-| `google_ads_list_campaigns` | List all campaigns | Yes |
-| `google_ads_list_ad_groups` | List ad groups | Yes |
-| `google_ads_list_pending_changes` | Show paused items with claude- label | Yes |
-| `google_ads_validate_ad` | Validate RSA without creating | Yes |
-| `google_ads_create_campaign` | Create campaign (PAUSED) | Yes |
-| `google_ads_create_ad_group` | Create ad group (PAUSED) | Yes |
-| `google_ads_create_responsive_search_ad` | Create RSA (PAUSED) | Yes |
-| `google_ads_create_keywords` | Create keywords (PAUSED) | Yes |
-| `google_ads_enable_items` | Enable items (make LIVE) | **No - Requires Approval** |
+#### Context & Discovery
+| Tool | Description |
+|------|-------------|
+| `google_ads_get_client_context` | Detect which account from working directory |
+| `google_ads_list_campaigns` | List all campaigns with status and metrics |
+| `google_ads_list_ad_groups` | List ad groups in a campaign |
+| `google_ads_list_pending_changes` | Show paused items with claude- label |
+| `google_ads_list_conversion_actions` | List conversion actions |
+
+#### Campaign Management
+| Tool | Description |
+|------|-------------|
+| `google_ads_create_campaign` | Create campaign (PAUSED) |
+| `google_ads_create_ad_group` | Create ad group (PAUSED) |
+| `google_ads_create_responsive_search_ad` | Create RSA with validation (PAUSED) |
+| `google_ads_create_keywords` | Create keywords (PAUSED) |
+| `google_ads_validate_ad` | Validate RSA without creating |
+| `google_ads_enable_items` | Enable items (make LIVE) — **requires approval** |
+| `google_ads_pause_items` | Pause active items |
+| `google_ads_pause_keywords` | Pause specific keywords |
+| `google_ads_update_campaign_budget` | Update campaign daily budget |
+
+#### Tracking & URLs
+| Tool | Description |
+|------|-------------|
+| `google_ads_get_campaign_tracking` | Get tracking templates and URL parameters |
+| `google_ads_update_campaign_tracking` | Update tracking templates |
+
+#### Negative Keywords
+| Tool | Description |
+|------|-------------|
+| `google_ads_create_shared_set` | Create shared negative keyword list |
+| `google_ads_link_shared_set` | Link shared set to campaign |
+| `google_ads_unlink_shared_set` | Unlink shared set from campaign |
+| `google_ads_add_shared_negatives` | Add keywords to shared negative list |
+| `google_ads_remove_shared_negatives` | Remove keywords from shared list |
+| `google_ads_add_campaign_negatives` | Add campaign-level negatives |
+| `google_ads_remove_campaign_negatives` | Remove campaign-level negatives |
+| `google_ads_remove_adgroup_negatives` | Remove ad group-level negatives |
+
+#### Performance & Reporting
+| Tool | Description |
+|------|-------------|
+| `google_ads_keyword_performance` | Keyword metrics with quality score |
+| `google_ads_keyword_performance_by_conversion` | Keyword metrics by conversion action |
+| `google_ads_ad_performance` | Ad-level performance metrics |
+| `google_ads_ad_performance_by_conversion` | Ad metrics by conversion action |
+| `google_ads_search_term_report` | Search term query report |
+| `google_ads_search_term_report_by_conversion` | Search terms by conversion action |
+| `google_ads_search_term_insights` | Search term category insights |
+| `google_ads_search_term_insight_terms` | Terms within insight categories |
+| `google_ads_keyword_volume` | Keyword planner volume estimates |
+
+#### Advanced
+| Tool | Description |
+|------|-------------|
+| `google_ads_gaql_query` | Run raw GAQL queries |
 
 ### Example Commands
 
@@ -146,23 +202,47 @@ Restart Claude Code.
 # List campaigns
 "Show me all campaigns in this account"
 
-# Create ads from the gap coverage file
-"Create all the ads from gap-coverage-ads.tsv"
+# Create a new campaign
+"Create a Search campaign for brand terms with $50/day budget"
 
 # Check what's pending review
 "What changes are pending my review?"
 
 # After reviewing in Google Ads UI
-"Enable all the approved ads in the Church & Faith-Based ad group"
+"Enable the approved ads in the Brand campaign"
+
+# Performance analysis
+"Show me keyword performance for the last 30 days, sorted by cost"
+
+# Run custom GAQL
+"Run a GAQL query to get all ad groups with CTR below 2%"
 ```
 
 ## Safety Features
 
-1. **Everything starts PAUSED** - Nothing goes live until you explicitly enable it
-2. **Label tracking** - All Claude-created items get a `claude-pending` label
-3. **Validation** - Ads are validated before creation (headline/description lengths, etc.)
-4. **Approval prompts** - The `enable_items` tool requires explicit approval in Claude Code
-5. **Client isolation** - Working directory determines which account, preventing cross-client mistakes
+1. **Everything starts PAUSED** — Nothing goes live until you explicitly enable it
+2. **Label tracking** — All Claude-created items get a `claude-pending` label
+3. **Validation** — Ads are validated before creation (headline/description lengths, etc.)
+4. **Approval prompts** — The `enable_items` tool requires explicit approval in Claude Code
+5. **Client isolation** — Working directory determines which account, preventing cross-client mistakes
+
+## Adding New Clients
+
+Edit `config.json` to add clients. Map each client to a working directory:
+
+```json
+{
+  "clients": {
+    "client-slug": {
+      "customer_id": "123-456-7890",
+      "name": "Client Name",
+      "folder": "/path/to/client/workspace"
+    }
+  }
+}
+```
+
+No server restart needed — config is read on each request.
 
 ## Troubleshooting
 
@@ -175,28 +255,9 @@ Restart Claude Code.
 - Use a test account while waiting for approval
 
 ### "Authentication failed"
-- Refresh token may be expired - regenerate it
+- Refresh token may be expired — regenerate it
 - Check that client_id and client_secret are correct
 
-## Adding New Clients
+## License
 
-Edit `config.json` to add new clients:
-
-```json
-{
-  "clients": {
-    "neon-one": {
-      "customer_id": "111-222-3333",
-      "name": "Neon One",
-      "folder": "/Users/mark/claude-code/neon-one"
-    },
-    "new-client": {
-      "customer_id": "444-555-6666",
-      "name": "New Client",
-      "folder": "/Users/mark/claude-code/new-client"
-    }
-  }
-}
-```
-
-No server restart needed - config is read on each request.
+MIT — see [LICENSE](LICENSE) for details.

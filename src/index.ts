@@ -1385,6 +1385,36 @@ class GoogleAdsManager {
     const result = await withResilience(() => customer.query(query), "executeGaql");
     return safeResponse(result, "executeGaql");
   }
+
+  async keywordVolume(
+    customerId: string,
+    keywords: string[],
+    geoTargetConstants: string[] = ["geoTargetConstants/2840"],
+    language: string = "languageConstants/1000"
+  ) {
+    const customer = this.getCustomer(customerId);
+    const response = await withResilience(
+      () => customer.keywordPlanIdeas.generateKeywordHistoricalMetrics({
+        customer_id: customerId.replace(/-/g, ""),
+        keywords,
+        geo_target_constants: geoTargetConstants,
+        language,
+        keyword_plan_network: enums.KeywordPlanNetwork.GOOGLE_SEARCH,
+        include_adult_keywords: false,
+      } as any),
+      "keywordVolume"
+    );
+
+    const results = (response as any).results ?? [];
+    return results.map((r: any) => ({
+      keyword: r.text,
+      avg_monthly_searches: r.keyword_metrics?.avg_monthly_searches ?? null,
+      competition: r.keyword_metrics?.competition ?? null,
+      competition_index: r.keyword_metrics?.competition_index ?? null,
+      low_top_of_page_bid_micros: r.keyword_metrics?.low_top_of_page_bid_micros ?? null,
+      high_top_of_page_bid_micros: r.keyword_metrics?.high_top_of_page_bid_micros ?? null,
+    }));
+  }
 }
 
 // ============================================
@@ -2053,6 +2083,20 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const customerId = args?.customer_id as string || "";
         const query = args?.query as string;
         const result = await adsManager.executeGaql(customerId, query);
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify(result, null, 2),
+          }],
+        };
+      }
+
+      case "google_ads_keyword_volume": {
+        const customerId = args?.customer_id as string || "";
+        const keywords = args?.keywords as string[];
+        const geoTargetConstants = args?.geo_target_constants as string[] | undefined;
+        const language = args?.language as string | undefined;
+        const result = await adsManager.keywordVolume(customerId, keywords, geoTargetConstants, language);
         return {
           content: [{
             type: "text",

@@ -98,7 +98,7 @@ export function classifyError(error: any): Error {
     code?.authorization_error
   ) {
     return new GoogleAdsAuthError(
-      `Auth failed: ${message}. Check refresh token in Keychain (security find-generic-password -a google-ads-drak -s GOOGLE_ADS_REFRESH_TOKEN -w)`,
+      `Auth failed: ${message}. Check your refresh token and OAuth credentials.`,
       error,
     );
   }
