@@ -5,9 +5,27 @@ const https = require('https');
 const { exec } = require('child_process');
 const url = require('url');
 
-// Desktop OAuth client (installed app) from gcp-oauth.keys.json
-const CLIENT_ID = '557294086068-o7rb5neg65g28uf65j85q0h60cop40j9.apps.googleusercontent.com';
-const CLIENT_SECRET = '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';
+// Read OAuth credentials from environment variables or config.json
+const fs = require('fs');
+let CLIENT_ID = process.env.GOOGLE_ADS_CLIENT_ID;
+let CLIENT_SECRET = process.env.GOOGLE_ADS_CLIENT_SECRET;
+
+if (!CLIENT_ID || !CLIENT_SECRET) {
+  try {
+    const config = JSON.parse(fs.readFileSync('config.json', 'utf8'));
+    CLIENT_ID = CLIENT_ID || config.google_ads.client_id;
+    CLIENT_SECRET = CLIENT_SECRET || config.google_ads.client_secret;
+  } catch (e) {
+    // config.json not found, that's ok if env vars are set
+  }
+}
+
+if (!CLIENT_ID || !CLIENT_SECRET) {
+  console.error('Error: CLIENT_ID and CLIENT_SECRET are required.');
+  console.error('Set GOOGLE_ADS_CLIENT_ID and GOOGLE_ADS_CLIENT_SECRET env vars,');
+  console.error('or create config.json with google_ads.client_id and google_ads.client_secret.');
+  process.exit(1);
+}
 const SCOPE = 'https://www.googleapis.com/auth/adwords';
 const PORT = 8085;
 const REDIRECT_URI = `http://localhost:${PORT}`;

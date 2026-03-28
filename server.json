@@ -1,0 +1,23 @@
+{
+  "name": "mcp-google-ads",
+  "display_name": "Google Ads MCP",
+  "description": "MCP server for Google Ads API with MCC support, 35 tools for campaign management, reporting, and optimization. Safe by default — all changes created PAUSED.",
+  "repository": {
+    "url": "https://github.com/mharnett/mcp-google-ads",
+    "source": "github"
+  },
+  "version_detail": {
+    "version": "1.0.0",
+    "release_date": "2026-03-28",
+    "is_latest": true
+  },
+  "packages": [
+    {
+      "registry_name": "npm",
+      "name": "mcp-google-ads",
+      "version": "1.0.0"
+    }
+  ],
+  "remotes": [],
+  "license": "MIT"
+}

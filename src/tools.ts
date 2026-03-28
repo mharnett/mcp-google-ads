@@ -548,4 +548,29 @@ export const tools: Tool[] = [
       required: ["query"],
     },
   },
+  {
+    name: "google_ads_keyword_volume",
+    description: "Get historical search volume estimates for a list of keywords using the Google Ads Keyword Planner. Returns avg monthly searches, competition level, and CPC bid range for each keyword.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        customer_id: { type: "string", description: "The Google Ads customer ID" },
+        keywords: {
+          type: "array",
+          items: { type: "string" },
+          description: "List of keywords to get volume estimates for (max 20 per call)",
+        },
+        geo_target_constants: {
+          type: "array",
+          items: { type: "string" },
+          description: "Geo target resource names, e.g. ['geoTargetConstants/2840'] for US. Defaults to US if omitted.",
+        },
+        language: {
+          type: "string",
+          description: "Language resource name, e.g. 'languageConstants/1000' for English. Defaults to English if omitted.",
+        },
+      },
+      required: ["keywords"],
+    },
+  },
 ];

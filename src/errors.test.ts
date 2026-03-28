@@ -69,10 +69,13 @@ describe("classifyError", () => {
     expect(result).not.toBeInstanceOf(GoogleAdsServiceError);
   });
 
-  it("passes through errors with non-matching status codes", () => {
+  it("wraps non-Error objects with non-matching status codes in GoogleAdsError", () => {
     const error = { status: 400, message: "Bad request" };
     const result = classifyError(error);
-    expect(result).toBe(error);
+    expect(result).toBeInstanceOf(Error);
+    expect(result.name).toBe("GoogleAdsError");
+    expect(result.message).toBe("Bad request");
+    expect((result as any).cause).toBe(error);
   });
 });
 

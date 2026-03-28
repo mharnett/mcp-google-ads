@@ -7,15 +7,15 @@
     "mcc_customer_id": "123-456-7890"
   },
   "clients": {
-    "neon-one": {
+    "my-client": {
       "customer_id": "111-222-3333",
-      "name": "Neon One",
-      "folder": "/Users/mark/claude-code/neon-one"
+      "name": "My Client",
+      "folder": "/path/to/client/workspace"
     },
-    "client-two": {
+    "another-client": {
       "customer_id": "444-555-6666",
-      "name": "Client Two",
-      "folder": "/Users/mark/claude-code/client-two"
+      "name": "Another Client",
+      "folder": "/path/to/another/workspace"
     }
   },
   "defaults": {
