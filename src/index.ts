@@ -554,10 +554,20 @@ class GoogleAdsManager {
         throw new Error(`Headline too long (${h.text.length} chars, max 30): "${h.text}"`);
       }
     }
-    // Check description lengths
+    // Check description lengths (account for customizer tokens that render shorter)
+    const CUSTOMIZER_RE = /\{CUSTOMIZER\.[^}]+\}/g;
+    const CUSTOMIZER_RENDER = 16;
     for (const d of normalizedDescriptions) {
-      if (d.text.length > 90) {
-        throw new Error(`Description too long (${d.text.length} chars, max 90): "${d.text}"`);
+      let effectiveLen = d.text.length;
+      const matches = d.text.match(CUSTOMIZER_RE);
+      if (matches) {
+        for (const m of matches) {
+          effectiveLen -= m.length;
+          effectiveLen += CUSTOMIZER_RENDER;
+        }
+      }
+      if (effectiveLen > 90) {
+        throw new Error(`Description too long (${effectiveLen} chars, max 90): "${d.text}"`);
       }
     }
 
@@ -1216,10 +1226,20 @@ class GoogleAdsManager {
       }
     });
 
-    // Check description lengths
+    // Check description lengths (account for customizer tokens that render shorter)
+    const CUSTOMIZER_PATTERN = /\{CUSTOMIZER\.[^}]+\}/g;
+    const CUSTOMIZER_RENDER_LEN = 16; // conservative estimate of rendered length
     ad.descriptions.forEach((d, i) => {
-      if (d.length > 90) {
-        errors.push(`Description ${i + 1} too long (${d.length}/90): "${d}"`);
+      let effectiveLen = d.length;
+      const matches = d.match(CUSTOMIZER_PATTERN);
+      if (matches) {
+        for (const m of matches) {
+          effectiveLen -= m.length;
+          effectiveLen += CUSTOMIZER_RENDER_LEN;
+        }
+      }
+      if (effectiveLen > 90) {
+        errors.push(`Description ${i + 1} too long (${effectiveLen}/90): "${d}"`);
       }
     });
 
