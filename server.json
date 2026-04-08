@@ -6,12 +6,12 @@
     "url": "https://github.com/mharnett/mcp-google-ads",
     "source": "github"
   },
-  "version": "1.0.0",
+  "version": "1.0.1",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "mcp-google-ads",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "transport": { "type": "stdio" },
       "environmentVariables": [
         { "name": "GOOGLE_ADS_CLIENT_ID", "description": "OAuth client ID", "isRequired": true, "isSecret": false },
