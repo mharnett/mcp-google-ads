@@ -1626,9 +1626,28 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "google_ads_create_campaign": {
         const customerId = args?.customer_id as string || "";
+        const daily_budget = args?.daily_budget as number;
+
+        // Budget validation: reject $0 and negative budgets
+        if (daily_budget !== undefined && daily_budget <= 0) {
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({ error: "daily_budget must be positive (in dollars, e.g., 10 = $10/day)" }, null, 2),
+            }],
+          };
+        }
+
+        // Campaign name sanitization: strip HTML tags
+        const rawName = args?.name as string;
+        const sanitizedName = rawName.replace(/<[^>]*>/g, "");
+        if (sanitizedName !== rawName) {
+          console.error(`[warning] Stripped HTML from campaign name: "${rawName}" -> "${sanitizedName}"`);
+        }
+
         const result = await adsManager.createCampaign(customerId, {
-          name: args?.name as string,
-          budget_amount_micros: (args?.daily_budget as number) * 1000000,
+          name: sanitizedName,
+          budget_amount_micros: Math.round(daily_budget * 1000000),
         });
         return {
           content: [{
@@ -1647,7 +1666,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const result = await adsManager.createAdGroup(customerId, {
           name: args?.name as string,
           campaign_id: args?.campaign_id as string,
-          cpc_bid_micros: args?.cpc_bid ? (args.cpc_bid as number) * 1000000 : undefined,
+          cpc_bid_micros: args?.cpc_bid ? Math.round((args.cpc_bid as number) * 1000000) : undefined,
         });
         return {
           content: [{
@@ -1732,16 +1751,30 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "google_ads_enable_items": {
         const customerId = args?.customer_id as string || "";
+
+        // Validate at least one ID array is provided and non-empty
+        const hasCampaignIds = args?.campaign_ids && (args.campaign_ids as string[]).length > 0;
+        const hasAdGroupIds = args?.ad_group_ids && (args.ad_group_ids as string[]).length > 0;
+        const hasAdIds = args?.ad_ids && (args.ad_ids as string[]).length > 0;
+        if (!hasCampaignIds && !hasAdGroupIds && !hasAdIds) {
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({ error: "No item IDs provided. Specify at least one campaign, ad group, or ad ID." }, null, 2),
+            }],
+          };
+        }
+
         const results: any = {};
 
-        if (args?.campaign_ids) {
-          results.campaigns = await adsManager.enableCampaigns(customerId, args.campaign_ids as string[]);
+        if (hasCampaignIds) {
+          results.campaigns = await adsManager.enableCampaigns(customerId, args!.campaign_ids as string[]);
         }
-        if (args?.ad_group_ids) {
-          results.adGroups = await adsManager.enableAdGroups(customerId, args.ad_group_ids as string[]);
+        if (hasAdGroupIds) {
+          results.adGroups = await adsManager.enableAdGroups(customerId, args!.ad_group_ids as string[]);
         }
-        if (args?.ad_ids) {
-          results.ads = await adsManager.enableAds(customerId, args.ad_ids as string[]);
+        if (hasAdIds) {
+          results.ads = await adsManager.enableAds(customerId, args!.ad_ids as string[]);
         }
 
         return {
@@ -1758,16 +1791,30 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "google_ads_pause_items": {
         const customerId = args?.customer_id as string || "";
+
+        // Validate at least one ID array is provided and non-empty -- nothing to pause otherwise
+        const hasCampaignIds = args?.campaign_ids && (args.campaign_ids as string[]).length > 0;
+        const hasAdGroupIds = args?.ad_group_ids && (args.ad_group_ids as string[]).length > 0;
+        const hasAdIds = args?.ad_ids && (args.ad_ids as string[]).length > 0;
+        if (!hasCampaignIds && !hasAdGroupIds && !hasAdIds) {
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({ error: "No item IDs provided. Specify at least one campaign, ad group, or keyword ID." }, null, 2),
+            }],
+          };
+        }
+
         const results: any = {};
 
-        if (args?.campaign_ids) {
-          results.campaigns = await adsManager.pauseCampaigns(customerId, args.campaign_ids as string[]);
+        if (hasCampaignIds) {
+          results.campaigns = await adsManager.pauseCampaigns(customerId, args!.campaign_ids as string[]);
         }
-        if (args?.ad_group_ids) {
-          results.adGroups = await adsManager.pauseAdGroups(customerId, args.ad_group_ids as string[]);
+        if (hasAdGroupIds) {
+          results.adGroups = await adsManager.pauseAdGroups(customerId, args!.ad_group_ids as string[]);
         }
-        if (args?.ad_ids) {
-          results.ads = await adsManager.pauseAds(customerId, args.ad_ids as string[]);
+        if (hasAdIds) {
+          results.ads = await adsManager.pauseAds(customerId, args!.ad_ids as string[]);
         }
 
         return {
@@ -2000,6 +2047,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       // ============================================
 
       case "google_ads_keyword_performance": {
+        // Future date validation
+        const today_kp = new Date().toISOString().slice(0, 10);
+        if (args?.start_date && (args.start_date as string) > today_kp) {
+          return { content: [{ type: "text", text: JSON.stringify({ error: `start_date "${args.start_date}" is in the future. Reports only cover historical data.` }, null, 2) }] };
+        }
         const customerId = args?.customer_id as string || "";
         const result = await adsManager.getKeywordPerformance(customerId, {
           startDate: args?.start_date as string,
@@ -2017,6 +2069,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case "google_ads_keyword_performance_by_conversion": {
+        const today_kpbc = new Date().toISOString().slice(0, 10);
+        if (args?.start_date && (args.start_date as string) > today_kpbc) {
+          return { content: [{ type: "text", text: JSON.stringify({ error: `start_date "${args.start_date}" is in the future. Reports only cover historical data.` }, null, 2) }] };
+        }
         const customerId = args?.customer_id as string || "";
         const result = await adsManager.getKeywordPerformanceWithConversions(customerId, {
           startDate: args?.start_date as string,
@@ -2034,6 +2090,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case "google_ads_search_term_report": {
+        const today_str = new Date().toISOString().slice(0, 10);
+        if (args?.start_date && (args.start_date as string) > today_str) {
+          return { content: [{ type: "text", text: JSON.stringify({ error: `start_date "${args.start_date}" is in the future. Reports only cover historical data.` }, null, 2) }] };
+        }
         const customerId = args?.customer_id as string || "";
         const result = await adsManager.getSearchTermReport(customerId, {
           startDate: args?.start_date as string,
@@ -2052,6 +2112,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case "google_ads_search_term_report_by_conversion": {
+        const today_strbc = new Date().toISOString().slice(0, 10);
+        if (args?.start_date && (args.start_date as string) > today_strbc) {
+          return { content: [{ type: "text", text: JSON.stringify({ error: `start_date "${args.start_date}" is in the future. Reports only cover historical data.` }, null, 2) }] };
+        }
         const customerId = args?.customer_id as string || "";
         const result = await adsManager.getSearchTermReportWithConversions(customerId, {
           startDate: args?.start_date as string,
@@ -2070,6 +2134,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case "google_ads_ad_performance": {
+        const today_ap = new Date().toISOString().slice(0, 10);
+        if (args?.start_date && (args.start_date as string) > today_ap) {
+          return { content: [{ type: "text", text: JSON.stringify({ error: `start_date "${args.start_date}" is in the future. Reports only cover historical data.` }, null, 2) }] };
+        }
         const customerId = args?.customer_id as string || "";
         const result = await adsManager.getAdPerformance(customerId, {
           startDate: args?.start_date as string,
@@ -2086,6 +2154,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case "google_ads_ad_performance_by_conversion": {
+        const today_apbc = new Date().toISOString().slice(0, 10);
+        if (args?.start_date && (args.start_date as string) > today_apbc) {
+          return { content: [{ type: "text", text: JSON.stringify({ error: `start_date "${args.start_date}" is in the future. Reports only cover historical data.` }, null, 2) }] };
+        }
         const customerId = args?.customer_id as string || "";
         const result = await adsManager.getAdPerformanceWithConversions(customerId, {
           startDate: args?.start_date as string,
@@ -2151,6 +2223,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const dailyBudget = args?.daily_budget as number;
         const createNew = (args?.create_new_budget as boolean) || false;
 
+        // Budget validation: reject $0 and negative budgets
+        if (dailyBudget <= 0) {
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({ error: "Budget must be positive (in dollars, e.g., 10 = $10/day)" }, null, 2),
+            }],
+          };
+        }
+
         const result = await adsManager.updateCampaignBudget(customerId, campaignId, dailyBudget, createNew);
 
         return {
@@ -2167,6 +2249,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "google_ads_gaql_query": {
         const customerId = args?.customer_id as string || "";
         const query = args?.query as string;
+
+        // Block mutation statements -- GAQL query tool is read-only
+        const upperQuery = query.toUpperCase().trim();
+        if (upperQuery.startsWith("INSERT") || upperQuery.startsWith("UPDATE") || upperQuery.startsWith("DELETE") || upperQuery.startsWith("CREATE") || upperQuery.startsWith("DROP")) {
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({ error: "GAQL query tool is read-only. Mutation statements (INSERT, UPDATE, DELETE) are not allowed. Use the dedicated create/update tools instead." }, null, 2),
+            }],
+          };
+        }
+
         const result = await adsManager.executeGaql(customerId, query);
         return {
           content: [{
@@ -2179,6 +2273,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "google_ads_keyword_volume": {
         const customerId = args?.customer_id as string || "";
         const keywords = args?.keywords as string[];
+
+        // Enforce max 20 keywords per request
+        if (keywords.length > 20) {
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({ error: `Too many keywords (${keywords.length}). Maximum is 20 per request. Split into multiple calls.` }, null, 2),
+            }],
+          };
+        }
+
         const geoTargetConstants = args?.geo_target_constants as string[] | undefined;
         const language = args?.language as string | undefined;
         const result = await adsManager.keywordVolume(customerId, keywords, geoTargetConstants, language);
