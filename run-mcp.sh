@@ -1,8 +1,8 @@
 #!/bin/bash
 # Wrapper to launch Google Ads MCP with tokens from Keychain
 export GOOGLE_ADS_DEVELOPER_TOKEN=xQjWTuRLCJ_1UFpX1xLWlA
-export GOOGLE_ADS_CLIENT_ID=557294086068-o7rb5neg65g28uf65j85q0h60cop40j9.apps.googleusercontent.com
-export GOOGLE_ADS_CLIENT_SECRET=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
+export GOOGLE_ADS_CLIENT_ID=557294086068-ieqjkpisb8rs97m2ntnj68i3jog7qefj.apps.googleusercontent.com
+export GOOGLE_ADS_CLIENT_SECRET=$(security find-generic-password -s GOOGLE_ADS_CLIENT_SECRET -w 2>/dev/null)
 export GOOGLE_ADS_REFRESH_TOKEN=$(security find-generic-password -a google-ads-drak -s GOOGLE_ADS_REFRESH_TOKEN -w 2>/dev/null)
 export GOOGLE_ADS_REFRESH_TOKEN_FLOWSPACE=$(security find-generic-password -a google-ads-flowspace -s GOOGLE_ADS_REFRESH_TOKEN_FLOWSPACE -w 2>/dev/null)
 

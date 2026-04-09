@@ -51,11 +51,47 @@ interface Config {
 }
 
 function loadConfig(): Config {
+  // Try config.json first (for multi-client setups)
   const configPath = join(dirname(new URL(import.meta.url).pathname), "..", "config.json");
-  if (!existsSync(configPath)) {
-    throw new Error(`Config file not found at ${configPath}. Copy config.example.json to config.json and fill in your credentials.`);
+  if (existsSync(configPath)) {
+    return JSON.parse(readFileSync(configPath, "utf-8"));
   }
-  return JSON.parse(readFileSync(configPath, "utf-8"));
+
+  // Fall back to env vars (single-client mode)
+  const clientId = process.env.GOOGLE_ADS_CLIENT_ID;
+  const clientSecret = process.env.GOOGLE_ADS_CLIENT_SECRET;
+  const developerToken = process.env.GOOGLE_ADS_DEVELOPER_TOKEN;
+  const refreshToken = process.env.GOOGLE_ADS_REFRESH_TOKEN;
+  const customerId = process.env.GOOGLE_ADS_CUSTOMER_ID;
+  const mccId = process.env.GOOGLE_ADS_MCC_CUSTOMER_ID;
+
+  if (!clientId || !clientSecret || !developerToken || !refreshToken) {
+    throw new Error(
+      "No configuration found. Either:\n" +
+      "  1. Set env vars: GOOGLE_ADS_CLIENT_ID, GOOGLE_ADS_CLIENT_SECRET, GOOGLE_ADS_DEVELOPER_TOKEN, GOOGLE_ADS_REFRESH_TOKEN, GOOGLE_ADS_CUSTOMER_ID\n" +
+      "  2. Create a config.json next to the dist/ folder (see config.example.json)"
+    );
+  }
+
+  return {
+    google_ads: {
+      mcc_customer_id: mccId || "",
+    },
+    clients: customerId ? {
+      default: {
+        customer_id: customerId,
+        name: process.env.GOOGLE_ADS_ACCOUNT_NAME || "My Account",
+        folder: "",
+        mcc_customer_id: mccId,
+        direct_access: !mccId,
+      },
+    } : {},
+    defaults: {
+      create_paused: true,
+      label_prefix: "claude:",
+      require_approval_for_enable: true,
+    },
+  };
 }
 
 function getClientFromWorkingDir(config: Config, cwd: string): ClientConfig | null {
