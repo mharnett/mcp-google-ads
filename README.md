@@ -91,6 +91,17 @@ Edit `config.json` with your credentials:
 }
 ```
 
+### Environment Variables
+
+Alternatively, set credentials via environment variables (these override `config.json`):
+
+| Variable | Required | Description |
+|---|---|---|
+| `GOOGLE_ADS_DEVELOPER_TOKEN` | Yes | Google Ads API developer token |
+| `GOOGLE_ADS_CLIENT_ID` | Yes | OAuth 2.0 client ID |
+| `GOOGLE_ADS_CLIENT_SECRET` | Yes | OAuth 2.0 client secret |
+| `GOOGLE_ADS_REFRESH_TOKEN` | Yes | OAuth 2.0 refresh token |
+
 ### 4. Add to Claude Code
 
 Add to your Claude Code MCP settings (`~/.claude/settings.json` or project settings):
@@ -120,6 +131,8 @@ Or if installed from source:
 ```
 
 Restart Claude Code.
+
+**Claude Desktop:** Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows).
 
 ## Usage
 
