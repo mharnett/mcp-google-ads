@@ -1513,8 +1513,8 @@ const adsManager = new GoogleAdsManager(config);
 
 const server = new Server(
   {
-    name: "mcp-google-ads",
-    version: "1.0.0",
+    name: __cliPkg.name,
+    version: __cliPkg.version,
   },
   {
     capabilities: {
@@ -2252,5 +2252,15 @@ async function main() {
   await server.connect(transport);
   logger.info("MCP Google Ads server running");
 }
+
+process.on("SIGTERM", () => {
+  console.error("[shutdown] SIGTERM received, exiting");
+  process.exit(0);
+});
+
+process.on("SIGINT", () => {
+  console.error("[shutdown] SIGINT received, exiting");
+  process.exit(0);
+});
 
 main().catch((err) => logger.error({ error: err.message, stack: err.stack }, "Fatal startup error"));
