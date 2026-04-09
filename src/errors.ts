@@ -105,7 +105,9 @@ export function classifyError(error: any): Error {
     code?.authorization_error
   ) {
     return new GoogleAdsAuthError(
-      `Google Ads auth failed: ${message}. Check your refresh token and OAuth credentials.`,
+      `Google Ads auth failed: ${message}. ` +
+      `Re-authenticate: run 'node get-refresh-token.cjs' and update your GOOGLE_ADS_REFRESH_TOKEN environment variable.` +
+      (process.platform === "darwin" ? ` On macOS, update Keychain: security add-generic-password -a google-ads-drak -s GOOGLE_ADS_REFRESH_TOKEN -w "<token>" -U` : ""),
       error,
     );
   }

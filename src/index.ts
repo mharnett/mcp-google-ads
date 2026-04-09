@@ -190,7 +190,10 @@ class GoogleAdsManager {
     // Validate credentials at startup — fail fast
     const creds = validateCredentials();
     if (!creds.valid) {
-      const msg = `Missing required credentials: ${creds.missing.join(", ")}. MCP will not function. Check run-mcp.sh and Keychain entries.`;
+      const msg = `Missing required credentials: ${creds.missing.join(", ")}. ` +
+        `Set these environment variables before starting the server. ` +
+        `Run 'node get-refresh-token.cjs' to obtain a refresh token.` +
+        (process.platform === "darwin" ? ` On macOS, tokens can be stored in Keychain and loaded via run-mcp.sh.` : "");
       logger.error({ missing: creds.missing }, msg);
       throw new GoogleAdsAuthError(msg);
     }
