@@ -28,6 +28,12 @@ try {
   console.error(`[build] ${__cliPkg.name}@${__cliPkg.version} (dev mode)`);
 }
 
+// Version safety: warn if running a deprecated or dangerously old version
+const __minimumSafeVersion = "1.0.5"; // minimum version with GAQL sanitization
+if (__cliPkg.version < __minimumSafeVersion) {
+  console.error(`[WARNING] Running deprecated version ${__cliPkg.version}. Minimum safe version is ${__minimumSafeVersion}. Please upgrade.`);
+}
+
 // CLI flags
 if (process.argv.includes("--help") || process.argv.includes("-h")) {
   console.error(`${__cliPkg.name} v${__cliPkg.version}\n`);
