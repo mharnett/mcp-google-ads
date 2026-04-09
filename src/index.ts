@@ -309,7 +309,7 @@ class GoogleAdsManager {
       query += ` AND campaign.id = ${sanitizeNumericId(options.campaignId)}`;
     }
     if (options.adGroupId) {
-      query += ` AND ad_group.id = ${options.adGroupId}`;
+      query += ` AND ad_group.id = ${sanitizeNumericId(options.adGroupId)}`;
     }
     query += ` ORDER BY campaign.name, ad_group.name`;
     const result = await withResilience(() => customer.query(query), "listAds");
