@@ -15,6 +15,7 @@ import { tools } from "./tools.js";
 import { GoogleAdsApi, enums, resources, MutateOperation } from "google-ads-api";
 import { readFileSync, existsSync } from "fs";
 import { z } from "zod";
+import v8 from "v8";
 
 // CLI package info
 const __cliPkg = JSON.parse(readFileSync(join(dirname(new URL(import.meta.url).pathname), "..", "package.json"), "utf-8"));
@@ -48,6 +49,17 @@ if (process.argv.includes("--help") || process.argv.includes("-h")) {
 if (process.argv.includes("--version") || process.argv.includes("-v")) {
   console.error(__cliPkg.version);
   process.exit(0);
+}
+
+// Startup: detect npx vs direct node
+if (process.argv[1]?.includes('.npm/_npx')) {
+  console.error("[startup] Running via npx -- first run may be slow due to package resolution");
+}
+
+// Startup: check heap size
+const heapLimit = v8.getHeapStatistics().heap_size_limit;
+if (heapLimit < 256 * 1024 * 1024) {
+  console.error(`[startup] WARNING: Heap limit is ${Math.round(heapLimit / 1024 / 1024)}MB`);
 }
 
 // ============================================
@@ -143,9 +155,9 @@ function sanitizeNumericId(id: string): string {
   return id.replace(/[^0-9]/g, "");
 }
 
-/** Escape single quotes in strings used in GAQL WHERE clauses. */
+/** Escape single quotes and backslashes in strings used in GAQL WHERE clauses. */
 function escapeGaqlString(s: string): string {
-  return s.replace(/'/g, "\\'");
+  return s.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
 }
 
 // ============================================
@@ -415,13 +427,11 @@ class GoogleAdsManager {
     const cleanId = customerId.replace(/-/g, "");
 
     // Check if label already exists
+    const safeName = escapeGaqlString(labelName);
     const existing = await withResilience(
-      () => customer.query(`
-        SELECT label.resource_name, label.name
-        FROM label
-        WHERE label.name = '${escapeGaqlString(labelName)}'
-          AND label.status = 'ENABLED'
-      `),
+      () => customer.query(
+        `SELECT label.resource_name, label.name FROM label WHERE label.name = '` + safeName + `' AND label.status = 'ENABLED'`
+      ),
       "ensureLabelExists.query"
     );
 
@@ -434,9 +444,9 @@ class GoogleAdsManager {
     if ((result as any).existing) {
       // Race condition: re-query
       const requery = await withResilience(
-        () => customer.query(`
-          SELECT label.resource_name FROM label WHERE label.name = '${escapeGaqlString(labelName)}' AND label.status = 'ENABLED'
-        `),
+        () => customer.query(
+          `SELECT label.resource_name FROM label WHERE label.name = '` + safeName + `' AND label.status = 'ENABLED'`
+        ),
         "ensureLabelExists.requery"
       );
       return (requery[0] as any).label.resource_name;
@@ -1344,40 +1354,23 @@ class GoogleAdsManager {
     compareEndDate?: string;
   }) {
     const customer = this.getCustomer(customerId);
+    const safeCampaignId = sanitizeNumericId(options.campaignId);
+    const safeStartDate = escapeGaqlString(options.startDate);
+    const safeEndDate = escapeGaqlString(options.endDate);
 
     // Current period - get categories with metrics
-    const currentQuery = `
-      SELECT
-        campaign_search_term_insight.campaign_id,
-        campaign_search_term_insight.category_label,
-        campaign_search_term_insight.id,
-        metrics.clicks,
-        metrics.impressions,
-        metrics.conversions,
-        metrics.conversions_value
-      FROM campaign_search_term_insight
-      WHERE campaign_search_term_insight.campaign_id = '${options.campaignId}'
-        AND segments.date BETWEEN '${options.startDate}' AND '${options.endDate}'
-    `;
+    const currentQuery =
+      `SELECT campaign_search_term_insight.campaign_id, campaign_search_term_insight.category_label, campaign_search_term_insight.id, metrics.clicks, metrics.impressions, metrics.conversions, metrics.conversions_value FROM campaign_search_term_insight WHERE campaign_search_term_insight.campaign_id = '` + safeCampaignId + `' AND segments.date BETWEEN '` + safeStartDate + `' AND '` + safeEndDate + `'`;
 
     const currentResults = await withResilience(() => customer.query(currentQuery), "getSearchTermInsights.current");
 
     // If comparison dates provided, get previous period too
     let previousResults: any[] = [];
     if (options.compareStartDate && options.compareEndDate) {
-      const prevQuery = `
-        SELECT
-          campaign_search_term_insight.campaign_id,
-          campaign_search_term_insight.category_label,
-          campaign_search_term_insight.id,
-          metrics.clicks,
-          metrics.impressions,
-          metrics.conversions,
-          metrics.conversions_value
-        FROM campaign_search_term_insight
-        WHERE campaign_search_term_insight.campaign_id = '${options.campaignId}'
-          AND segments.date BETWEEN '${options.compareStartDate}' AND '${options.compareEndDate}'
-      `;
+      const safeCompStart = escapeGaqlString(options.compareStartDate);
+      const safeCompEnd = escapeGaqlString(options.compareEndDate);
+      const prevQuery =
+        `SELECT campaign_search_term_insight.campaign_id, campaign_search_term_insight.category_label, campaign_search_term_insight.id, metrics.clicks, metrics.impressions, metrics.conversions, metrics.conversions_value FROM campaign_search_term_insight WHERE campaign_search_term_insight.campaign_id = '` + safeCampaignId + `' AND segments.date BETWEEN '` + safeCompStart + `' AND '` + safeCompEnd + `'`;
       previousResults = await withResilience(() => customer.query(prevQuery), "getSearchTermInsights.previous");
     }
 
@@ -1459,22 +1452,13 @@ class GoogleAdsManager {
     endDate: string;
   }) {
     const customer = this.getCustomer(customerId);
+    const safeCampId = sanitizeNumericId(options.campaignId);
+    const safeInsId = sanitizeNumericId(options.insightId);
+    const safeStart = escapeGaqlString(options.startDate);
+    const safeEnd = escapeGaqlString(options.endDate);
 
-    const query = `
-      SELECT
-        campaign_search_term_insight.campaign_id,
-        campaign_search_term_insight.category_label,
-        campaign_search_term_insight.id,
-        segments.search_term,
-        metrics.clicks,
-        metrics.impressions,
-        metrics.conversions,
-        metrics.conversions_value
-      FROM campaign_search_term_insight
-      WHERE campaign_search_term_insight.campaign_id = '${options.campaignId}'
-        AND campaign_search_term_insight.id = '${options.insightId}'
-        AND segments.date BETWEEN '${options.startDate}' AND '${options.endDate}'
-    `;
+    const query =
+      `SELECT campaign_search_term_insight.campaign_id, campaign_search_term_insight.category_label, campaign_search_term_insight.id, segments.search_term, metrics.clicks, metrics.impressions, metrics.conversions, metrics.conversions_value FROM campaign_search_term_insight WHERE campaign_search_term_insight.campaign_id = '` + safeCampId + `' AND campaign_search_term_insight.id = '` + safeInsId + `' AND segments.date BETWEEN '` + safeStart + `' AND '` + safeEnd + `'`;
 
     const result = await withResilience(() => customer.query(query), "getSearchTermInsightTerms");
     return safeResponse(result, "getSearchTermInsightTerms");

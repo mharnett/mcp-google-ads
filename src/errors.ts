@@ -41,6 +41,13 @@ export function validateCredentials(): { valid: boolean; missing: string[] } {
   const missing = required.filter(
     (key) => !process.env[key] || process.env[key]!.trim() === "",
   );
+  // Basic format validation: credentials should have reasonable length > 10 chars
+  const malformed = required.filter(
+    (key) => process.env[key] && process.env[key]!.trim().length > 0 && process.env[key]!.trim().length < 10,
+  );
+  if (malformed.length > 0) {
+    missing.push(...malformed.map(k => `${k} (format: too short, expected length > 10)`));
+  }
   return { valid: missing.length === 0, missing };
 }
 
