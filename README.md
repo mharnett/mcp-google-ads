@@ -54,6 +54,8 @@ npm install
 npm run build
 ```
 
+**Security:** Never share your `.mcp.json` file or commit it to git -- it may contain API credentials. Add `.mcp.json` to your `.gitignore`.
+
 ### 3. Configure
 
 ```bash

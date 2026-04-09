@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.0.13] - 2026-04-04
+
+### Security
+- Error responses now pass through `safeResponse` to prevent oversized error payloads
+- `safeResponse` deep-clones before truncation to avoid mutating original data
+
+### Fixed
+- Budget unit documentation clarified (dollars, not microcurrency) in tool descriptions
+
 ## [1.0.9] - 2026-04-09
 
 ### Added
