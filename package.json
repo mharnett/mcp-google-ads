@@ -1,7 +1,7 @@
 {
   "name": "mcp-google-ads",
   "mcpName": "io.github.mharnett/google-ads",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "description": "MCP server for Google Ads API with MCC support, 35 tools for campaign management, reporting, and optimization. Safe by default — all changes created PAUSED.",
   "main": "dist/index.js",
   "bin": {
@@ -53,7 +53,7 @@
   },
   "homepage": "https://github.com/mharnett/mcp-google-ads#readme",
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=18.18.0"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.24.0",
