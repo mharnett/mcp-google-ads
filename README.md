@@ -1,6 +1,6 @@
 # MCP Google Ads Server
 
-An MCP (Model Context Protocol) server for the Google Ads API with built-in safeguards for review before changes go live. Production-proven with MCC (Manager Account) support, 35 tools for campaign management, reporting, and optimization.
+An MCP (Model Context Protocol) server for the Google Ads API with built-in safeguards for review before changes go live. Production-proven with MCC (Manager Account) support, 34 tools for campaign management, reporting, and optimization.
 
 ## Features
 
@@ -133,7 +133,7 @@ Restart Claude Code.
 5. Claude enables (requires your approval prompt)
 ```
 
-### Available Tools (35)
+### Available Tools (34)
 
 #### Context & Discovery
 | Tool | Description |
