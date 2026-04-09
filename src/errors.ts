@@ -14,7 +14,7 @@ export class GoogleAdsRateLimitError extends Error {
     public readonly retryAfterMs: number,
     cause?: unknown,
   ) {
-    super(`Rate limited, retry after ${retryAfterMs}ms`);
+    super(`Google Ads rate limited, retry after ${retryAfterMs}ms`);
     this.name = "GoogleAdsRateLimitError";
     this.cause = cause;
   }
@@ -98,7 +98,7 @@ export function classifyError(error: any): Error {
     code?.authorization_error
   ) {
     return new GoogleAdsAuthError(
-      `Auth failed: ${message}. Check your refresh token and OAuth credentials.`,
+      `Google Ads auth failed: ${message}. Check your refresh token and OAuth credentials.`,
       error,
     );
   }
