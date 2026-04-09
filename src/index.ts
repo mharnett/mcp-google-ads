@@ -31,7 +31,8 @@ try {
 
 // Version safety: warn if running a deprecated or dangerously old version
 const __minimumSafeVersion = "1.0.5"; // minimum version with GAQL sanitization
-if (__cliPkg.version < __minimumSafeVersion) {
+const __semverLt = (a: string, b: string) => { const pa = a.split(".").map(Number), pb = b.split(".").map(Number); for (let i = 0; i < 3; i++) { if ((pa[i] || 0) < (pb[i] || 0)) return true; if ((pa[i] || 0) > (pb[i] || 0)) return false; } return false; };
+if (__semverLt(__cliPkg.version, __minimumSafeVersion)) {
   console.error(`[WARNING] Running deprecated version ${__cliPkg.version}. Minimum safe version is ${__minimumSafeVersion}. Please upgrade.`);
 }
 
@@ -995,13 +996,13 @@ class GoogleAdsManager {
     `;
 
     if (options.keywordTextContains) {
-      query += ` AND ad_group_criterion.keyword.text LIKE '%${options.keywordTextContains}%'`;
+      query += ` AND ad_group_criterion.keyword.text LIKE '%${escapeGaqlString(options.keywordTextContains)}%'`;
     }
     if (options.campaignIds && options.campaignIds.length > 0) {
       query += ` AND campaign.id IN (${options.campaignIds.map(sanitizeNumericId).join(",")})`;
     }
     if (options.adGroupIds && options.adGroupIds.length > 0) {
-      query += ` AND ad_group.id IN (${options.adGroupIds.join(",")})`;
+      query += ` AND ad_group.id IN (${options.adGroupIds.map(sanitizeNumericId).join(",")})`;
     }
 
     query += ` ORDER BY metrics.cost_micros DESC`;
@@ -1046,13 +1047,13 @@ class GoogleAdsManager {
     `;
 
     if (options.keywordTextContains) {
-      query += ` AND ad_group_criterion.keyword.text LIKE '%${options.keywordTextContains}%'`;
+      query += ` AND ad_group_criterion.keyword.text LIKE '%${escapeGaqlString(options.keywordTextContains)}%'`;
     }
     if (options.campaignIds && options.campaignIds.length > 0) {
       query += ` AND campaign.id IN (${options.campaignIds.map(sanitizeNumericId).join(",")})`;
     }
     if (options.adGroupIds && options.adGroupIds.length > 0) {
-      query += ` AND ad_group.id IN (${options.adGroupIds.join(",")})`;
+      query += ` AND ad_group.id IN (${options.adGroupIds.map(sanitizeNumericId).join(",")})`;
     }
 
     query += ` ORDER BY ad_group_criterion.keyword.text, segments.conversion_action_name`;
@@ -1095,13 +1096,13 @@ class GoogleAdsManager {
       WHERE segments.date BETWEEN '${options.startDate}' AND '${options.endDate}'
     `;
     if (options.searchTermContains) {
-      query += ` AND search_term_view.search_term LIKE '%${options.searchTermContains}%'`;
+      query += ` AND search_term_view.search_term LIKE '%${escapeGaqlString(options.searchTermContains)}%'`;
     }
     if (options.campaignIds && options.campaignIds.length > 0) {
       query += ` AND campaign.id IN (${options.campaignIds.map(sanitizeNumericId).join(",")})`;
     }
     if (options.adGroupIds && options.adGroupIds.length > 0) {
-      query += ` AND ad_group.id IN (${options.adGroupIds.join(",")})`;
+      query += ` AND ad_group.id IN (${options.adGroupIds.map(sanitizeNumericId).join(",")})`;
     }
 
     query += ` ORDER BY metrics.impressions DESC`;
@@ -1143,13 +1144,13 @@ class GoogleAdsManager {
     `;
 
     if (options.searchTermContains) {
-      query += ` AND search_term_view.search_term LIKE '%${options.searchTermContains}%'`;
+      query += ` AND search_term_view.search_term LIKE '%${escapeGaqlString(options.searchTermContains)}%'`;
     }
     if (options.campaignIds && options.campaignIds.length > 0) {
       query += ` AND campaign.id IN (${options.campaignIds.map(sanitizeNumericId).join(",")})`;
     }
     if (options.adGroupIds && options.adGroupIds.length > 0) {
-      query += ` AND ad_group.id IN (${options.adGroupIds.join(",")})`;
+      query += ` AND ad_group.id IN (${options.adGroupIds.map(sanitizeNumericId).join(",")})`;
     }
 
     query += ` ORDER BY search_term_view.search_term, segments.conversion_action_name`;
@@ -1204,7 +1205,7 @@ class GoogleAdsManager {
       query += ` AND campaign.id IN (${options.campaignIds.map(sanitizeNumericId).join(",")})`;
     }
     if (options.adGroupIds && options.adGroupIds.length > 0) {
-      query += ` AND ad_group.id IN (${options.adGroupIds.join(",")})`;
+      query += ` AND ad_group.id IN (${options.adGroupIds.map(sanitizeNumericId).join(",")})`;
     }
 
     query += ` ORDER BY metrics.impressions DESC`;
@@ -1257,7 +1258,7 @@ class GoogleAdsManager {
       query += ` AND campaign.id IN (${options.campaignIds.map(sanitizeNumericId).join(",")})`;
     }
     if (options.adGroupIds && options.adGroupIds.length > 0) {
-      query += ` AND ad_group.id IN (${options.adGroupIds.join(",")})`;
+      query += ` AND ad_group.id IN (${options.adGroupIds.map(sanitizeNumericId).join(",")})`;
     }
 
     query += ` ORDER BY ad_group_ad.ad.id, segments.conversion_action_name`;
