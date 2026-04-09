@@ -45,6 +45,12 @@ if (process.argv.includes("--version") || process.argv.includes("-v")) {
 }
 
 // ============================================
+// ENV VAR TRIMMING
+// ============================================
+
+const envTrimmed = (key: string): string => (process.env[key] || "").trim().replace(/^["']|["']$/g, "");
+
+// ============================================
 // CONFIGURATION
 // ============================================
 
@@ -77,12 +83,12 @@ function loadConfig(): Config {
   }
 
   // Fall back to env vars (single-client mode)
-  const clientId = process.env.GOOGLE_ADS_CLIENT_ID;
-  const clientSecret = process.env.GOOGLE_ADS_CLIENT_SECRET;
-  const developerToken = process.env.GOOGLE_ADS_DEVELOPER_TOKEN;
-  const refreshToken = process.env.GOOGLE_ADS_REFRESH_TOKEN;
-  const customerId = process.env.GOOGLE_ADS_CUSTOMER_ID;
-  const mccId = process.env.GOOGLE_ADS_MCC_CUSTOMER_ID;
+  const clientId = envTrimmed("GOOGLE_ADS_CLIENT_ID");
+  const clientSecret = envTrimmed("GOOGLE_ADS_CLIENT_SECRET");
+  const developerToken = envTrimmed("GOOGLE_ADS_DEVELOPER_TOKEN");
+  const refreshToken = envTrimmed("GOOGLE_ADS_REFRESH_TOKEN");
+  const customerId = envTrimmed("GOOGLE_ADS_CUSTOMER_ID");
+  const mccId = envTrimmed("GOOGLE_ADS_MCC_CUSTOMER_ID");
 
   if (!clientId || !clientSecret || !developerToken || !refreshToken) {
     throw new Error(
@@ -171,11 +177,11 @@ class GoogleAdsManager {
     }
     logger.info("Credentials validated: all required env vars present");
 
-    this.defaultRefreshToken = process.env.GOOGLE_ADS_REFRESH_TOKEN!;
+    this.defaultRefreshToken = envTrimmed("GOOGLE_ADS_REFRESH_TOKEN");
     this.api = new GoogleAdsApi({
-      client_id: process.env.GOOGLE_ADS_CLIENT_ID!,
-      client_secret: process.env.GOOGLE_ADS_CLIENT_SECRET!,
-      developer_token: process.env.GOOGLE_ADS_DEVELOPER_TOKEN!,
+      client_id: envTrimmed("GOOGLE_ADS_CLIENT_ID"),
+      client_secret: envTrimmed("GOOGLE_ADS_CLIENT_SECRET"),
+      developer_token: envTrimmed("GOOGLE_ADS_DEVELOPER_TOKEN"),
     });
   }
 
@@ -2267,6 +2273,10 @@ process.on("SIGINT", () => {
 
 process.on("SIGPIPE", () => {
   // Client disconnected -- expected during shutdown
+});
+
+process.on("unhandledRejection", (reason) => {
+  console.error("[error] Unhandled promise rejection:", reason);
 });
 
 main().catch((err) => logger.error({ error: err.message, stack: err.stack }, "Fatal startup error"));
