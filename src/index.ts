@@ -121,6 +121,20 @@ function getClientFromWorkingDir(config: Config, cwd: string): ClientConfig | nu
 }
 
 // ============================================
+// GAQL SANITIZATION
+// ============================================
+
+/** Strip non-numeric characters from IDs used in GAQL WHERE clauses. */
+function sanitizeNumericId(id: string): string {
+  return id.replace(/[^0-9]/g, "");
+}
+
+/** Escape single quotes in strings used in GAQL WHERE clauses. */
+function escapeGaqlString(s: string): string {
+  return s.replace(/'/g, "\\'");
+}
+
+// ============================================
 // TYPED ERRORS & VALIDATION (extracted to errors.ts)
 // ============================================
 
@@ -265,7 +279,7 @@ class GoogleAdsManager {
       WHERE ad_group.status != 'REMOVED'
     `;
     if (campaignId) {
-      query += ` AND campaign.id = ${campaignId}`;
+      query += ` AND campaign.id = ${sanitizeNumericId(campaignId)}`;
     }
     query += ` ORDER BY campaign.name, ad_group.name`;
     const result = await withResilience(() => customer.query(query), "listAdGroups");
@@ -292,7 +306,7 @@ class GoogleAdsManager {
       WHERE ad_group_ad.status != 'REMOVED'
     `;
     if (options.campaignId) {
-      query += ` AND campaign.id = ${options.campaignId}`;
+      query += ` AND campaign.id = ${sanitizeNumericId(options.campaignId)}`;
     }
     if (options.adGroupId) {
       query += ` AND ad_group.id = ${options.adGroupId}`;
@@ -391,7 +405,7 @@ class GoogleAdsManager {
       () => customer.query(`
         SELECT label.resource_name, label.name
         FROM label
-        WHERE label.name = '${labelName}'
+        WHERE label.name = '${escapeGaqlString(labelName)}'
           AND label.status = 'ENABLED'
       `),
       "ensureLabelExists.query"
@@ -407,7 +421,7 @@ class GoogleAdsManager {
       // Race condition: re-query
       const requery = await withResilience(
         () => customer.query(`
-          SELECT label.resource_name FROM label WHERE label.name = '${labelName}' AND label.status = 'ENABLED'
+          SELECT label.resource_name FROM label WHERE label.name = '${escapeGaqlString(labelName)}' AND label.status = 'ENABLED'
         `),
         "ensureLabelExists.requery"
       );
@@ -960,7 +974,7 @@ class GoogleAdsManager {
       query += ` AND ad_group_criterion.keyword.text LIKE '%${options.keywordTextContains}%'`;
     }
     if (options.campaignIds && options.campaignIds.length > 0) {
-      query += ` AND campaign.id IN (${options.campaignIds.join(",")})`;
+      query += ` AND campaign.id IN (${options.campaignIds.map(sanitizeNumericId).join(",")})`;
     }
     if (options.adGroupIds && options.adGroupIds.length > 0) {
       query += ` AND ad_group.id IN (${options.adGroupIds.join(",")})`;
@@ -1011,7 +1025,7 @@ class GoogleAdsManager {
       query += ` AND ad_group_criterion.keyword.text LIKE '%${options.keywordTextContains}%'`;
     }
     if (options.campaignIds && options.campaignIds.length > 0) {
-      query += ` AND campaign.id IN (${options.campaignIds.join(",")})`;
+      query += ` AND campaign.id IN (${options.campaignIds.map(sanitizeNumericId).join(",")})`;
     }
     if (options.adGroupIds && options.adGroupIds.length > 0) {
       query += ` AND ad_group.id IN (${options.adGroupIds.join(",")})`;
@@ -1060,7 +1074,7 @@ class GoogleAdsManager {
       query += ` AND search_term_view.search_term LIKE '%${options.searchTermContains}%'`;
     }
     if (options.campaignIds && options.campaignIds.length > 0) {
-      query += ` AND campaign.id IN (${options.campaignIds.join(",")})`;
+      query += ` AND campaign.id IN (${options.campaignIds.map(sanitizeNumericId).join(",")})`;
     }
     if (options.adGroupIds && options.adGroupIds.length > 0) {
       query += ` AND ad_group.id IN (${options.adGroupIds.join(",")})`;
@@ -1108,7 +1122,7 @@ class GoogleAdsManager {
       query += ` AND search_term_view.search_term LIKE '%${options.searchTermContains}%'`;
     }
     if (options.campaignIds && options.campaignIds.length > 0) {
-      query += ` AND campaign.id IN (${options.campaignIds.join(",")})`;
+      query += ` AND campaign.id IN (${options.campaignIds.map(sanitizeNumericId).join(",")})`;
     }
     if (options.adGroupIds && options.adGroupIds.length > 0) {
       query += ` AND ad_group.id IN (${options.adGroupIds.join(",")})`;
@@ -1163,7 +1177,7 @@ class GoogleAdsManager {
     `;
 
     if (options.campaignIds && options.campaignIds.length > 0) {
-      query += ` AND campaign.id IN (${options.campaignIds.join(",")})`;
+      query += ` AND campaign.id IN (${options.campaignIds.map(sanitizeNumericId).join(",")})`;
     }
     if (options.adGroupIds && options.adGroupIds.length > 0) {
       query += ` AND ad_group.id IN (${options.adGroupIds.join(",")})`;
@@ -1216,7 +1230,7 @@ class GoogleAdsManager {
     `;
 
     if (options.campaignIds && options.campaignIds.length > 0) {
-      query += ` AND campaign.id IN (${options.campaignIds.join(",")})`;
+      query += ` AND campaign.id IN (${options.campaignIds.map(sanitizeNumericId).join(",")})`;
     }
     if (options.adGroupIds && options.adGroupIds.length > 0) {
       query += ` AND ad_group.id IN (${options.adGroupIds.join(",")})`;
