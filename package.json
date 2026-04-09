@@ -1,7 +1,7 @@
 {
   "name": "mcp-google-ads",
   "mcpName": "io.github.mharnett/google-ads",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "MCP server for Google Ads API with MCC support, 35 tools for campaign management, reporting, and optimization. Safe by default — all changes created PAUSED.",
   "main": "dist/index.js",
   "bin": {
