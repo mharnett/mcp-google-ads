@@ -12,6 +12,7 @@ import {
   Tool,
 } from "@modelcontextprotocol/sdk/types.js";
 import { tools } from "./tools.js";
+import { validateRsa } from "./validateRsa.js";
 import { GoogleAdsApi, enums, resources, MutateOperation } from "google-ads-api";
 import { readFileSync, existsSync } from "fs";
 import { z } from "zod";
@@ -706,8 +707,10 @@ class GoogleAdsManager {
     final_urls: string[];
     headlines: Array<string | { text: string; pinned_position?: number }>; // max 15
     descriptions: Array<string | { text: string; pinned_position?: number }>; // max 4
-    path1?: string;
-    path2?: string;
+    path1: string;
+    path2: string;
+    /** Additional labels to attach beyond the auto-applied claude-YYYY-MM-DD. */
+    labels?: string[];
   }) {
     const customer = this.getCustomer(customerId);
 
@@ -719,35 +722,21 @@ class GoogleAdsManager {
       typeof d === "string" ? { text: d } : d
     );
 
-    // Validate
-    if (normalizedHeadlines.length < 3 || normalizedHeadlines.length > 15) {
-      throw new Error("RSA requires 3-15 headlines");
-    }
-    if (normalizedDescriptions.length < 2 || normalizedDescriptions.length > 4) {
-      throw new Error("RSA requires 2-4 descriptions");
-    }
-
-    // Check headline lengths
-    for (const h of normalizedHeadlines) {
-      if (h.text.length > 30) {
-        throw new Error(`Headline too long (${h.text.length} chars, max 30): "${h.text}"`);
-      }
-    }
-    // Check description lengths (account for customizer tokens that render shorter)
-    const CUSTOMIZER_RE = /\{CUSTOMIZER\.[^}]+\}/g;
-    const CUSTOMIZER_RENDER = 16;
-    for (const d of normalizedDescriptions) {
-      let effectiveLen = d.text.length;
-      const matches = d.text.match(CUSTOMIZER_RE);
-      if (matches) {
-        for (const m of matches) {
-          effectiveLen -= m.length;
-          effectiveLen += CUSTOMIZER_RENDER;
-        }
-      }
-      if (effectiveLen > 90) {
-        throw new Error(`Description too long (${effectiveLen} chars, max 90): "${d.text}"`);
-      }
+    // Run the same lint rules the google_ads_validate_ad tool enforces.
+    // The auto-label satisfies the ≥1 label requirement, so we pass a
+    // synthetic label through to the validator (additional caller-supplied
+    // labels in ad.labels are tacked on after creation alongside the
+    // auto-date label).
+    const validation = validateRsa({
+      headlines: normalizedHeadlines.map(h => h.text),
+      descriptions: normalizedDescriptions.map(d => d.text),
+      final_urls: ad.final_urls,
+      path1: ad.path1,
+      path2: ad.path2,
+      labels: ["__auto_claude_label__", ...(ad.labels ?? [])],
+    });
+    if (!validation.valid) {
+      throw new Error("RSA validation failed:\n" + validation.errors.join("\n"));
     }
 
     // Map pinned_position to ServedAssetFieldType enum values
@@ -1387,62 +1376,19 @@ class GoogleAdsManager {
   }
 
   // Validate an ad without creating it
-  async validateAd(customerId: string, ad: {
+  async validateAd(_customerId: string, ad: {
     headlines: string[];
     descriptions: string[];
     final_urls: string[];
+    path1?: string;
+    path2?: string;
+    labels?: string[];
   }) {
-    const errors: string[] = [];
-
-    // Check headline count
-    if (ad.headlines.length < 3) {
-      errors.push(`Need at least 3 headlines, got ${ad.headlines.length}`);
-    }
-    if (ad.headlines.length > 15) {
-      errors.push(`Maximum 15 headlines, got ${ad.headlines.length}`);
-    }
-
-    // Check description count
-    if (ad.descriptions.length < 2) {
-      errors.push(`Need at least 2 descriptions, got ${ad.descriptions.length}`);
-    }
-    if (ad.descriptions.length > 4) {
-      errors.push(`Maximum 4 descriptions, got ${ad.descriptions.length}`);
-    }
-
-    // Check headline lengths
-    ad.headlines.forEach((h, i) => {
-      if (h.length > 30) {
-        errors.push(`Headline ${i + 1} too long (${h.length}/30): "${h}"`);
-      }
-    });
-
-    // Check description lengths (account for customizer tokens that render shorter)
-    const CUSTOMIZER_PATTERN = /\{CUSTOMIZER\.[^}]+\}/g;
-    const CUSTOMIZER_RENDER_LEN = 16; // conservative estimate of rendered length
-    ad.descriptions.forEach((d, i) => {
-      let effectiveLen = d.length;
-      const matches = d.match(CUSTOMIZER_PATTERN);
-      if (matches) {
-        for (const m of matches) {
-          effectiveLen -= m.length;
-          effectiveLen += CUSTOMIZER_RENDER_LEN;
-        }
-      }
-      if (effectiveLen > 90) {
-        errors.push(`Description ${i + 1} too long (${effectiveLen}/90): "${d}"`);
-      }
-    });
-
-    // Check final URLs
-    if (ad.final_urls.length === 0) {
-      errors.push("At least one final URL is required");
-    }
-
-    return {
-      valid: errors.length === 0,
-      errors,
-    };
+    // Delegates to the pure validateRsa() function so the logic can be
+    // unit-tested without instantiating the full manager. Enforces path1,
+    // path2, and at least 1 label in addition to the headline/description/
+    // final_url rules that were already in place.
+    return validateRsa(ad);
   }
 
   // Get search term category insights for a campaign (with trend comparison)
@@ -1715,6 +1661,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           headlines: args?.headlines as string[],
           descriptions: args?.descriptions as string[],
           final_urls: args?.final_urls as string[],
+          path1: args?.path1 as string | undefined,
+          path2: args?.path2 as string | undefined,
+          labels: args?.labels as string[] | undefined,
         });
         return {
           content: [{
@@ -1788,12 +1737,19 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const rawDescriptions = args?.descriptions as Array<string | { text: string; pinned_position?: number }>;
         const headlineTexts = rawHeadlines.map(h => typeof h === "string" ? h : h.text);
         const descriptionTexts = rawDescriptions.map(d => typeof d === "string" ? d : d.text);
+        const extraLabels = (args?.labels as string[] | undefined) ?? [];
 
-        // Validate first
+        // Validate first (the create path also runs validateRsa, but we
+        // validate here too so the tool returns a clean error rather than
+        // throwing). The auto-applied claude-YYYY-MM-DD label satisfies the
+        // ≥1 label requirement; any extraLabels are bonus.
         const validation = await adsManager.validateAd(customerId, {
           headlines: headlineTexts,
           descriptions: descriptionTexts,
           final_urls: args?.final_urls as string[],
+          path1: args?.path1 as string | undefined,
+          path2: args?.path2 as string | undefined,
+          labels: ["__auto_claude_label__", ...extraLabels],
         });
 
         if (!validation.valid) {
@@ -1816,6 +1772,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           descriptions: rawDescriptions,
           path1: args?.path1 as string,
           path2: args?.path2 as string,
+          labels: extraLabels,
         });
 
         return {
