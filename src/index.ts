@@ -474,6 +474,82 @@ class GoogleAdsManager {
     return result;
   }
 
+  // Apply a label to campaigns
+  async labelCampaigns(customerId: string, campaignResourceNames: string[], labelResourceName: string) {
+    const customer = this.getCustomer(customerId);
+    const operations = campaignResourceNames.map(rn => ({ campaign: rn, label: labelResourceName }));
+    return withResilience(() => customer.campaignLabels.create(operations), "labelCampaigns");
+  }
+
+  // Apply a label to ad groups
+  async labelAdGroups(customerId: string, adGroupResourceNames: string[], labelResourceName: string) {
+    const customer = this.getCustomer(customerId);
+    const operations = adGroupResourceNames.map(rn => ({ ad_group: rn, label: labelResourceName }));
+    return withResilience(() => customer.adGroupLabels.create(operations), "labelAdGroups");
+  }
+
+  // Apply a label to ads (ad_group_ad level)
+  async labelAdGroupAds(customerId: string, adGroupAdResourceNames: string[], labelResourceName: string) {
+    const customer = this.getCustomer(customerId);
+    const operations = adGroupAdResourceNames.map(rn => ({ ad_group_ad: rn, label: labelResourceName }));
+    return withResilience(() => customer.adGroupAdLabels.create(operations), "labelAdGroupAds");
+  }
+
+  // Today's audit label in Claude-MM-DD-YY format (GLOBAL rule: every Claude-created asset gets this)
+  private todayClaudeLabel(): string {
+    const now = new Date();
+    const mm = String(now.getMonth() + 1).padStart(2, "0");
+    const dd = String(now.getDate()).padStart(2, "0");
+    const yy = String(now.getFullYear()).slice(-2);
+    return `Claude-${mm}-${dd}-${yy}`;
+  }
+
+  // Apply today's Claude-MM-DD-YY label to newly created assets.
+  // Best-effort: log and swallow errors so creation never fails because of labeling.
+  // `assetType` selects which *Labels endpoint to hit.
+  private async autoLabelCreated(
+    customerId: string,
+    resourceNames: string[],
+    assetType: "campaign" | "ad_group" | "ad" | "keyword" | "shared_set"
+  ): Promise<string | null> {
+    if (!resourceNames?.length) return null;
+    const labelName = this.todayClaudeLabel();
+    try {
+      const labelRN = await this.ensureLabelExists(customerId, labelName);
+      switch (assetType) {
+        case "campaign":
+          await this.labelCampaigns(customerId, resourceNames, labelRN);
+          break;
+        case "ad_group":
+          await this.labelAdGroups(customerId, resourceNames, labelRN);
+          break;
+        case "ad":
+          await this.labelAdGroupAds(customerId, resourceNames, labelRN);
+          break;
+        case "keyword":
+          await this.labelAdGroupCriteria(customerId, resourceNames, labelRN);
+          break;
+        case "shared_set": {
+          // No campaign/ad_group/ad_group_ad equivalent exists for shared_set in all API versions.
+          // Attempt via customer.sharedSetLabels if available; otherwise log and skip.
+          const customer = this.getCustomer(customerId);
+          const sharedSetLabels = (customer as any).sharedSetLabels;
+          if (sharedSetLabels?.create) {
+            const ops = resourceNames.map(rn => ({ shared_set: rn, label: labelRN }));
+            await withResilience(() => sharedSetLabels.create(ops), "labelSharedSets");
+          } else {
+            console.error(`[INFO] sharedSetLabels endpoint not available — skipping auto-label for shared set`);
+          }
+          break;
+        }
+      }
+      return labelName;
+    } catch (e: any) {
+      console.error(`[WARN] autoLabelCreated(${assetType}) failed for '${labelName}': ${e.message}`);
+      return null;
+    }
+  }
+
   // Update campaign budget — either in-place or by creating a new solo budget
   async updateCampaignBudget(customerId: string, campaignId: string, dailyBudgetDollars: number, createNewBudget: boolean = false) {
     const customer = this.getCustomer(customerId);
@@ -590,6 +666,10 @@ class GoogleAdsManager {
       "createCampaign"
     );
 
+    // GLOBAL rule: auto-apply Claude-MM-DD-YY label to the new campaign
+    const campaignRNs = ((campaignResult as any).results || []).map((r: any) => r.resource_name).filter(Boolean);
+    await this.autoLabelCreated(customerId, campaignRNs, "campaign");
+
     return campaignResult;
   }
 
@@ -612,6 +692,10 @@ class GoogleAdsManager {
         }]),
       "createAdGroup"
     );
+
+    // GLOBAL rule: auto-apply Claude-MM-DD-YY label to the new ad group
+    const adGroupRNs = ((result as any).results || []).map((r: any) => r.resource_name).filter(Boolean);
+    await this.autoLabelCreated(customerId, adGroupRNs, "ad_group");
 
     return result;
   }
@@ -698,6 +782,10 @@ class GoogleAdsManager {
       "createResponsiveSearchAd"
     );
 
+    // GLOBAL rule: auto-apply Claude-MM-DD-YY label to the new ad
+    const adRNs = ((result as any).results || []).map((r: any) => r.resource_name).filter(Boolean);
+    await this.autoLabelCreated(customerId, adRNs, "ad");
+
     return result;
   }
 
@@ -721,15 +809,18 @@ class GoogleAdsManager {
 
     const result = await withResilience(() => customer.adGroupCriteria.create(keywordCriteria), "createKeywords");
 
-    // Auto-label created keywords for discoverability
-    const labelName = keywords.label || `${this.config.defaults.label_prefix}pending`;
+    const criterionRNs = ((result as any).results || []).map((r: any) => r.resource_name).filter(Boolean);
+
+    // GLOBAL rule: always apply today's Claude-MM-DD-YY audit label
+    await this.autoLabelCreated(customerId, criterionRNs, "keyword");
+
+    // Optional user-supplied workflow label (e.g. claude:pending for discoverability)
+    const workflowLabel = keywords.label || `${this.config.defaults.label_prefix}pending`;
     try {
-      const labelRN = await this.ensureLabelExists(customerId, labelName);
-      const criterionRNs = (result as any).results.map((r: any) => r.resource_name);
+      const labelRN = await this.ensureLabelExists(customerId, workflowLabel);
       await this.labelAdGroupCriteria(customerId, criterionRNs, labelRN);
     } catch (e: any) {
-      // Labeling is best-effort — don't fail the keyword creation
-      console.error(`[WARN] Failed to label keywords with '${labelName}': ${e.message}`);
+      console.error(`[WARN] Failed to apply workflow label '${workflowLabel}' to keywords: ${e.message}`);
     }
 
     return result;
@@ -759,6 +850,11 @@ class GoogleAdsManager {
     };
 
     const result = await withResilience(() => customer.sharedSets.create([sharedSet]), "createSharedSet");
+
+    // GLOBAL rule: auto-apply Claude-MM-DD-YY label to the new shared set
+    const sharedSetRNs = ((result as any).results || []).map((r: any) => r.resource_name).filter(Boolean);
+    await this.autoLabelCreated(customerId, sharedSetRNs, "shared_set");
+
     return result;
   }
 
