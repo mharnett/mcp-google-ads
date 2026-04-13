@@ -1,11 +1,12 @@
 // ============================================
 // CREDENTIAL LOADING & PERSISTENCE
 // ============================================
-// Priority order for resolving credentials at runtime:
+// Priority order for resolving credentials at runtime (12-factor style —
+// explicit env overrides always win over implicit file storage):
 //
 //   1. config.json (existing multi-client deployments — unchanged for backwards compat)
-//   2. Per-user credentials file at env-paths config dir (written by mcp-google-ads-auth)
-//   3. GOOGLE_ADS_* env vars (legacy / dev override — still honored)
+//   2. GOOGLE_ADS_* env vars (explicit override — wins if set)
+//   3. Per-user credentials file at env-paths config dir (written by mcp-google-ads-auth)
 //   4. EMBEDDED_* constants (client_id, client_secret, developer_token only — from build-time injection)
 //
 // This ordering ensures:
@@ -110,25 +111,33 @@ export function writeStoredCredentials(
  * Throws a descriptive Error if any required value is missing after
  * walking the entire priority chain. The error message points users to
  * the correct action (run the auth helper vs. set env vars).
+ *
+ * The optional `credsFilePath` parameter exists so tests can point at a
+ * tmpdir instead of reading the real ~/Library credentials file, and so
+ * the MCP server's multi-client mode can read a different location.
  */
-export function resolveCredentials(): ResolvedCredentials {
+export function resolveCredentials(
+  credsFilePath: string = credentialsFilePath,
+): ResolvedCredentials {
   // Client ID / Secret / Dev Token: env override > embedded
   const client_id = envTrimmed("GOOGLE_ADS_CLIENT_ID") || EMBEDDED_CLIENT_ID;
   const client_secret = envTrimmed("GOOGLE_ADS_CLIENT_SECRET") || EMBEDDED_CLIENT_SECRET;
   const developer_token = envTrimmed("GOOGLE_ADS_DEVELOPER_TOKEN") || EMBEDDED_DEVELOPER_TOKEN;
 
-  // Refresh token + Customer ID: file > env
-  const stored = readStoredCredentials();
+  // Refresh token / Customer ID: env override > file
+  // Explicit env vars always win so a developer can point at a different
+  // account without needing to re-run the auth CLI.
+  const stored = readStoredCredentials(credsFilePath);
   const envRefresh = envTrimmed("GOOGLE_ADS_REFRESH_TOKEN");
   const envCustomer = envTrimmed("GOOGLE_ADS_CUSTOMER_ID");
   const envMcc = envTrimmed("GOOGLE_ADS_MCC_CUSTOMER_ID");
 
-  const refresh_token = stored?.refresh_token || envRefresh;
-  const customer_id = stored?.customer_id || envCustomer;
-  const mcc_customer_id = stored?.mcc_customer_id || envMcc || "";
+  const refresh_token = envRefresh || stored?.refresh_token || "";
+  const customer_id = envCustomer || stored?.customer_id || "";
+  const mcc_customer_id = envMcc || stored?.mcc_customer_id || "";
 
   const source: ResolvedCredentials["source"] =
-    stored && envRefresh ? "mixed" : stored ? "file" : "env";
+    envRefresh && stored ? "mixed" : envRefresh ? "env" : stored ? "file" : "env";
 
   const missing: string[] = [];
   if (!client_id) missing.push("client_id");

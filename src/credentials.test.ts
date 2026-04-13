@@ -130,19 +130,23 @@ describe("readStoredCredentials / writeStoredCredentials", () => {
 // ============================================
 
 describe("resolveCredentials priority chain", () => {
+  // Each test passes a fresh tmp path so none of them accidentally resolve
+  // from the real ~/Library credentials file the auth CLI writes at runtime.
+  const freshPath = () => path.join(tmpDir, `creds-${Math.random().toString(36).slice(2)}.json`);
+
   it("throws with a helpful message when nothing is configured", () => {
-    // No env vars set, no file, no embedded (empty string in tests)
-    expect(() => resolveCredentials()).toThrow(/Missing Google Ads credentials/);
-    expect(() => resolveCredentials()).toThrow(/npx mcp-google-ads-auth/);
+    const p = freshPath();
+    expect(() => resolveCredentials(p)).toThrow(/Missing Google Ads credentials/);
+    expect(() => resolveCredentials(p)).toThrow(/npx mcp-google-ads-auth/);
   });
 
-  it("resolves from env vars when all are present", () => {
+  it("resolves from env vars when all are present (no file)", () => {
     process.env.GOOGLE_ADS_CLIENT_ID = "x".repeat(30);
     process.env.GOOGLE_ADS_CLIENT_SECRET = "x".repeat(30);
     process.env.GOOGLE_ADS_DEVELOPER_TOKEN = "x".repeat(30);
     process.env.GOOGLE_ADS_REFRESH_TOKEN = "x".repeat(30);
     process.env.GOOGLE_ADS_CUSTOMER_ID = "1234567890";
-    const resolved = resolveCredentials();
+    const resolved = resolveCredentials(freshPath());
     expect(resolved.source).toBe("env");
     expect(resolved.customer_id).toBe("1234567890");
   });
@@ -153,7 +157,7 @@ describe("resolveCredentials priority chain", () => {
     process.env.GOOGLE_ADS_DEVELOPER_TOKEN = "x".repeat(30);
     process.env.GOOGLE_ADS_REFRESH_TOKEN = "x".repeat(30);
     process.env.GOOGLE_ADS_CUSTOMER_ID = "1234567890";
-    const resolved = resolveCredentials();
+    const resolved = resolveCredentials(freshPath());
     expect(resolved.client_id).toBe("x".repeat(30));
   });
 
@@ -163,23 +167,69 @@ describe("resolveCredentials priority chain", () => {
     process.env.GOOGLE_ADS_DEVELOPER_TOKEN = "x".repeat(30);
     process.env.GOOGLE_ADS_REFRESH_TOKEN = "x".repeat(30);
     process.env.GOOGLE_ADS_CUSTOMER_ID = "374-196-1572";
-    const resolved = resolveCredentials();
+    const resolved = resolveCredentials(freshPath());
     expect(resolved.customer_id).toBe("374-196-1572");
     const validated = validateResolvedCredentials(resolved);
     expect(validated.valid).toBe(true);
   });
 
-  it("includes 'missing credentials' message when fields are partially set", () => {
+  it("throws when only client_id is set and nothing else fills in", () => {
     process.env.GOOGLE_ADS_CLIENT_ID = "x".repeat(30);
-    // Leave the rest unset
+    // No other env vars, fresh tmp file => no stored fallback
     try {
-      resolveCredentials();
+      resolveCredentials(freshPath());
       throw new Error("Expected resolveCredentials to throw");
     } catch (err) {
       const msg = (err as Error).message;
       expect(msg).toMatch(/refresh_token/);
       expect(msg).toMatch(/customer_id/);
     }
+  });
+
+  it("falls back to stored file when env vars are absent", () => {
+    process.env.GOOGLE_ADS_CLIENT_ID = "x".repeat(30);
+    process.env.GOOGLE_ADS_CLIENT_SECRET = "x".repeat(30);
+    process.env.GOOGLE_ADS_DEVELOPER_TOKEN = "x".repeat(30);
+    // NO GOOGLE_ADS_REFRESH_TOKEN / CUSTOMER_ID — should fall through to file
+    const filePath = freshPath();
+    writeStoredCredentials(
+      {
+        version: CREDENTIALS_FILE_VERSION,
+        refresh_token: "y".repeat(30),
+        customer_id: "9876543210",
+        customer_name: "From File",
+        obtained_at: new Date().toISOString(),
+        scopes: ["https://www.googleapis.com/auth/adwords"],
+      },
+      filePath,
+    );
+    const resolved = resolveCredentials(filePath);
+    expect(resolved.source).toBe("file");
+    expect(resolved.customer_id).toBe("9876543210");
+    expect(resolved.refresh_token).toBe("y".repeat(30));
+  });
+
+  it("env var overrides file (explicit wins over implicit)", () => {
+    process.env.GOOGLE_ADS_CLIENT_ID = "x".repeat(30);
+    process.env.GOOGLE_ADS_CLIENT_SECRET = "x".repeat(30);
+    process.env.GOOGLE_ADS_DEVELOPER_TOKEN = "x".repeat(30);
+    process.env.GOOGLE_ADS_REFRESH_TOKEN = "env-token".padEnd(30, "x");
+    process.env.GOOGLE_ADS_CUSTOMER_ID = "1111111111";
+    const filePath = freshPath();
+    writeStoredCredentials(
+      {
+        version: CREDENTIALS_FILE_VERSION,
+        refresh_token: "file-token".padEnd(30, "y"),
+        customer_id: "9999999999",
+        obtained_at: new Date().toISOString(),
+        scopes: ["https://www.googleapis.com/auth/adwords"],
+      },
+      filePath,
+    );
+    const resolved = resolveCredentials(filePath);
+    expect(resolved.customer_id).toBe("1111111111");
+    expect(resolved.refresh_token).toBe("env-token".padEnd(30, "x"));
+    expect(resolved.source).toBe("mixed");
   });
 });
 
