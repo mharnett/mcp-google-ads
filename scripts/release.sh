@@ -69,7 +69,9 @@ if [[ "${DRY_RUN}" == "1" ]]; then
   exit 0
 fi
 
-echo "==> Publishing to npm (public, with provenance)..."
-npm publish --access public --provenance
+echo "==> Publishing to npm (public)..."
+# --provenance only works from CI providers with OIDC (e.g. GitHub Actions).
+# Local Mac publishes can't generate provenance; omit the flag to succeed.
+npm publish --access public
 
 echo "✅ Published."
