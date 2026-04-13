@@ -33,11 +33,36 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
 
       - run: npm ci
+
+      # Fail fast if embedded secrets are missing. Without this guard, the build
+      # would silently succeed and publish an empty-secrets package to npm —
+      # every end-user's `npx mcp-google-ads-auth` would then error with "set
+      # GOOGLE_ADS_CLIENT_ID in your environment", breaking the install flow.
+      #
+      # Canonical publish path is scripts/release.sh running locally on Mac with
+      # Keychain-sourced secrets. This CI workflow is a fallback only; configure
+      # secrets in repo settings (Settings > Secrets and variables > Actions)
+      # before triggering a Release-based publish.
+      - name: Verify embedded secrets are configured
+        env:
+          EMBEDDED_CLIENT_ID: ${{ secrets.EMBEDDED_CLIENT_ID }}
+          EMBEDDED_CLIENT_SECRET: ${{ secrets.EMBEDDED_CLIENT_SECRET }}
+          EMBEDDED_DEVELOPER_TOKEN: ${{ secrets.EMBEDDED_DEVELOPER_TOKEN }}
+        run: |
+          missing=()
+          [ -z "$EMBEDDED_CLIENT_ID" ] && missing+=("EMBEDDED_CLIENT_ID")
+          [ -z "$EMBEDDED_CLIENT_SECRET" ] && missing+=("EMBEDDED_CLIENT_SECRET")
+          [ -z "$EMBEDDED_DEVELOPER_TOKEN" ] && missing+=("EMBEDDED_DEVELOPER_TOKEN")
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Cannot publish: missing GitHub repo secrets: ${missing[*]}"
+            echo "Either add these secrets under Settings > Secrets and variables > Actions,"
+            echo "or publish locally via scripts/release.sh instead of through this workflow."
+            exit 1
+          fi
+          echo "All embedded secrets present."
+
       - name: Build with embedded OAuth credentials
         # scripts/build.mjs reads EMBEDDED_* from env at build time via esbuild --define.
-        # These are GitHub Actions secrets, set in the repo settings. When absent,
-        # the build still succeeds but prints a warning and the published package
-        # falls back to requiring users to set GOOGLE_ADS_* env vars themselves.
         run: npm run build
         env:
           EMBEDDED_CLIENT_ID: ${{ secrets.EMBEDDED_CLIENT_ID }}
