@@ -33,7 +33,16 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
 
       - run: npm ci
-      - run: npm run build
+      - name: Build with embedded OAuth credentials
+        # scripts/build.mjs reads EMBEDDED_* from env at build time via esbuild --define.
+        # These are GitHub Actions secrets, set in the repo settings. When absent,
+        # the build still succeeds but prints a warning and the published package
+        # falls back to requiring users to set GOOGLE_ADS_* env vars themselves.
+        run: npm run build
+        env:
+          EMBEDDED_CLIENT_ID: ${{ secrets.EMBEDDED_CLIENT_ID }}
+          EMBEDDED_CLIENT_SECRET: ${{ secrets.EMBEDDED_CLIENT_SECRET }}
+          EMBEDDED_DEVELOPER_TOKEN: ${{ secrets.EMBEDDED_DEVELOPER_TOKEN }}
       - run: npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

@@ -2,7 +2,14 @@
 
 import { config as dotenvConfig } from "dotenv";
 import { join, dirname } from "path";
-dotenvConfig({ path: join(dirname(new URL(import.meta.url).pathname), "..", ".env") });
+import { fileURLToPath } from "url";
+
+// On Windows, `new URL(import.meta.url).pathname` returns '/C:/path' with a
+// leading slash that breaks path.join. fileURLToPath is the correct
+// cross-platform conversion from file:// URL to a native OS path.
+const __moduleDir = dirname(fileURLToPath(import.meta.url));
+
+dotenvConfig({ path: join(__moduleDir, "..", ".env") });
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -19,12 +26,11 @@ import { z } from "zod";
 import v8 from "v8";
 
 // CLI package info
-const __cliPkg = JSON.parse(readFileSync(join(dirname(new URL(import.meta.url).pathname), "..", "package.json"), "utf-8"));
+const __cliPkg = JSON.parse(readFileSync(join(__moduleDir, "..", "package.json"), "utf-8"));
 
 // Log build fingerprint at startup
 try {
-  const __buildInfoDir = dirname(new URL(import.meta.url).pathname);
-  const buildInfo = JSON.parse(readFileSync(join(__buildInfoDir, "build-info.json"), "utf-8"));
+  const buildInfo = JSON.parse(readFileSync(join(__moduleDir, "build-info.json"), "utf-8"));
   console.error(`[build] SHA: ${buildInfo.sha} (${buildInfo.builtAt})`);
 } catch {
   console.error(`[build] ${__cliPkg.name}@${__cliPkg.version} (dev mode)`);
@@ -97,40 +103,31 @@ interface Config {
 
 function loadConfig(): Config {
   // Try config.json first (for multi-client setups)
-  const configPath = join(dirname(new URL(import.meta.url).pathname), "..", "config.json");
+  const configPath = join(__moduleDir, "..", "config.json");
   if (existsSync(configPath)) {
     return JSON.parse(readFileSync(configPath, "utf-8"));
   }
 
-  // Fall back to env vars (single-client mode)
-  const clientId = envTrimmed("GOOGLE_ADS_CLIENT_ID");
-  const clientSecret = envTrimmed("GOOGLE_ADS_CLIENT_SECRET");
-  const developerToken = envTrimmed("GOOGLE_ADS_DEVELOPER_TOKEN");
-  const refreshToken = envTrimmed("GOOGLE_ADS_REFRESH_TOKEN");
-  const customerId = envTrimmed("GOOGLE_ADS_CUSTOMER_ID");
-  const mccId = envTrimmed("GOOGLE_ADS_MCC_CUSTOMER_ID");
-
-  if (!clientId || !clientSecret || !developerToken || !refreshToken) {
-    throw new Error(
-      "No configuration found. Either:\n" +
-      "  1. Set env vars: GOOGLE_ADS_CLIENT_ID, GOOGLE_ADS_CLIENT_SECRET, GOOGLE_ADS_DEVELOPER_TOKEN, GOOGLE_ADS_REFRESH_TOKEN, GOOGLE_ADS_CUSTOMER_ID\n" +
-      "  2. Create a config.json next to the dist/ folder (see config.example.json)"
-    );
-  }
+  // Fall back to the priority chain in credentials.ts:
+  //   env vars > per-user credentials file (from mcp-google-ads-auth) > embedded build-time secrets
+  // resolveCredentials() throws a descriptive Error (pointing at the auth helper)
+  // if any required value is missing — let it propagate.
+  const resolved = resolveCredentials();
+  const stored = readStoredCredentials();
 
   return {
     google_ads: {
-      mcc_customer_id: mccId || "",
+      mcc_customer_id: resolved.mcc_customer_id || "",
     },
-    clients: customerId ? {
+    clients: {
       default: {
-        customer_id: customerId,
-        name: process.env.GOOGLE_ADS_ACCOUNT_NAME || "My Account",
+        customer_id: resolved.customer_id,
+        name: stored?.customer_name || process.env.GOOGLE_ADS_ACCOUNT_NAME || "My Account",
         folder: "",
-        mcc_customer_id: mccId,
-        direct_access: !mccId,
+        mcc_customer_id: resolved.mcc_customer_id,
+        direct_access: !resolved.mcc_customer_id,
       },
-    } : {},
+    },
     defaults: {
       create_paused: true,
       label_prefix: "claude:",
@@ -170,11 +167,17 @@ import {
   GoogleAdsAuthError,
   GoogleAdsRateLimitError,
   GoogleAdsServiceError,
-  validateCredentials,
   classifyError,
 } from "./errors.js";
 
 import { withResilience, safeResponse, logger } from "./resilience.js";
+import {
+  resolveCredentials,
+  readStoredCredentials,
+  validateResolvedCredentials,
+  type ResolvedCredentials,
+} from "./credentials.js";
+import { onPosixSignal } from "./platform.js";
 
 // ============================================
 // GOOGLE ADS CLIENT
@@ -188,23 +191,32 @@ class GoogleAdsManager {
   constructor(config: Config) {
     this.config = config;
 
-    // Validate credentials at startup — fail fast
-    const creds = validateCredentials();
-    if (!creds.valid) {
-      const msg = `Missing required credentials: ${creds.missing.join(", ")}. ` +
-        `Set these environment variables before starting the server. ` +
-        `Run 'node get-refresh-token.cjs' to obtain a refresh token.` +
-        (process.platform === "darwin" ? ` On macOS, tokens can be stored in Keychain and loaded via run-mcp.sh.` : "");
-      logger.error({ missing: creds.missing }, msg);
+    // Resolve credentials via the priority chain (env > per-user file > embedded).
+    // resolveCredentials() throws GoogleAdsAuthError-compatible Error with a
+    // message pointing the user at `npx mcp-google-ads-auth` if anything is missing.
+    let resolved: ResolvedCredentials;
+    try {
+      resolved = resolveCredentials();
+    } catch (err) {
+      const msg = (err as Error).message;
+      logger.error({ err: msg }, "Credential resolution failed");
       throw new GoogleAdsAuthError(msg);
     }
-    logger.info("Credentials validated: all required env vars present");
 
-    this.defaultRefreshToken = envTrimmed("GOOGLE_ADS_REFRESH_TOKEN");
+    const formatCheck = validateResolvedCredentials(resolved);
+    if (!formatCheck.valid) {
+      const msg = `Credential format check failed: ${formatCheck.issues.join("; ")}. ` +
+        `Re-run 'npx mcp-google-ads-auth' to refresh.`;
+      logger.error({ issues: formatCheck.issues }, msg);
+      throw new GoogleAdsAuthError(msg);
+    }
+    logger.info({ source: resolved.source }, "Credentials resolved");
+
+    this.defaultRefreshToken = resolved.refresh_token;
     this.api = new GoogleAdsApi({
-      client_id: envTrimmed("GOOGLE_ADS_CLIENT_ID"),
-      client_secret: envTrimmed("GOOGLE_ADS_CLIENT_SECRET"),
-      developer_token: envTrimmed("GOOGLE_ADS_DEVELOPER_TOKEN"),
+      client_id: resolved.client_id,
+      client_secret: resolved.client_secret,
+      developer_token: resolved.developer_token,
     });
   }
 
@@ -2426,8 +2438,9 @@ process.on("SIGINT", () => {
   process.exit(0);
 });
 
-process.on("SIGPIPE", () => {
-  // Client disconnected -- expected during shutdown
+// Client disconnection during shutdown (POSIX-only; see platform.ts)
+onPosixSignal("SIGPIPE", () => {
+  // No-op: expected when Claude Desktop closes the stdio pipe first
 });
 
 process.on("unhandledRejection", (reason) => {

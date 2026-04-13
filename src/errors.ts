@@ -106,8 +106,7 @@ export function classifyError(error: any): Error {
   ) {
     return new GoogleAdsAuthError(
       `Google Ads auth failed: ${message}. ` +
-      `Re-authenticate: run 'node get-refresh-token.cjs' and update your GOOGLE_ADS_REFRESH_TOKEN environment variable.` +
-      (process.platform === "darwin" ? ` On macOS, update Keychain: security add-generic-password -a google-ads-drak -s GOOGLE_ADS_REFRESH_TOKEN -w "<token>" -U` : ""),
+      `Re-authenticate: run 'npx mcp-google-ads-auth' to refresh your credentials, then restart Claude Desktop.`,
       error,
     );
   }

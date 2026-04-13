@@ -12,7 +12,9 @@ describe("classifyError", () => {
     const error = { status: 401, message: "Unauthorized" };
     const result = classifyError(error);
     expect(result).toBeInstanceOf(GoogleAdsAuthError);
-    expect(result.message).toContain("Auth failed");
+    expect(result.message).toContain("auth failed");
+    // Points users at the current auth helper, not the deleted get-refresh-token.cjs
+    expect(result.message).toContain("npx mcp-google-ads-auth");
   });
 
   it("classifies 403 status as GoogleAdsAuthError", () => {
