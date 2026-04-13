@@ -68,7 +68,7 @@ export const tools: Tool[] = [
   },
   {
     name: "google_ads_validate_ad",
-    description: "Validate an RSA without creating it. Use this to check for errors before creating.",
+    description: "Validate an RSA without creating it. Use this to check for errors before creating. Enforces: 3-15 headlines (≤30 chars), 2-4 descriptions (≤90 chars), ≥1 final URL, both path1 AND path2 present (≤15 chars each), ≥1 label.",
     inputSchema: {
       additionalProperties: false,
       type: "object",
@@ -87,8 +87,21 @@ export const tools: Tool[] = [
           type: "array",
           items: { type: "string" },
         },
+        path1: {
+          type: "string",
+          description: "Display URL path segment 1 (required, max 15 chars). Shown in ad preview.",
+        },
+        path2: {
+          type: "string",
+          description: "Display URL path segment 2 (required, max 15 chars). Shown in ad preview.",
+        },
+        labels: {
+          type: "array",
+          items: { type: "string" },
+          description: "At least 1 label required (e.g. 'claude-2026-04-12' for versioning). Enables later discovery and auditing.",
+        },
       },
-      required: ["headlines", "descriptions", "final_urls"],
+      required: ["headlines", "descriptions", "final_urls", "path1", "path2", "labels"],
     },
   },
   {
@@ -122,7 +135,7 @@ export const tools: Tool[] = [
   },
   {
     name: "google_ads_create_responsive_search_ad",
-    description: "Create a responsive search ad (will be PAUSED until approved). Validates before creating. Headlines/descriptions can be plain strings or objects with pinned_position (1-3 for headlines, 1-2 for descriptions).",
+    description: "Create a responsive search ad (will be PAUSED until approved). Validates before creating. Headlines/descriptions can be plain strings or objects with pinned_position (1-3 for headlines, 1-2 for descriptions). path1 and path2 are required (display URL paths). A `claude-YYYY-MM-DD` label is auto-applied; pass additional `labels` to attach more.",
     inputSchema: {
       additionalProperties: false,
       type: "object",
@@ -162,10 +175,21 @@ export const tools: Tool[] = [
             ],
           },
         },
-        path1: { type: "string" },
-        path2: { type: "string" },
+        path1: {
+          type: "string",
+          description: "Display URL path segment 1 (required, max 15 chars).",
+        },
+        path2: {
+          type: "string",
+          description: "Display URL path segment 2 (required, max 15 chars).",
+        },
+        labels: {
+          type: "array",
+          items: { type: "string" },
+          description: "Optional additional labels to attach alongside the auto-applied claude-YYYY-MM-DD label. The auto-label alone satisfies the ≥1 label requirement, so this is for extra tagging only.",
+        },
       },
-      required: ["ad_group_id", "final_urls", "headlines", "descriptions"],
+      required: ["ad_group_id", "final_urls", "headlines", "descriptions", "path1", "path2"],
     },
   },
   {

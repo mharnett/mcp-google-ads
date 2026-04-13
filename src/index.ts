@@ -2,7 +2,14 @@
 
 import { config as dotenvConfig } from "dotenv";
 import { join, dirname } from "path";
-dotenvConfig({ path: join(dirname(new URL(import.meta.url).pathname), "..", ".env") });
+import { fileURLToPath } from "url";
+
+// On Windows, `new URL(import.meta.url).pathname` returns '/C:/path' with a
+// leading slash that breaks path.join. fileURLToPath is the correct
+// cross-platform conversion from file:// URL to a native OS path.
+const __moduleDir = dirname(fileURLToPath(import.meta.url));
+
+dotenvConfig({ path: join(__moduleDir, "..", ".env") });
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -12,18 +19,18 @@ import {
   Tool,
 } from "@modelcontextprotocol/sdk/types.js";
 import { tools } from "./tools.js";
+import { validateRsa } from "./validateRsa.js";
 import { GoogleAdsApi, enums, resources, MutateOperation } from "google-ads-api";
 import { readFileSync, existsSync } from "fs";
 import { z } from "zod";
 import v8 from "v8";
 
 // CLI package info
-const __cliPkg = JSON.parse(readFileSync(join(dirname(new URL(import.meta.url).pathname), "..", "package.json"), "utf-8"));
+const __cliPkg = JSON.parse(readFileSync(join(__moduleDir, "..", "package.json"), "utf-8"));
 
 // Log build fingerprint at startup
 try {
-  const __buildInfoDir = dirname(new URL(import.meta.url).pathname);
-  const buildInfo = JSON.parse(readFileSync(join(__buildInfoDir, "build-info.json"), "utf-8"));
+  const buildInfo = JSON.parse(readFileSync(join(__moduleDir, "build-info.json"), "utf-8"));
   console.error(`[build] SHA: ${buildInfo.sha} (${buildInfo.builtAt})`);
 } catch {
   console.error(`[build] ${__cliPkg.name}@${__cliPkg.version} (dev mode)`);
@@ -96,40 +103,31 @@ interface Config {
 
 function loadConfig(): Config {
   // Try config.json first (for multi-client setups)
-  const configPath = join(dirname(new URL(import.meta.url).pathname), "..", "config.json");
+  const configPath = join(__moduleDir, "..", "config.json");
   if (existsSync(configPath)) {
     return JSON.parse(readFileSync(configPath, "utf-8"));
   }
 
-  // Fall back to env vars (single-client mode)
-  const clientId = envTrimmed("GOOGLE_ADS_CLIENT_ID");
-  const clientSecret = envTrimmed("GOOGLE_ADS_CLIENT_SECRET");
-  const developerToken = envTrimmed("GOOGLE_ADS_DEVELOPER_TOKEN");
-  const refreshToken = envTrimmed("GOOGLE_ADS_REFRESH_TOKEN");
-  const customerId = envTrimmed("GOOGLE_ADS_CUSTOMER_ID");
-  const mccId = envTrimmed("GOOGLE_ADS_MCC_CUSTOMER_ID");
-
-  if (!clientId || !clientSecret || !developerToken || !refreshToken) {
-    throw new Error(
-      "No configuration found. Either:\n" +
-      "  1. Set env vars: GOOGLE_ADS_CLIENT_ID, GOOGLE_ADS_CLIENT_SECRET, GOOGLE_ADS_DEVELOPER_TOKEN, GOOGLE_ADS_REFRESH_TOKEN, GOOGLE_ADS_CUSTOMER_ID\n" +
-      "  2. Create a config.json next to the dist/ folder (see config.example.json)"
-    );
-  }
+  // Fall back to the priority chain in credentials.ts:
+  //   env vars > per-user credentials file (from mcp-google-ads-auth) > embedded build-time secrets
+  // resolveCredentials() throws a descriptive Error (pointing at the auth helper)
+  // if any required value is missing — let it propagate.
+  const resolved = resolveCredentials();
+  const stored = readStoredCredentials();
 
   return {
     google_ads: {
-      mcc_customer_id: mccId || "",
+      mcc_customer_id: resolved.mcc_customer_id || "",
     },
-    clients: customerId ? {
+    clients: {
       default: {
-        customer_id: customerId,
-        name: process.env.GOOGLE_ADS_ACCOUNT_NAME || "My Account",
+        customer_id: resolved.customer_id,
+        name: stored?.customer_name || process.env.GOOGLE_ADS_ACCOUNT_NAME || "My Account",
         folder: "",
-        mcc_customer_id: mccId,
-        direct_access: !mccId,
+        mcc_customer_id: resolved.mcc_customer_id,
+        direct_access: !resolved.mcc_customer_id,
       },
-    } : {},
+    },
     defaults: {
       create_paused: true,
       label_prefix: "claude:",
@@ -169,11 +167,17 @@ import {
   GoogleAdsAuthError,
   GoogleAdsRateLimitError,
   GoogleAdsServiceError,
-  validateCredentials,
   classifyError,
 } from "./errors.js";
 
 import { withResilience, safeResponse, logger } from "./resilience.js";
+import {
+  resolveCredentials,
+  readStoredCredentials,
+  validateResolvedCredentials,
+  type ResolvedCredentials,
+} from "./credentials.js";
+import { onPosixSignal } from "./platform.js";
 
 // ============================================
 // GOOGLE ADS CLIENT
@@ -187,23 +191,32 @@ class GoogleAdsManager {
   constructor(config: Config) {
     this.config = config;
 
-    // Validate credentials at startup — fail fast
-    const creds = validateCredentials();
-    if (!creds.valid) {
-      const msg = `Missing required credentials: ${creds.missing.join(", ")}. ` +
-        `Set these environment variables before starting the server. ` +
-        `Run 'node get-refresh-token.cjs' to obtain a refresh token.` +
-        (process.platform === "darwin" ? ` On macOS, tokens can be stored in Keychain and loaded via run-mcp.sh.` : "");
-      logger.error({ missing: creds.missing }, msg);
+    // Resolve credentials via the priority chain (env > per-user file > embedded).
+    // resolveCredentials() throws GoogleAdsAuthError-compatible Error with a
+    // message pointing the user at `npx mcp-google-ads-auth` if anything is missing.
+    let resolved: ResolvedCredentials;
+    try {
+      resolved = resolveCredentials();
+    } catch (err) {
+      const msg = (err as Error).message;
+      logger.error({ err: msg }, "Credential resolution failed");
       throw new GoogleAdsAuthError(msg);
     }
-    logger.info("Credentials validated: all required env vars present");
 
-    this.defaultRefreshToken = envTrimmed("GOOGLE_ADS_REFRESH_TOKEN");
+    const formatCheck = validateResolvedCredentials(resolved);
+    if (!formatCheck.valid) {
+      const msg = `Credential format check failed: ${formatCheck.issues.join("; ")}. ` +
+        `Re-run 'npx mcp-google-ads-auth' to refresh.`;
+      logger.error({ issues: formatCheck.issues }, msg);
+      throw new GoogleAdsAuthError(msg);
+    }
+    logger.info({ source: resolved.source }, "Credentials resolved");
+
+    this.defaultRefreshToken = resolved.refresh_token;
     this.api = new GoogleAdsApi({
-      client_id: envTrimmed("GOOGLE_ADS_CLIENT_ID"),
-      client_secret: envTrimmed("GOOGLE_ADS_CLIENT_SECRET"),
-      developer_token: envTrimmed("GOOGLE_ADS_DEVELOPER_TOKEN"),
+      client_id: resolved.client_id,
+      client_secret: resolved.client_secret,
+      developer_token: resolved.developer_token,
     });
   }
 
@@ -706,8 +719,10 @@ class GoogleAdsManager {
     final_urls: string[];
     headlines: Array<string | { text: string; pinned_position?: number }>; // max 15
     descriptions: Array<string | { text: string; pinned_position?: number }>; // max 4
-    path1?: string;
-    path2?: string;
+    path1: string;
+    path2: string;
+    /** Additional labels to attach beyond the auto-applied claude-YYYY-MM-DD. */
+    labels?: string[];
   }) {
     const customer = this.getCustomer(customerId);
 
@@ -719,35 +734,21 @@ class GoogleAdsManager {
       typeof d === "string" ? { text: d } : d
     );
 
-    // Validate
-    if (normalizedHeadlines.length < 3 || normalizedHeadlines.length > 15) {
-      throw new Error("RSA requires 3-15 headlines");
-    }
-    if (normalizedDescriptions.length < 2 || normalizedDescriptions.length > 4) {
-      throw new Error("RSA requires 2-4 descriptions");
-    }
-
-    // Check headline lengths
-    for (const h of normalizedHeadlines) {
-      if (h.text.length > 30) {
-        throw new Error(`Headline too long (${h.text.length} chars, max 30): "${h.text}"`);
-      }
-    }
-    // Check description lengths (account for customizer tokens that render shorter)
-    const CUSTOMIZER_RE = /\{CUSTOMIZER\.[^}]+\}/g;
-    const CUSTOMIZER_RENDER = 16;
-    for (const d of normalizedDescriptions) {
-      let effectiveLen = d.text.length;
-      const matches = d.text.match(CUSTOMIZER_RE);
-      if (matches) {
-        for (const m of matches) {
-          effectiveLen -= m.length;
-          effectiveLen += CUSTOMIZER_RENDER;
-        }
-      }
-      if (effectiveLen > 90) {
-        throw new Error(`Description too long (${effectiveLen} chars, max 90): "${d.text}"`);
-      }
+    // Run the same lint rules the google_ads_validate_ad tool enforces.
+    // The auto-label satisfies the ≥1 label requirement, so we pass a
+    // synthetic label through to the validator (additional caller-supplied
+    // labels in ad.labels are tacked on after creation alongside the
+    // auto-date label).
+    const validation = validateRsa({
+      headlines: normalizedHeadlines.map(h => h.text),
+      descriptions: normalizedDescriptions.map(d => d.text),
+      final_urls: ad.final_urls,
+      path1: ad.path1,
+      path2: ad.path2,
+      labels: ["__auto_claude_label__", ...(ad.labels ?? [])],
+    });
+    if (!validation.valid) {
+      throw new Error("RSA validation failed:\n" + validation.errors.join("\n"));
     }
 
     // Map pinned_position to ServedAssetFieldType enum values
@@ -1387,62 +1388,19 @@ class GoogleAdsManager {
   }
 
   // Validate an ad without creating it
-  async validateAd(customerId: string, ad: {
+  async validateAd(_customerId: string, ad: {
     headlines: string[];
     descriptions: string[];
     final_urls: string[];
+    path1?: string;
+    path2?: string;
+    labels?: string[];
   }) {
-    const errors: string[] = [];
-
-    // Check headline count
-    if (ad.headlines.length < 3) {
-      errors.push(`Need at least 3 headlines, got ${ad.headlines.length}`);
-    }
-    if (ad.headlines.length > 15) {
-      errors.push(`Maximum 15 headlines, got ${ad.headlines.length}`);
-    }
-
-    // Check description count
-    if (ad.descriptions.length < 2) {
-      errors.push(`Need at least 2 descriptions, got ${ad.descriptions.length}`);
-    }
-    if (ad.descriptions.length > 4) {
-      errors.push(`Maximum 4 descriptions, got ${ad.descriptions.length}`);
-    }
-
-    // Check headline lengths
-    ad.headlines.forEach((h, i) => {
-      if (h.length > 30) {
-        errors.push(`Headline ${i + 1} too long (${h.length}/30): "${h}"`);
-      }
-    });
-
-    // Check description lengths (account for customizer tokens that render shorter)
-    const CUSTOMIZER_PATTERN = /\{CUSTOMIZER\.[^}]+\}/g;
-    const CUSTOMIZER_RENDER_LEN = 16; // conservative estimate of rendered length
-    ad.descriptions.forEach((d, i) => {
-      let effectiveLen = d.length;
-      const matches = d.match(CUSTOMIZER_PATTERN);
-      if (matches) {
-        for (const m of matches) {
-          effectiveLen -= m.length;
-          effectiveLen += CUSTOMIZER_RENDER_LEN;
-        }
-      }
-      if (effectiveLen > 90) {
-        errors.push(`Description ${i + 1} too long (${effectiveLen}/90): "${d}"`);
-      }
-    });
-
-    // Check final URLs
-    if (ad.final_urls.length === 0) {
-      errors.push("At least one final URL is required");
-    }
-
-    return {
-      valid: errors.length === 0,
-      errors,
-    };
+    // Delegates to the pure validateRsa() function so the logic can be
+    // unit-tested without instantiating the full manager. Enforces path1,
+    // path2, and at least 1 label in addition to the headline/description/
+    // final_url rules that were already in place.
+    return validateRsa(ad);
   }
 
   // Get search term category insights for a campaign (with trend comparison)
@@ -1715,6 +1673,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           headlines: args?.headlines as string[],
           descriptions: args?.descriptions as string[],
           final_urls: args?.final_urls as string[],
+          path1: args?.path1 as string | undefined,
+          path2: args?.path2 as string | undefined,
+          labels: args?.labels as string[] | undefined,
         });
         return {
           content: [{
@@ -1788,12 +1749,19 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const rawDescriptions = args?.descriptions as Array<string | { text: string; pinned_position?: number }>;
         const headlineTexts = rawHeadlines.map(h => typeof h === "string" ? h : h.text);
         const descriptionTexts = rawDescriptions.map(d => typeof d === "string" ? d : d.text);
+        const extraLabels = (args?.labels as string[] | undefined) ?? [];
 
-        // Validate first
+        // Validate first (the create path also runs validateRsa, but we
+        // validate here too so the tool returns a clean error rather than
+        // throwing). The auto-applied claude-YYYY-MM-DD label satisfies the
+        // ≥1 label requirement; any extraLabels are bonus.
         const validation = await adsManager.validateAd(customerId, {
           headlines: headlineTexts,
           descriptions: descriptionTexts,
           final_urls: args?.final_urls as string[],
+          path1: args?.path1 as string | undefined,
+          path2: args?.path2 as string | undefined,
+          labels: ["__auto_claude_label__", ...extraLabels],
         });
 
         if (!validation.valid) {
@@ -1816,6 +1784,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           descriptions: rawDescriptions,
           path1: args?.path1 as string,
           path2: args?.path2 as string,
+          labels: extraLabels,
         });
 
         return {
@@ -2469,8 +2438,9 @@ process.on("SIGINT", () => {
   process.exit(0);
 });
 
-process.on("SIGPIPE", () => {
-  // Client disconnected -- expected during shutdown
+// Client disconnection during shutdown (POSIX-only; see platform.ts)
+onPosixSignal("SIGPIPE", () => {
+  // No-op: expected when Claude Desktop closes the stdio pipe first
 });
 
 process.on("unhandledRejection", (reason) => {
