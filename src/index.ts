@@ -981,42 +981,54 @@ class GoogleAdsManager {
     return result;
   }
 
-  // Pause ads
+  // Pause ads (auto-labels with today's Claude-MM-DD-YY label for auditability)
   async pauseAds(customerId: string, adIds: string[]) {
     const customer = this.getCustomer(customerId);
 
-    const operations = adIds.map(adId => ({
-      resource_name: `customers/${customerId.replace(/-/g, "")}/adGroupAds/${adId}`,
+    const resourceNames = adIds.map(
+      adId => `customers/${customerId.replace(/-/g, "")}/adGroupAds/${adId}`
+    );
+    const operations = resourceNames.map(rn => ({
+      resource_name: rn,
       status: enums.AdGroupAdStatus.PAUSED,
     }));
 
     const result = await withResilience(() => customer.adGroupAds.update(operations), "pauseAds");
+    await this.autoLabelCreated(customerId, resourceNames, "ad");
     return result;
   }
 
-  // Pause ad groups
+  // Pause ad groups (auto-labels with today's Claude-MM-DD-YY label for auditability)
   async pauseAdGroups(customerId: string, adGroupIds: string[]) {
     const customer = this.getCustomer(customerId);
 
-    const operations = adGroupIds.map(id => ({
-      resource_name: `customers/${customerId.replace(/-/g, "")}/adGroups/${id}`,
+    const resourceNames = adGroupIds.map(
+      id => `customers/${customerId.replace(/-/g, "")}/adGroups/${id}`
+    );
+    const operations = resourceNames.map(rn => ({
+      resource_name: rn,
       status: enums.AdGroupStatus.PAUSED,
     }));
 
     const result = await withResilience(() => customer.adGroups.update(operations), "pauseAdGroups");
+    await this.autoLabelCreated(customerId, resourceNames, "ad_group");
     return result;
   }
 
-  // Pause campaigns
+  // Pause campaigns (auto-labels with today's Claude-MM-DD-YY label for auditability)
   async pauseCampaigns(customerId: string, campaignIds: string[]) {
     const customer = this.getCustomer(customerId);
 
-    const operations = campaignIds.map(id => ({
-      resource_name: `customers/${customerId.replace(/-/g, "")}/campaigns/${id}`,
+    const resourceNames = campaignIds.map(
+      id => `customers/${customerId.replace(/-/g, "")}/campaigns/${id}`
+    );
+    const operations = resourceNames.map(rn => ({
+      resource_name: rn,
       status: enums.CampaignStatus.PAUSED,
     }));
 
     const result = await withResilience(() => customer.campaigns.update(operations), "pauseCampaigns");
+    await this.autoLabelCreated(customerId, resourceNames, "campaign");
     return result;
   }
 

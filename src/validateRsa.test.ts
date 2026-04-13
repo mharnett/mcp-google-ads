@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 
-import { validateRsa } from "./validateRsa.js";
+import { effectiveTextLength, validateRsa } from "./validateRsa.js";
 
 const BASE_VALID_AD = {
   headlines: ["Headline 1", "Headline 2", "Headline 3"],
@@ -168,6 +168,86 @@ describe("validateRsa", () => {
       const result = validateRsa({ ...BASE_VALID_AD, labels: ["  "] });
       expect(result.valid).toBe(false);
       expect(result.errors.some((e) => /at least 1 label/i.test(e))).toBe(true);
+    });
+  });
+
+  describe("effectiveTextLength — keyword insertion + customizer rendering", () => {
+    it("treats {KeyWord:default} as the default text length", () => {
+      // Literal 35, default "FDA Compliant Fulfillment" = 25
+      expect(effectiveTextLength("{Keyword:FDA Compliant Fulfillment}")).toBe(25);
+      expect(effectiveTextLength("{KeyWord:Fulfillment Services}")).toBe(20);
+      expect(effectiveTextLength("{keyword:3pl}")).toBe(3);
+      expect(effectiveTextLength("{KEYWORD:pet products}")).toBe(12);
+    });
+
+    it("treats {CUSTOMIZER.Name:default} as the default text length", () => {
+      expect(effectiveTextLength("{CUSTOMIZER.CurrentDate:Today}")).toBe(5);
+    });
+
+    it("treats bare {CUSTOMIZER.Name} as a conservative estimate", () => {
+      // "foo " + CUSTOMIZER_RENDER_LEN (16)
+      expect(effectiveTextLength("foo {CUSTOMIZER.Bar}")).toBe(4 + 16);
+    });
+
+    it("returns plain length when no tokens present", () => {
+      expect(effectiveTextLength("Hello world")).toBe(11);
+    });
+  });
+
+  describe("keyword insertion in ad fields", () => {
+    it("accepts a headline whose literal exceeds 30 but default fits", () => {
+      // Literal 35, default 25 — must pass.
+      const result = validateRsa({
+        ...BASE_VALID_AD,
+        headlines: [
+          "{Keyword:FDA Compliant Fulfillment}",
+          "Headline 2",
+          "Headline 3",
+        ],
+      });
+      expect(result.valid).toBe(true);
+    });
+
+    it("rejects a headline whose default text exceeds 30", () => {
+      // Default "This default text is thirty-one!!" = 33 chars
+      const result = validateRsa({
+        ...BASE_VALID_AD,
+        headlines: [
+          "{Keyword:This default text is thirty-one!!}",
+          "Headline 2",
+          "Headline 3",
+        ],
+      });
+      expect(result.valid).toBe(false);
+      expect(result.errors.some((e) => /Headline 1 too long/.test(e))).toBe(true);
+    });
+
+    it("accepts a description containing {KeyWord:default} whose literal exceeds 90", () => {
+      // 70-char prefix + {KeyWord:short} => literal >90, rendered ~76 ≤ 90
+      const result = validateRsa({
+        ...BASE_VALID_AD,
+        descriptions: [
+          "x".repeat(70) + " {KeyWord:short}",
+          "Description 2",
+        ],
+      });
+      expect(result.valid).toBe(true);
+    });
+
+    it("accepts a path containing a short keyword insertion", () => {
+      // Literal "{KeyWord:3pl}" = 13 chars, rendered "3pl" = 3 chars
+      const result = validateRsa({ ...BASE_VALID_AD, path1: "{KeyWord:3pl}" });
+      expect(result.valid).toBe(true);
+    });
+
+    it("rejects a path whose rendered form exceeds 15 chars", () => {
+      // Default "sixteen-char-paths" = 18 chars
+      const result = validateRsa({
+        ...BASE_VALID_AD,
+        path1: "{KeyWord:sixteen-char-paths}",
+      });
+      expect(result.valid).toBe(false);
+      expect(result.errors.some((e) => /path1 too long/i.test(e))).toBe(true);
     });
   });
 

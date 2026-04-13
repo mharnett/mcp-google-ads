@@ -236,7 +236,7 @@ export const tools: Tool[] = [
   },
   {
     name: "google_ads_pause_items",
-    description: "Pause enabled campaigns, ad groups, or ads. REQUIRES USER APPROVAL. This will stop items from serving.",
+    description: "Pause enabled campaigns, ad groups, or ads. REQUIRES USER APPROVAL. This will stop items from serving. Auto-applies today's `Claude-MM-DD-YY` label for audit trail.",
     inputSchema: {
       additionalProperties: false,
       type: "object",

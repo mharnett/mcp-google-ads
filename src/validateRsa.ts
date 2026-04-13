@@ -33,9 +33,13 @@ const MAX_DESCRIPTIONS = 4;
 const MAX_DESCRIPTION_LENGTH = 90;
 const MAX_PATH_LENGTH = 15;
 
-// Customizer tokens like {CUSTOMIZER.foo} render much shorter than their
-// literal text in descriptions. Conservative estimate used for length check.
-const CUSTOMIZER_PATTERN = /\{CUSTOMIZER\.[^}]+\}/g;
+// Dynamic insertions in ad text render shorter than their literal form.
+// Google Ads validates against the rendered length (default text for keyword
+// insertions and customizers-with-default; a conservative estimate for bare
+// customizer tokens). Applies to headlines, descriptions, and display paths.
+const KEYWORD_INSERT_PATTERN = /\{(?:KeyWord|Keyword|keyword|KEYWORD):([^}]*)\}/g;
+const CUSTOMIZER_WITH_DEFAULT = /\{CUSTOMIZER\.[^:}]+:([^}]*)\}/g;
+const CUSTOMIZER_NO_DEFAULT = /\{CUSTOMIZER\.[^:}]+\}/g;
 const CUSTOMIZER_RENDER_LEN = 16;
 
 export function validateRsa(ad: RsaInput): RsaValidationResult {
@@ -49,8 +53,9 @@ export function validateRsa(ad: RsaInput): RsaValidationResult {
     errors.push(`Maximum ${MAX_HEADLINES} headlines, got ${ad.headlines.length}`);
   }
   (ad.headlines ?? []).forEach((h, i) => {
-    if (h.length > MAX_HEADLINE_LENGTH) {
-      errors.push(`Headline ${i + 1} too long (${h.length}/${MAX_HEADLINE_LENGTH}): "${h}"`);
+    const effectiveLen = effectiveTextLength(h);
+    if (effectiveLen > MAX_HEADLINE_LENGTH) {
+      errors.push(`Headline ${i + 1} too long (${effectiveLen}/${MAX_HEADLINE_LENGTH}): "${h}"`);
     }
   });
 
@@ -64,7 +69,7 @@ export function validateRsa(ad: RsaInput): RsaValidationResult {
     errors.push(`Maximum ${MAX_DESCRIPTIONS} descriptions, got ${ad.descriptions.length}`);
   }
   (ad.descriptions ?? []).forEach((d, i) => {
-    const effectiveLen = effectiveDescriptionLength(d);
+    const effectiveLen = effectiveTextLength(d);
     if (effectiveLen > MAX_DESCRIPTION_LENGTH) {
       errors.push(
         `Description ${i + 1} too long (${effectiveLen}/${MAX_DESCRIPTION_LENGTH}): "${d}"`
@@ -80,15 +85,21 @@ export function validateRsa(ad: RsaInput): RsaValidationResult {
   // ── Path 1 (NEW: required, ≤15 chars) ──
   if (!isNonEmpty(ad.path1)) {
     errors.push("path1 is required (display URL path segment)");
-  } else if (ad.path1!.length > MAX_PATH_LENGTH) {
-    errors.push(`path1 too long (${ad.path1!.length}/${MAX_PATH_LENGTH}): "${ad.path1}"`);
+  } else {
+    const effectiveLen = effectiveTextLength(ad.path1!);
+    if (effectiveLen > MAX_PATH_LENGTH) {
+      errors.push(`path1 too long (${effectiveLen}/${MAX_PATH_LENGTH}): "${ad.path1}"`);
+    }
   }
 
   // ── Path 2 (NEW: required, ≤15 chars) ──
   if (!isNonEmpty(ad.path2)) {
     errors.push("path2 is required (display URL path segment)");
-  } else if (ad.path2!.length > MAX_PATH_LENGTH) {
-    errors.push(`path2 too long (${ad.path2!.length}/${MAX_PATH_LENGTH}): "${ad.path2}"`);
+  } else {
+    const effectiveLen = effectiveTextLength(ad.path2!);
+    if (effectiveLen > MAX_PATH_LENGTH) {
+      errors.push(`path2 too long (${effectiveLen}/${MAX_PATH_LENGTH}): "${ad.path2}"`);
+    }
   }
 
   // ── Labels (NEW: at least 1 required) ──
@@ -107,14 +118,19 @@ function isNonEmpty(s: string | undefined | null): boolean {
   return typeof s === "string" && s.trim().length > 0;
 }
 
-function effectiveDescriptionLength(desc: string): number {
-  let effectiveLen = desc.length;
-  const matches = desc.match(CUSTOMIZER_PATTERN);
-  if (matches) {
-    for (const m of matches) {
-      effectiveLen -= m.length;
-      effectiveLen += CUSTOMIZER_RENDER_LEN;
-    }
-  }
-  return effectiveLen;
+/**
+ * Compute the length Google Ads will actually validate against, after
+ * substituting dynamic insertions:
+ *   - {KeyWord:default} / {Keyword:default} / {keyword:default} / {KEYWORD:default}
+ *     → rendered as the default text
+ *   - {CUSTOMIZER.Name:default} → rendered as the default text
+ *   - {CUSTOMIZER.Name}        → rendered as a conservative estimate
+ *
+ * Applies to headlines, descriptions, and display paths alike.
+ */
+export function effectiveTextLength(text: string): number {
+  let rendered = text.replace(KEYWORD_INSERT_PATTERN, "$1");
+  rendered = rendered.replace(CUSTOMIZER_WITH_DEFAULT, "$1");
+  rendered = rendered.replace(CUSTOMIZER_NO_DEFAULT, " ".repeat(CUSTOMIZER_RENDER_LEN));
+  return rendered.length;
 }
