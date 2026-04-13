@@ -10,8 +10,9 @@ jobs:
   test:
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
         node-version: [18, 20, 22]
 
     steps:
@@ -26,3 +27,13 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npm test
+
+      # Smoke test: the auth CLI should at least print --help on every OS.
+      # This catches import-time failures (missing deps, ESM resolution bugs,
+      # cross-platform path bugs) without requiring a real OAuth flow.
+      - name: Smoke test mcp-google-ads-auth --help
+        run: node dist/auth-cli.js --help
+
+      # Dedicated portability pass. Redundant with `npm test` but makes
+      # failures from portability rules easy to spot in the CI UI.
+      - run: npm run test:portability
