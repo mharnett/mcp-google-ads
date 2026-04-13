@@ -222,7 +222,7 @@ export const tools: Tool[] = [
   },
   {
     name: "google_ads_enable_items",
-    description: "Enable paused campaigns, ad groups, or ads. REQUIRES USER APPROVAL. Use after reviewing in Google Ads UI.",
+    description: "Enable paused campaigns, ad groups, or ads. REQUIRES USER APPROVAL. Use after reviewing in Google Ads UI. Auto-applies today's `Claude-MM-DD-YY` label; pass `labels` to attach additional custom labels so different enable operations stay distinguishable.",
     inputSchema: {
       additionalProperties: false,
       type: "object",
@@ -231,12 +231,17 @@ export const tools: Tool[] = [
         campaign_ids: { type: "array", items: { type: "string" } },
         ad_group_ids: { type: "array", items: { type: "string" } },
         ad_ids: { type: "array", items: { type: "string" } },
+        labels: {
+          type: "array",
+          items: { type: "string" },
+          description: "Optional custom labels to apply to every enabled item (in addition to the auto-applied `Claude-MM-DD-YY` label). Labels are created if they don't exist.",
+        },
       },
     },
   },
   {
     name: "google_ads_pause_items",
-    description: "Pause enabled campaigns, ad groups, or ads. REQUIRES USER APPROVAL. This will stop items from serving. Auto-applies today's `Claude-MM-DD-YY` label for audit trail.",
+    description: "Pause enabled campaigns, ad groups, or ads. REQUIRES USER APPROVAL. This will stop items from serving. Auto-applies today's `Claude-MM-DD-YY` label; pass `labels` to attach additional custom labels so different pause operations stay distinguishable (e.g. `fix-landing-page-redirect`).",
     inputSchema: {
       additionalProperties: false,
       type: "object",
@@ -245,6 +250,11 @@ export const tools: Tool[] = [
         campaign_ids: { type: "array", items: { type: "string" } },
         ad_group_ids: { type: "array", items: { type: "string" } },
         ad_ids: { type: "array", items: { type: "string" } },
+        labels: {
+          type: "array",
+          items: { type: "string" },
+          description: "Optional custom labels to apply to every paused item (in addition to the auto-applied `Claude-MM-DD-YY` label). Labels are created if they don't exist.",
+        },
       },
     },
   },

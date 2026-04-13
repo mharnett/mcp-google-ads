@@ -942,47 +942,96 @@ class GoogleAdsManager {
     return result;
   }
 
-  // Enable ads (requires approval in MCP)
-  async enableAds(customerId: string, adIds: string[]) {
+  // Enable ads (auto-labels with today's Claude-MM-DD-YY + any custom labels)
+  async enableAds(customerId: string, adIds: string[], labels?: string[]) {
     const customer = this.getCustomer(customerId);
 
-    const operations = adIds.map(adId => ({
-      resource_name: `customers/${customerId.replace(/-/g, "")}/adGroupAds/${adId}`,
+    const resourceNames = adIds.map(
+      adId => `customers/${customerId.replace(/-/g, "")}/adGroupAds/${adId}`
+    );
+    const operations = resourceNames.map(rn => ({
+      resource_name: rn,
       status: enums.AdGroupAdStatus.ENABLED,
     }));
 
     const result = await withResilience(() => customer.adGroupAds.update(operations), "enableAds");
+    await this.autoLabelCreated(customerId, resourceNames, "ad");
+    await this.applyCustomLabels(customerId, resourceNames, "ad", labels);
     return result;
   }
 
-  // Enable ad groups
-  async enableAdGroups(customerId: string, adGroupIds: string[]) {
+  // Enable ad groups (auto-labels with today's Claude-MM-DD-YY + any custom labels)
+  async enableAdGroups(customerId: string, adGroupIds: string[], labels?: string[]) {
     const customer = this.getCustomer(customerId);
 
-    const operations = adGroupIds.map(id => ({
-      resource_name: `customers/${customerId.replace(/-/g, "")}/adGroups/${id}`,
+    const resourceNames = adGroupIds.map(
+      id => `customers/${customerId.replace(/-/g, "")}/adGroups/${id}`
+    );
+    const operations = resourceNames.map(rn => ({
+      resource_name: rn,
       status: enums.AdGroupStatus.ENABLED,
     }));
 
     const result = await withResilience(() => customer.adGroups.update(operations), "enableAdGroups");
+    await this.autoLabelCreated(customerId, resourceNames, "ad_group");
+    await this.applyCustomLabels(customerId, resourceNames, "ad_group", labels);
     return result;
   }
 
-  // Enable campaigns
-  async enableCampaigns(customerId: string, campaignIds: string[]) {
+  // Enable campaigns (auto-labels with today's Claude-MM-DD-YY + any custom labels)
+  async enableCampaigns(customerId: string, campaignIds: string[], labels?: string[]) {
     const customer = this.getCustomer(customerId);
 
-    const operations = campaignIds.map(id => ({
-      resource_name: `customers/${customerId.replace(/-/g, "")}/campaigns/${id}`,
+    const resourceNames = campaignIds.map(
+      id => `customers/${customerId.replace(/-/g, "")}/campaigns/${id}`
+    );
+    const operations = resourceNames.map(rn => ({
+      resource_name: rn,
       status: enums.CampaignStatus.ENABLED,
     }));
 
     const result = await withResilience(() => customer.campaigns.update(operations), "enableCampaigns");
+    await this.autoLabelCreated(customerId, resourceNames, "campaign");
+    await this.applyCustomLabels(customerId, resourceNames, "campaign", labels);
     return result;
   }
 
-  // Pause ads (auto-labels with today's Claude-MM-DD-YY label for auditability)
-  async pauseAds(customerId: string, adIds: string[]) {
+  // Apply one or more custom labels to resources of a given asset type.
+  // Best-effort: logs and swallows errors so the calling mutation isn't rolled
+  // back on a labeling failure. Creates labels that don't yet exist.
+  private async applyCustomLabels(
+    customerId: string,
+    resourceNames: string[],
+    assetType: "campaign" | "ad_group" | "ad" | "keyword",
+    labelNames: string[] | undefined
+  ): Promise<void> {
+    const clean = (labelNames ?? []).map(l => l?.trim()).filter((l): l is string => !!l);
+    if (clean.length === 0 || resourceNames.length === 0) return;
+    for (const labelName of clean) {
+      try {
+        const labelRN = await this.ensureLabelExists(customerId, labelName);
+        switch (assetType) {
+          case "campaign":
+            await this.labelCampaigns(customerId, resourceNames, labelRN);
+            break;
+          case "ad_group":
+            await this.labelAdGroups(customerId, resourceNames, labelRN);
+            break;
+          case "ad":
+            await this.labelAdGroupAds(customerId, resourceNames, labelRN);
+            break;
+          case "keyword":
+            await this.labelAdGroupCriteria(customerId, resourceNames, labelRN);
+            break;
+        }
+      } catch (e: any) {
+        console.error(`[WARN] applyCustomLabels(${assetType}, '${labelName}') failed: ${e.message}`);
+      }
+    }
+  }
+
+  // Pause ads (auto-labels with today's Claude-MM-DD-YY + any custom labels)
+  async pauseAds(customerId: string, adIds: string[], labels?: string[]) {
     const customer = this.getCustomer(customerId);
 
     const resourceNames = adIds.map(
@@ -995,11 +1044,12 @@ class GoogleAdsManager {
 
     const result = await withResilience(() => customer.adGroupAds.update(operations), "pauseAds");
     await this.autoLabelCreated(customerId, resourceNames, "ad");
+    await this.applyCustomLabels(customerId, resourceNames, "ad", labels);
     return result;
   }
 
-  // Pause ad groups (auto-labels with today's Claude-MM-DD-YY label for auditability)
-  async pauseAdGroups(customerId: string, adGroupIds: string[]) {
+  // Pause ad groups (auto-labels with today's Claude-MM-DD-YY + any custom labels)
+  async pauseAdGroups(customerId: string, adGroupIds: string[], labels?: string[]) {
     const customer = this.getCustomer(customerId);
 
     const resourceNames = adGroupIds.map(
@@ -1012,11 +1062,12 @@ class GoogleAdsManager {
 
     const result = await withResilience(() => customer.adGroups.update(operations), "pauseAdGroups");
     await this.autoLabelCreated(customerId, resourceNames, "ad_group");
+    await this.applyCustomLabels(customerId, resourceNames, "ad_group", labels);
     return result;
   }
 
-  // Pause campaigns (auto-labels with today's Claude-MM-DD-YY label for auditability)
-  async pauseCampaigns(customerId: string, campaignIds: string[]) {
+  // Pause campaigns (auto-labels with today's Claude-MM-DD-YY + any custom labels)
+  async pauseCampaigns(customerId: string, campaignIds: string[], labels?: string[]) {
     const customer = this.getCustomer(customerId);
 
     const resourceNames = campaignIds.map(
@@ -1029,6 +1080,7 @@ class GoogleAdsManager {
 
     const result = await withResilience(() => customer.campaigns.update(operations), "pauseCampaigns");
     await this.autoLabelCreated(customerId, resourceNames, "campaign");
+    await this.applyCustomLabels(customerId, resourceNames, "campaign", labels);
     return result;
   }
 
@@ -1846,16 +1898,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           };
         }
 
+        const labels = args?.labels as string[] | undefined;
         const results: any = {};
 
         if (hasCampaignIds) {
-          results.campaigns = await adsManager.enableCampaigns(customerId, args!.campaign_ids as string[]);
+          results.campaigns = await adsManager.enableCampaigns(customerId, args!.campaign_ids as string[], labels);
         }
         if (hasAdGroupIds) {
-          results.adGroups = await adsManager.enableAdGroups(customerId, args!.ad_group_ids as string[]);
+          results.adGroups = await adsManager.enableAdGroups(customerId, args!.ad_group_ids as string[], labels);
         }
         if (hasAdIds) {
-          results.ads = await adsManager.enableAds(customerId, args!.ad_ids as string[]);
+          results.ads = await adsManager.enableAds(customerId, args!.ad_ids as string[], labels);
         }
 
         return {
@@ -1886,16 +1939,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           };
         }
 
+        const labels = args?.labels as string[] | undefined;
         const results: any = {};
 
         if (hasCampaignIds) {
-          results.campaigns = await adsManager.pauseCampaigns(customerId, args!.campaign_ids as string[]);
+          results.campaigns = await adsManager.pauseCampaigns(customerId, args!.campaign_ids as string[], labels);
         }
         if (hasAdGroupIds) {
-          results.adGroups = await adsManager.pauseAdGroups(customerId, args!.ad_group_ids as string[]);
+          results.adGroups = await adsManager.pauseAdGroups(customerId, args!.ad_group_ids as string[], labels);
         }
         if (hasAdIds) {
-          results.ads = await adsManager.pauseAds(customerId, args!.ad_ids as string[]);
+          results.ads = await adsManager.pauseAds(customerId, args!.ad_ids as string[], labels);
         }
 
         return {
