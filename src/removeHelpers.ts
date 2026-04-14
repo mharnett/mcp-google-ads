@@ -11,6 +11,40 @@ export interface RemoveArgs {
   labels?: string[];
 }
 
+// Some MCP wrappers forward array args as JSON-encoded strings.
+// Accept either form so the tool doesn't silently treat a stringified
+// array as one long ID.
+export function coerceStringArray(v: unknown): string[] | undefined {
+  if (v == null) return undefined;
+  if (Array.isArray(v)) return v.map(String);
+  if (typeof v === "string") {
+    const trimmed = v.trim();
+    if (trimmed.startsWith("[")) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (Array.isArray(parsed)) return parsed.map(String);
+      } catch {
+        // fall through
+      }
+    }
+    // Bare single ID as string? Wrap it.
+    return [trimmed];
+  }
+  return undefined;
+}
+
+export function normalizeRemoveArgs(raw: Record<string, unknown> | undefined): RemoveArgs {
+  const r = raw ?? {};
+  return {
+    customer_id: typeof r.customer_id === "string" ? r.customer_id : undefined,
+    campaign_ids: coerceStringArray(r.campaign_ids),
+    ad_group_ids: coerceStringArray(r.ad_group_ids),
+    ad_ids: coerceStringArray(r.ad_ids),
+    confirm: r.confirm === true,
+    labels: coerceStringArray(r.labels),
+  };
+}
+
 export type ValidationResult = { ok: true } | { ok: false; error: string };
 
 export function validateRemoveInput(args: RemoveArgs): ValidationResult {

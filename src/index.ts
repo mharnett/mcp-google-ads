@@ -24,6 +24,8 @@ import {
   validateRemoveInput,
   buildRemovePreview,
   orderRemovalsChildUp,
+  normalizeRemoveArgs,
+  coerceStringArray,
   type RemoveArgs,
 } from "./removeHelpers.js";
 import { GoogleAdsApi, enums, resources, MutateOperation } from "google-ads-api";
@@ -2025,14 +2027,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case "google_ads_remove_items": {
-        const removeArgs: RemoveArgs = {
-          customer_id: args?.customer_id as string | undefined,
-          campaign_ids: args?.campaign_ids as string[] | undefined,
-          ad_group_ids: args?.ad_group_ids as string[] | undefined,
-          ad_ids: args?.ad_ids as string[] | undefined,
-          confirm: args?.confirm as boolean | undefined,
-          labels: args?.labels as string[] | undefined,
-        };
+        const removeArgs: RemoveArgs = normalizeRemoveArgs(args as Record<string, unknown> | undefined);
         const customerId = removeArgs.customer_id ?? "";
 
         const validation = validateRemoveInput(removeArgs);
@@ -2109,9 +2104,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           return { content: [{ type: "text", text: JSON.stringify({ error: "label is required" }, null, 2) }] };
         }
         const result = await adsManager.applyLabel(customerId, label, {
-          campaignIds: args?.campaign_ids as string[] | undefined,
-          adGroupIds: args?.ad_group_ids as string[] | undefined,
-          adIds: args?.ad_ids as string[] | undefined,
+          campaignIds: coerceStringArray(args?.campaign_ids),
+          adGroupIds: coerceStringArray(args?.ad_group_ids),
+          adIds: coerceStringArray(args?.ad_ids),
         });
         return {
           content: [{ type: "text", text: JSON.stringify({ success: true, ...result }, null, 2) }],
