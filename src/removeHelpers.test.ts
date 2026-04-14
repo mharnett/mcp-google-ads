@@ -131,10 +131,16 @@ describe("normalizeRemoveArgs", () => {
     expect(result.ad_ids).toEqual(["1", "2"]);
   });
 
-  it("defaults confirm to false unless exactly true", () => {
-    expect(normalizeRemoveArgs({ confirm: "true" as any }).confirm).toBe(false);
-    expect(normalizeRemoveArgs({ confirm: 1 as any }).confirm).toBe(false);
+  it("accepts confirm as boolean true or string 'true' (harness coercion)", () => {
     expect(normalizeRemoveArgs({ confirm: true }).confirm).toBe(true);
+    expect(normalizeRemoveArgs({ confirm: "true" as any }).confirm).toBe(true);
+  });
+
+  it("rejects other truthy values as confirm", () => {
+    expect(normalizeRemoveArgs({ confirm: 1 as any }).confirm).toBe(false);
+    expect(normalizeRemoveArgs({ confirm: "yes" as any }).confirm).toBe(false);
+    expect(normalizeRemoveArgs({ confirm: false }).confirm).toBe(false);
+    expect(normalizeRemoveArgs({}).confirm).toBe(false);
   });
 });
 

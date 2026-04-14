@@ -40,7 +40,7 @@ export function normalizeRemoveArgs(raw: Record<string, unknown> | undefined): R
     campaign_ids: coerceStringArray(r.campaign_ids),
     ad_group_ids: coerceStringArray(r.ad_group_ids),
     ad_ids: coerceStringArray(r.ad_ids),
-    confirm: r.confirm === true,
+    confirm: r.confirm === true || r.confirm === "true",
     labels: coerceStringArray(r.labels),
   };
 }
