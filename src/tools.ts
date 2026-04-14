@@ -259,6 +259,48 @@ export const tools: Tool[] = [
     },
   },
   {
+    name: "google_ads_remove_items",
+    description: "Remove campaigns, ad groups, or ads permanently. IRREVERSIBLE at the API level (reports on removed resources still work). DRY-RUN BY DEFAULT: omit `confirm` or pass `confirm: false` to get a preview; pass `confirm: true` to actually remove. Labels are applied BEFORE removal so the audit trail survives. Removals run in child-up order (ads → ad_groups → campaigns) so parent removes don't fail on enabled children. Auto-applies today's `Claude-MM-DD-YY` label.",
+    inputSchema: {
+      additionalProperties: false,
+      type: "object",
+      properties: {
+        customer_id: { type: "string" },
+        campaign_ids: { type: "array", items: { type: "string" } },
+        ad_group_ids: { type: "array", items: { type: "string" } },
+        ad_ids: { type: "array", items: { type: "string" } },
+        confirm: {
+          type: "boolean",
+          description: "Must be true to actually remove. Omit or false for dry-run preview.",
+        },
+        labels: {
+          type: "array",
+          items: { type: "string" },
+          description: "Optional custom labels to apply BEFORE removal (label-first ordering keeps the audit trail intact). Labels are created if they don't exist.",
+        },
+      },
+    },
+  },
+  {
+    name: "google_ads_apply_label",
+    description: "Attach a label to existing campaigns, ad groups, or ads without changing their status. Label is created if it doesn't exist. Useful for tagging items for audit trails or bulk ops.",
+    inputSchema: {
+      additionalProperties: false,
+      type: "object",
+      properties: {
+        customer_id: { type: "string" },
+        label: {
+          type: "string",
+          description: "Label name. Created if it doesn't exist.",
+        },
+        campaign_ids: { type: "array", items: { type: "string" } },
+        ad_group_ids: { type: "array", items: { type: "string" } },
+        ad_ids: { type: "array", items: { type: "string" } },
+      },
+      required: ["label"],
+    },
+  },
+  {
     name: "google_ads_create_shared_set",
     description: "Create a new shared negative keyword list at account level. Returns the new shared set ID.",
     inputSchema: {

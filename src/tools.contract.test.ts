@@ -16,6 +16,8 @@ describe("Tool Schema Contract", () => {
     "google_ads_create_keywords",
     "google_ads_enable_items",
     "google_ads_pause_items",
+    "google_ads_remove_items",
+    "google_ads_apply_label",
     "google_ads_create_shared_set",
     "google_ads_link_shared_set",
     "google_ads_unlink_shared_set",
@@ -107,6 +109,43 @@ describe("Tool Schema Contract", () => {
     it("gaql_query requires query", () => {
       const tool = tools.find(t => t.name === "google_ads_gaql_query");
       expect((tool!.inputSchema as any).required).toContain("query");
+    });
+
+    it("remove_items has confirm field (dry-run default)", () => {
+      const tool = tools.find(t => t.name === "google_ads_remove_items");
+      expect(tool).toBeDefined();
+      const props = (tool!.inputSchema as any).properties;
+      expect(props).toHaveProperty("confirm");
+      expect(props.confirm.type).toBe("boolean");
+    });
+
+    it("remove_items description warns about irreversibility + dry-run", () => {
+      const tool = tools.find(t => t.name === "google_ads_remove_items");
+      expect(tool!.description).toMatch(/IRREVERSIBLE|irreversible/);
+      expect(tool!.description!.toLowerCase()).toContain("dry");
+      expect(tool!.description!.toLowerCase()).toContain("confirm");
+    });
+
+    it("remove_items supports all three resource types", () => {
+      const tool = tools.find(t => t.name === "google_ads_remove_items");
+      const props = (tool!.inputSchema as any).properties;
+      expect(props).toHaveProperty("campaign_ids");
+      expect(props).toHaveProperty("ad_group_ids");
+      expect(props).toHaveProperty("ad_ids");
+    });
+
+    it("apply_label requires label", () => {
+      const tool = tools.find(t => t.name === "google_ads_apply_label");
+      expect(tool).toBeDefined();
+      expect((tool!.inputSchema as any).required).toContain("label");
+    });
+
+    it("apply_label supports all three resource types", () => {
+      const tool = tools.find(t => t.name === "google_ads_apply_label");
+      const props = (tool!.inputSchema as any).properties;
+      expect(props).toHaveProperty("campaign_ids");
+      expect(props).toHaveProperty("ad_group_ids");
+      expect(props).toHaveProperty("ad_ids");
     });
   });
 });

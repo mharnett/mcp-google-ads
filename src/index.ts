@@ -20,6 +20,12 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { tools } from "./tools.js";
 import { validateRsa } from "./validateRsa.js";
+import {
+  validateRemoveInput,
+  buildRemovePreview,
+  orderRemovalsChildUp,
+  type RemoveArgs,
+} from "./removeHelpers.js";
 import { GoogleAdsApi, enums, resources, MutateOperation } from "google-ads-api";
 import { readFileSync, existsSync } from "fs";
 import { z } from "zod";
@@ -1084,6 +1090,60 @@ class GoogleAdsManager {
     return result;
   }
 
+  // Remove ads permanently. Reports on removed ads still work.
+  async removeAds(customerId: string, adIds: string[]) {
+    const customer = this.getCustomer(customerId);
+    const cleanId = customerId.replace(/-/g, "");
+    const resourceNames = adIds.map(id => `customers/${cleanId}/adGroupAds/${id}`);
+    return withResilience(() => customer.adGroupAds.remove(resourceNames), "removeAds");
+  }
+
+  // Remove ad groups permanently. Cascades to child ads.
+  async removeAdGroups(customerId: string, adGroupIds: string[]) {
+    const customer = this.getCustomer(customerId);
+    const cleanId = customerId.replace(/-/g, "");
+    const resourceNames = adGroupIds.map(id => `customers/${cleanId}/adGroups/${id}`);
+    return withResilience(() => customer.adGroups.remove(resourceNames), "removeAdGroups");
+  }
+
+  // Remove campaigns permanently. Cascades to child ad groups and ads.
+  async removeCampaigns(customerId: string, campaignIds: string[]) {
+    const customer = this.getCustomer(customerId);
+    const cleanId = customerId.replace(/-/g, "");
+    const resourceNames = campaignIds.map(id => `customers/${cleanId}/campaigns/${id}`);
+    return withResilience(() => customer.campaigns.remove(resourceNames), "removeCampaigns");
+  }
+
+  // Attach a label to existing resources without changing status.
+  // Unlike applyCustomLabels (which swallows errors to protect a parent mutation),
+  // this surfaces errors to the caller so label-first-then-remove can abort cleanly.
+  async applyLabel(
+    customerId: string,
+    label: string,
+    targets: { campaignIds?: string[]; adGroupIds?: string[]; adIds?: string[] }
+  ) {
+    const cleanId = customerId.replace(/-/g, "");
+    const labelRN = await this.ensureLabelExists(customerId, label);
+    const result: any = { label, label_resource_name: labelRN };
+
+    if (targets.campaignIds?.length) {
+      const rns = targets.campaignIds.map(id => `customers/${cleanId}/campaigns/${id}`);
+      await this.labelCampaigns(customerId, rns, labelRN);
+      result.campaigns_labeled = rns.length;
+    }
+    if (targets.adGroupIds?.length) {
+      const rns = targets.adGroupIds.map(id => `customers/${cleanId}/adGroups/${id}`);
+      await this.labelAdGroups(customerId, rns, labelRN);
+      result.ad_groups_labeled = rns.length;
+    }
+    if (targets.adIds?.length) {
+      const rns = targets.adIds.map(id => `customers/${cleanId}/adGroupAds/${id}`);
+      await this.labelAdGroupAds(customerId, rns, labelRN);
+      result.ads_labeled = rns.length;
+    }
+    return result;
+  }
+
   // Update campaign tracking parameters (final_url_suffix, tracking_url_template, custom params)
   async updateCampaignTracking(customerId: string, campaignId: string, updates: {
     final_url_suffix?: string;
@@ -1961,6 +2021,100 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               results,
             }, null, 2),
           }],
+        };
+      }
+
+      case "google_ads_remove_items": {
+        const removeArgs: RemoveArgs = {
+          customer_id: args?.customer_id as string | undefined,
+          campaign_ids: args?.campaign_ids as string[] | undefined,
+          ad_group_ids: args?.ad_group_ids as string[] | undefined,
+          ad_ids: args?.ad_ids as string[] | undefined,
+          confirm: args?.confirm as boolean | undefined,
+          labels: args?.labels as string[] | undefined,
+        };
+        const customerId = removeArgs.customer_id ?? "";
+
+        const validation = validateRemoveInput(removeArgs);
+        if (!validation.ok) {
+          return { content: [{ type: "text", text: JSON.stringify({ error: validation.error }, null, 2) }] };
+        }
+
+        if (removeArgs.confirm !== true) {
+          return {
+            content: [{ type: "text", text: JSON.stringify(buildRemovePreview(removeArgs), null, 2) }],
+          };
+        }
+
+        // Label FIRST (label-first-then-remove) so the audit trail survives the remove.
+        // If any label attach fails, abort before removing anything.
+        const autoLabel = (adsManager as any).todayClaudeLabel
+          ? (adsManager as any).todayClaudeLabel()
+          : undefined;
+        const allLabels = [autoLabel, ...(removeArgs.labels ?? [])].filter(
+          (l): l is string => typeof l === "string" && !!l
+        );
+        const labelResults: any[] = [];
+        for (const labelName of allLabels) {
+          try {
+            const r = await adsManager.applyLabel(customerId, labelName, {
+              campaignIds: removeArgs.campaign_ids,
+              adGroupIds: removeArgs.ad_group_ids,
+              adIds: removeArgs.ad_ids,
+            });
+            labelResults.push(r);
+          } catch (e: any) {
+            return {
+              content: [{
+                type: "text",
+                text: JSON.stringify({
+                  error: `Label attach failed before removal: ${e.message}. Nothing removed.`,
+                  partial_labels_applied: labelResults,
+                }, null, 2),
+              }],
+            };
+          }
+        }
+
+        // Remove in child-up order.
+        const steps = orderRemovalsChildUp(removeArgs);
+        const removed: any = {};
+        for (const step of steps) {
+          if (step.type === "ads") {
+            removed.ads = await adsManager.removeAds(customerId, step.ids);
+          } else if (step.type === "ad_groups") {
+            removed.ad_groups = await adsManager.removeAdGroups(customerId, step.ids);
+          } else {
+            removed.campaigns = await adsManager.removeCampaigns(customerId, step.ids);
+          }
+        }
+
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              success: true,
+              message: "Items removed. Reports on removed resources remain queryable.",
+              labels_applied: allLabels,
+              removed,
+            }, null, 2),
+          }],
+        };
+      }
+
+      case "google_ads_apply_label": {
+        const customerId = (args?.customer_id as string) ?? "";
+        const label = args?.label as string;
+        if (!label) {
+          return { content: [{ type: "text", text: JSON.stringify({ error: "label is required" }, null, 2) }] };
+        }
+        const result = await adsManager.applyLabel(customerId, label, {
+          campaignIds: args?.campaign_ids as string[] | undefined,
+          adGroupIds: args?.ad_group_ids as string[] | undefined,
+          adIds: args?.ad_ids as string[] | undefined,
+        });
+        return {
+          content: [{ type: "text", text: JSON.stringify({ success: true, ...result }, null, 2) }],
         };
       }
 
