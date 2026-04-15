@@ -28,6 +28,12 @@ import {
   coerceStringArray,
   type RemoveArgs,
 } from "./removeHelpers.js";
+import {
+  normalizeUpdateAssetUrlsArgs,
+  normalizePauseAssetLinksArgs,
+  buildUpdateUrlsDryRun,
+  buildPauseLinksDryRun,
+} from "./assetHelpers.js";
 import { GoogleAdsApi, enums, resources, MutateOperation } from "google-ads-api";
 import { readFileSync, existsSync } from "fs";
 import { z } from "zod";
@@ -1170,6 +1176,198 @@ class GoogleAdsManager {
     }
 
     const result = await withResilience(() => customer.campaigns.update([campaignUpdate]), "updateCampaignTracking");
+    return result;
+  }
+
+  // Update campaign bidding strategy (and/or target CPA / target ROAS).
+  // If `strategy` is omitted, the current strategy is preserved and only the target is updated.
+  async updateCampaignBidding(customerId: string, campaignId: string, updates: {
+    strategy?: "MAXIMIZE_CONVERSIONS" | "MAXIMIZE_CONVERSION_VALUE" | "TARGET_CPA" | "TARGET_ROAS" | "MANUAL_CPC" | "MAXIMIZE_CLICKS";
+    target_cpa_dollars?: number;
+    target_roas?: number;
+  }) {
+    const customer = this.getCustomer(customerId);
+    const cleanId = customerId.replace(/-/g, "");
+
+    const [current] = await withResilience(
+      () =>
+        customer.query(`
+          SELECT campaign.id, campaign.name, campaign.bidding_strategy_type
+          FROM campaign
+          WHERE campaign.id = ${campaignId}
+        `),
+      "updateCampaignBidding.query"
+    );
+
+    if (!current?.campaign?.name) {
+      throw new Error(`Campaign ${campaignId} not found`);
+    }
+
+    const currentTypeEnum = current.campaign.bidding_strategy_type as number;
+    const typeEnumToName: Record<number, string> = {
+      2: "MANUAL_CPC",
+      6: "MAXIMIZE_CONVERSIONS",
+      8: "TARGET_CPA",
+      9: "TARGET_ROAS",
+      10: "MAXIMIZE_CONVERSIONS",
+      11: "MAXIMIZE_CONVERSION_VALUE",
+      12: "TARGET_SPEND",
+    };
+    const currentStrategy = typeEnumToName[currentTypeEnum] || "UNKNOWN";
+    const resolvedStrategy = updates.strategy || currentStrategy;
+
+    const targetCpaMicros = updates.target_cpa_dollars !== undefined
+      ? Math.round(updates.target_cpa_dollars * 1_000_000)
+      : undefined;
+
+    const campaignUpdate: any = {
+      resource_name: `customers/${cleanId}/campaigns/${campaignId}`,
+    };
+
+    switch (resolvedStrategy) {
+      case "MAXIMIZE_CONVERSIONS":
+        campaignUpdate.maximize_conversions = targetCpaMicros !== undefined
+          ? { target_cpa_micros: targetCpaMicros }
+          : {};
+        break;
+      case "MAXIMIZE_CONVERSION_VALUE":
+        campaignUpdate.maximize_conversion_value = updates.target_roas !== undefined
+          ? { target_roas: updates.target_roas }
+          : {};
+        break;
+      case "TARGET_CPA":
+        if (targetCpaMicros === undefined) {
+          throw new Error("TARGET_CPA strategy requires target_cpa_dollars");
+        }
+        campaignUpdate.target_cpa = { target_cpa_micros: targetCpaMicros };
+        break;
+      case "TARGET_ROAS":
+        if (updates.target_roas === undefined) {
+          throw new Error("TARGET_ROAS strategy requires target_roas");
+        }
+        campaignUpdate.target_roas = { target_roas: updates.target_roas };
+        break;
+      case "MANUAL_CPC":
+        campaignUpdate.manual_cpc = {};
+        break;
+      case "MAXIMIZE_CLICKS":
+        campaignUpdate.target_spend = {};
+        break;
+      default:
+        throw new Error(`Unsupported strategy: ${resolvedStrategy}`);
+    }
+
+    await withResilience(
+      () => customer.campaigns.update([campaignUpdate]),
+      "updateCampaignBidding.update"
+    );
+
+    return {
+      campaign_id: campaignId,
+      campaign_name: current.campaign.name,
+      previous_strategy: currentStrategy,
+      new_strategy: resolvedStrategy,
+      target_cpa_dollars: updates.target_cpa_dollars,
+      target_roas: updates.target_roas,
+    };
+  }
+
+  async updateAssetUrls(customerId: string, updates: Array<{ asset_id: string; final_urls: string[] }>) {
+    const customer = this.getCustomer(customerId);
+    const cleanId = customerId.replace(/-/g, "");
+
+    // Fetch current URLs + attachment counts so the response is auditable.
+    const assetIds = updates.map(u => u.asset_id);
+    const idList = assetIds.join(",");
+
+    const currentRows = await withResilience(
+      () =>
+        customer.query(`
+          SELECT asset.id, asset.name, asset.final_urls, asset.sitelink_asset.link_text
+          FROM asset
+          WHERE asset.id IN (${idList})
+        `),
+      "updateAssetUrls.query"
+    );
+
+    const byId = new Map<string, any>();
+    for (const row of currentRows) {
+      if (row.asset?.id) byId.set(String(row.asset.id), row.asset);
+    }
+    const missing = assetIds.filter(id => !byId.has(id));
+    if (missing.length > 0) {
+      throw new Error(`Asset ID(s) not found in customer ${customerId}: ${missing.join(", ")}`);
+    }
+
+    const operations = updates.map(u => ({
+      resource_name: `customers/${cleanId}/assets/${u.asset_id}`,
+      final_urls: u.final_urls,
+    }));
+
+    await withResilience(
+      () => customer.assets.update(operations as any),
+      "updateAssetUrls.update"
+    );
+
+    return {
+      customer_id: cleanId,
+      updated: updates.map(u => {
+        const before = byId.get(u.asset_id);
+        return {
+          asset_id: u.asset_id,
+          link_text: before?.sitelink_asset?.link_text ?? null,
+          previous_final_urls: before?.final_urls ?? [],
+          new_final_urls: u.final_urls,
+        };
+      }),
+    };
+  }
+
+  async pauseAssetLinks(customerId: string, resourceNames: string[]) {
+    const customer = this.getCustomer(customerId);
+    const cleanId = customerId.replace(/-/g, "");
+
+    const byLevel: Record<"customer_asset" | "campaign_asset" | "ad_group_asset", string[]> = {
+      customer_asset: [],
+      campaign_asset: [],
+      ad_group_asset: [],
+    };
+    for (const rn of resourceNames) {
+      if (/\/customerAssets\//.test(rn)) byLevel.customer_asset.push(rn);
+      else if (/\/campaignAssets\//.test(rn)) byLevel.campaign_asset.push(rn);
+      else if (/\/adGroupAssets\//.test(rn)) byLevel.ad_group_asset.push(rn);
+      else throw new Error(`Unrecognized asset-link resource name: ${rn}`);
+    }
+
+    // Status enum: 2 = PAUSED per google-ads-api
+    const PAUSED = 2;
+    const result = { customer_id: cleanId, paused: { customer_asset: 0, campaign_asset: 0, ad_group_asset: 0 } };
+
+    if (byLevel.customer_asset.length > 0) {
+      const ops = byLevel.customer_asset.map(rn => ({ resource_name: rn, status: PAUSED }));
+      await withResilience(
+        () => customer.customerAssets.update(ops as any),
+        "pauseAssetLinks.customerAssets"
+      );
+      result.paused.customer_asset = ops.length;
+    }
+    if (byLevel.campaign_asset.length > 0) {
+      const ops = byLevel.campaign_asset.map(rn => ({ resource_name: rn, status: PAUSED }));
+      await withResilience(
+        () => customer.campaignAssets.update(ops as any),
+        "pauseAssetLinks.campaignAssets"
+      );
+      result.paused.campaign_asset = ops.length;
+    }
+    if (byLevel.ad_group_asset.length > 0) {
+      const ops = byLevel.ad_group_asset.map(rn => ({ resource_name: rn, status: PAUSED }));
+      await withResilience(
+        () => customer.adGroupAssets.update(ops as any),
+        "pauseAssetLinks.adGroupAssets"
+      );
+      result.paused.ad_group_asset = ops.length;
+    }
+
     return result;
   }
 
@@ -2528,6 +2726,78 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             }, null, 2),
           }],
         };
+      }
+
+      case "google_ads_update_campaign_bidding": {
+        const customerId = args?.customer_id as string || "";
+        const campaignId = args?.campaign_id as string;
+        const strategy = args?.strategy as "MAXIMIZE_CONVERSIONS" | "MAXIMIZE_CONVERSION_VALUE" | "TARGET_CPA" | "TARGET_ROAS" | "MANUAL_CPC" | "MAXIMIZE_CLICKS" | undefined;
+        const targetCpaDollars = args?.target_cpa_dollars as number | undefined;
+        const targetRoas = args?.target_roas as number | undefined;
+
+        if (strategy === undefined && targetCpaDollars === undefined && targetRoas === undefined) {
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({ error: "Must provide at least one of: strategy, target_cpa_dollars, target_roas" }, null, 2),
+            }],
+          };
+        }
+        if (targetCpaDollars !== undefined && targetCpaDollars <= 0) {
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({ error: "target_cpa_dollars must be positive" }, null, 2),
+            }],
+          };
+        }
+        if (targetRoas !== undefined && targetRoas <= 0) {
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({ error: "target_roas must be positive (decimal, e.g., 3.0 = 300%)" }, null, 2),
+            }],
+          };
+        }
+
+        const result = await adsManager.updateCampaignBidding(customerId, campaignId, {
+          strategy,
+          target_cpa_dollars: targetCpaDollars,
+          target_roas: targetRoas,
+        });
+
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({ success: true, ...result }, null, 2),
+          }],
+        };
+      }
+
+      case "google_ads_update_asset_urls": {
+        const normalized = normalizeUpdateAssetUrlsArgs(args as Record<string, unknown>);
+        if ("error" in normalized) {
+          return { content: [{ type: "text", text: JSON.stringify({ error: normalized.error }, null, 2) }] };
+        }
+        if (!normalized.confirm) {
+          return { content: [{ type: "text", text: JSON.stringify(buildUpdateUrlsDryRun(normalized), null, 2) }] };
+        }
+        const customerId = normalized.customer_id || "";
+        const result = await adsManager.updateAssetUrls(customerId, normalized.updates);
+        return { content: [{ type: "text", text: JSON.stringify({ success: true, ...result }, null, 2) }] };
+      }
+
+      case "google_ads_pause_asset_links": {
+        const normalized = normalizePauseAssetLinksArgs(args as Record<string, unknown>);
+        if ("error" in normalized) {
+          return { content: [{ type: "text", text: JSON.stringify({ error: normalized.error }, null, 2) }] };
+        }
+        if (!normalized.confirm) {
+          return { content: [{ type: "text", text: JSON.stringify(buildPauseLinksDryRun(normalized), null, 2) }] };
+        }
+        const customerId = normalized.customer_id || "";
+        const result = await adsManager.pauseAssetLinks(customerId, normalized.resource_names);
+        return { content: [{ type: "text", text: JSON.stringify({ success: true, ...result }, null, 2) }] };
       }
 
       case "google_ads_gaql_query": {

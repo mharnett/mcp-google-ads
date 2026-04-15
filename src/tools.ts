@@ -645,6 +645,26 @@ export const tools: Tool[] = [
     },
   },
   {
+    name: "google_ads_update_campaign_bidding",
+    description: "Update a campaign's bidding strategy and/or target CPA / target ROAS. If `strategy` is omitted the current strategy is preserved and only the target values are updated (useful for adding a tCPA to an existing Max Conversions campaign). Dollar amounts are in dollars (converted to micros internally). target_roas is a decimal (e.g., 3.0 = 300%).",
+    inputSchema: {
+      additionalProperties: false,
+      type: "object",
+      properties: {
+        customer_id: { type: "string" },
+        campaign_id: { type: "string", description: "The numeric string campaign ID to update" },
+        strategy: {
+          type: "string",
+          enum: ["MAXIMIZE_CONVERSIONS", "MAXIMIZE_CONVERSION_VALUE", "TARGET_CPA", "TARGET_ROAS", "MANUAL_CPC", "MAXIMIZE_CLICKS"],
+          description: "Optional. New bidding strategy. If omitted, keeps current strategy and only updates target values.",
+        },
+        target_cpa_dollars: { type: "number", description: "Target CPA in dollars. Applies to MAXIMIZE_CONVERSIONS (optional ceiling) or TARGET_CPA (required)." },
+        target_roas: { type: "number", description: "Target ROAS as decimal (3.0 = 300%). Applies to MAXIMIZE_CONVERSION_VALUE or TARGET_ROAS." },
+      },
+      required: ["campaign_id"],
+    },
+  },
+  {
     name: "google_ads_gaql_query",
     description: "Execute a raw GAQL (Google Ads Query Language) query. Use this for custom reports or accessing any Google Ads API resource not covered by other tools. See https://developers.google.com/google-ads/api/docs/query/overview for GAQL syntax.",
     inputSchema: {
@@ -655,6 +675,60 @@ export const tools: Tool[] = [
         query: { type: "string", description: "The GAQL query to execute" },
       },
       required: ["query"],
+    },
+  },
+  {
+    name: "google_ads_update_asset_urls",
+    description: "Update the final_urls on one or more assets (e.g. sitelinks, callouts). DRY-RUN BY DEFAULT: omit `confirm` or pass `confirm: false` to get a preview. Updating an asset's URL affects EVERY campaign/ad group/customer link that uses that asset ID -- use GAQL against customer_asset/campaign_asset/ad_group_asset to check attachments first.",
+    inputSchema: {
+      additionalProperties: false,
+      type: "object",
+      properties: {
+        customer_id: { type: "string" },
+        updates: {
+          type: "array",
+          description: "List of assets to update.",
+          items: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              asset_id: { type: "string", description: "Numeric asset ID" },
+              final_urls: {
+                type: "array",
+                items: { type: "string" },
+                description: "New final URLs. Must start with http:// or https://.",
+              },
+            },
+            required: ["asset_id", "final_urls"],
+          },
+        },
+        confirm: {
+          type: "boolean",
+          description: "Must be true to actually update. Omit or false for dry-run preview.",
+        },
+      },
+      required: ["updates"],
+    },
+  },
+  {
+    name: "google_ads_pause_asset_links",
+    description: "Pause asset links (customer_asset, campaign_asset, or ad_group_asset). Use this to stop a sitelink from serving without deleting the underlying asset. DRY-RUN BY DEFAULT: omit `confirm` or pass `confirm: false` to get a preview. Resource name form: customers/{cid}/customerAssets/{assetId}~SITELINK, customers/{cid}/campaignAssets/{campId}~{assetId}~SITELINK, or customers/{cid}/adGroupAssets/{agId}~{assetId}~SITELINK.",
+    inputSchema: {
+      additionalProperties: false,
+      type: "object",
+      properties: {
+        customer_id: { type: "string" },
+        resource_names: {
+          type: "array",
+          items: { type: "string" },
+          description: "Full resource names of the asset links to pause.",
+        },
+        confirm: {
+          type: "boolean",
+          description: "Must be true to actually pause. Omit or false for dry-run preview.",
+        },
+      },
+      required: ["resource_names"],
     },
   },
   {
