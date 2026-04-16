@@ -10,14 +10,14 @@ import {
 
 describe("validateRemoveInput", () => {
   it("rejects when no IDs provided", () => {
-    const result = validateRemoveInput({ customer_id: "7458517309" });
+    const result = validateRemoveInput({ customer_id: "1234567890" });
     expect(result.ok).toBe(false);
     expect(result.ok ? "" : result.error).toMatch(/No item IDs/);
   });
 
   it("rejects when all ID arrays are empty", () => {
     const result = validateRemoveInput({
-      customer_id: "7458517309",
+      customer_id: "1234567890",
       campaign_ids: [],
       ad_group_ids: [],
       ad_ids: [],
@@ -27,7 +27,7 @@ describe("validateRemoveInput", () => {
 
   it("accepts when any one ID array has content", () => {
     const result = validateRemoveInput({
-      customer_id: "7458517309",
+      customer_id: "1234567890",
       campaign_ids: ["123"],
     });
     expect(result.ok).toBe(true);
@@ -35,7 +35,7 @@ describe("validateRemoveInput", () => {
 
   it("accepts when only ad_ids is provided", () => {
     const result = validateRemoveInput({
-      customer_id: "7458517309",
+      customer_id: "1234567890",
       ad_ids: ["456"],
     });
     expect(result.ok).toBe(true);
@@ -45,7 +45,7 @@ describe("validateRemoveInput", () => {
 describe("buildRemovePreview", () => {
   it("returns dry_run: true with provided IDs", () => {
     const args: RemoveArgs = {
-      customer_id: "7458517309",
+      customer_id: "1234567890",
       campaign_ids: ["111"],
       ad_group_ids: ["222"],
       ad_ids: ["333"],
@@ -61,7 +61,7 @@ describe("buildRemovePreview", () => {
 
   it("shows removal_order as child-up (ads → ad_groups → campaigns)", () => {
     const preview = buildRemovePreview({
-      customer_id: "7458517309",
+      customer_id: "1234567890",
       campaign_ids: ["111"],
     });
     expect(preview.removal_order).toMatch(/ads.*ad_groups.*campaigns/);
@@ -69,7 +69,7 @@ describe("buildRemovePreview", () => {
 
   it("defaults empty arrays when IDs omitted", () => {
     const preview = buildRemovePreview({
-      customer_id: "7458517309",
+      customer_id: "1234567890",
       campaign_ids: ["111"],
     });
     expect(preview.would_remove.ad_groups).toEqual([]);
@@ -78,7 +78,7 @@ describe("buildRemovePreview", () => {
 
   it("mentions confirm:true in the message", () => {
     const preview = buildRemovePreview({
-      customer_id: "7458517309",
+      customer_id: "1234567890",
       ad_ids: ["1"],
     });
     expect(preview.message).toMatch(/confirm.*true/);
@@ -115,7 +115,7 @@ describe("coerceStringArray", () => {
 describe("normalizeRemoveArgs", () => {
   it("coerces stringified array IDs into real arrays", () => {
     const result = normalizeRemoveArgs({
-      customer_id: "7458517309",
+      customer_id: "1234567890",
       campaign_ids: '["850837339", "967142783"]',
       labels: '["mcp-cleanup"]',
     });

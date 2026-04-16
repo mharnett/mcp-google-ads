@@ -3,7 +3,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
 const LIVE = process.env.LIVE_TEST === "true";
-const CUSTOMER_ID = process.env.TEST_CUSTOMER_ID || "7458517309";
+const CUSTOMER_ID = process.env.TEST_CUSTOMER_ID || "1234567890";
 
 function parseToolResult(result: any): any {
   const text = result?.content?.[0]?.text;
@@ -19,7 +19,7 @@ describe.skipIf(!LIVE)("mcp-google-ads integration", () => {
     transport = new StdioClientTransport({
       command: "bash",
       args: ["-c", "source ./run-mcp.sh"],
-      cwd: "/Users/mark/claude-code/mcps/mcp-google-ads",
+      cwd: process.cwd(),
     });
     client = new Client({ name: "test-client", version: "1.0.0" }, { capabilities: {} });
     await client.connect(transport);
@@ -42,7 +42,7 @@ describe.skipIf(!LIVE)("mcp-google-ads integration", () => {
   it("google_ads_get_client_context returns client info", async () => {
     const result = await client.callTool({
       name: "google_ads_get_client_context",
-      arguments: { working_directory: "/Users/mark/claude-code/Flowspace" },
+      arguments: { working_directory: process.cwd() },
     });
     const data = parseToolResult(result);
     expect(data).toBeDefined();
