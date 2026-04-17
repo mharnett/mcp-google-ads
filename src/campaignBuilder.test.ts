@@ -131,4 +131,31 @@ describe("buildCampaignCreatePayload — DEMAND_GEN channel", () => {
     expect(plan.campaign.maximize_conversions).toEqual({});
     expect(plan.campaign.manual_cpc).toBeUndefined();
   });
+
+  it("DEMAND_GEN sets explicit network_settings (all false; DG runs on its own surfaces)", () => {
+    // Google Ads API rejects DG campaign create with "The required field was
+    // not present" when network_settings is omitted. DG campaigns run on
+    // YouTube / Discover / Gmail — never on Search, Display, or Partner
+    // networks — so every flag must be explicit false.
+    const plan = buildCampaignCreatePayload({
+      name: "DG Campaign",
+      budget_amount_micros: 20_000_000,
+      channel_type: "DEMAND_GEN",
+    });
+
+    expect(plan.campaign.network_settings).toEqual({
+      target_google_search: false,
+      target_search_network: false,
+      target_content_network: false,
+      target_partner_search_network: false,
+    });
+  });
+
+  it("SEARCH does NOT set network_settings (back-compat — unchanged behavior)", () => {
+    const plan = buildCampaignCreatePayload({
+      name: "Search Campaign",
+      budget_amount_micros: 10_000_000,
+    });
+    expect(plan.campaign.network_settings).toBeUndefined();
+  });
 });

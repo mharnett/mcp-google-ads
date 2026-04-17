@@ -53,6 +53,21 @@ GoogleAdsManager.createCampaign to use buildCampaignCreatePayload + attach
 criteria post-campaign-create; updated handler to thread through new params.
 All 8 new tests + 231 existing tests still pass (239/8).
 
+### Cycle 8c — DEMAND_GEN network_settings explicit [hotfix 2026-04-17]
+RED: `DEMAND_GEN sets explicit network_settings (all false; DG runs on its
+own surfaces)` — the field was undefined. Google Ads API rejects DG
+campaign create with "The required field was not present" if
+network_settings is omitted. DG runs on YouTube/Discover/Gmail — never on
+Search/Display/Partner networks — so every flag must be explicit false.
+Discovered during live DG campaign creation after the explicitly_shared
+fix landed.
+GREEN: set network_settings = { all-four-networks: false } in the builder
+when channel_type === "DEMAND_GEN". SEARCH path unchanged (retains
+implicit server defaults for back-compat). +13 LOC incl comment.
+Back-compat guard test added: SEARCH does NOT set network_settings.
+275 → 279 passing (+4 new tests), 0 regressions.
+REFACTOR: none.
+
 ### Cycle 8b — Dedicated budget (explicitly_shared: false) [hotfix 2026-04-17]
 RED: `budget is dedicated (not shared)` — field was undefined; Google Ads
 API defaults to explicitly_shared=true when omitted, which makes auto-

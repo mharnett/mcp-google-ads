@@ -71,6 +71,20 @@ export function buildCampaignCreatePayload(input: CampaignCreateInput): Campaign
     advertising_channel_type: channelEnum,
   };
 
+  // DEMAND_GEN campaigns run on YouTube / Discover / Gmail only — never on
+  // Search, Display, or Partner networks. Google Ads API rejects DG campaign
+  // create with "The required field was not present" if network_settings is
+  // omitted, so pin every flag to false explicitly. SEARCH retains the
+  // historical behavior of omitting network_settings (server defaults).
+  if (channelType === "DEMAND_GEN") {
+    campaign.network_settings = {
+      target_google_search: false,
+      target_search_network: false,
+      target_content_network: false,
+      target_partner_search_network: false,
+    };
+  }
+
   if (input.start_date) campaign.start_date = input.start_date;
   if (input.end_date) campaign.end_date = input.end_date;
 
