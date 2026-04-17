@@ -53,6 +53,16 @@ GoogleAdsManager.createCampaign to use buildCampaignCreatePayload + attach
 criteria post-campaign-create; updated handler to thread through new params.
 All 8 new tests + 231 existing tests still pass (239/8).
 
+### Cycle 8d — DEMAND_GEN network_settings: content_network=true [hotfix 2026-04-17]
+RED: `DEMAND_GEN sets network_settings: content_network=true, others=false`
+— previous cycle pinned all four flags to false, but Google Ads API then
+rejects with "Must target at least one network." DG serves on YouTube /
+Discover / Gmail, which Google categorizes as content-network inventory.
+GREEN: flip target_content_network to true in the DG branch of the
+builder; Search + Partner-Search remain false. +1 LOC change.
+Test was updated in-place (not a separate new test). 0 regressions.
+REFACTOR: none.
+
 ### Cycle 8c — DEMAND_GEN network_settings explicit [hotfix 2026-04-17]
 RED: `DEMAND_GEN sets explicit network_settings (all false; DG runs on its
 own surfaces)` — the field was undefined. Google Ads API rejects DG
