@@ -154,3 +154,29 @@ Added manager method that:
   4. auto-labels the resulting ad + applies any caller-supplied labels.
 
 Full suite 274 passed / 8 skipped.
+
+---
+
+## Commit 4 — Housekeeping
+
+No new tests (doc/version update). README now reflects 36 tools + a concrete
+Demand Gen end-to-end example block. CHANGELOG has a full v1.2.0 entry.
+package.json bumped to 1.2.0 with the new description.
+
+`npm run build` — zero TS errors.
+`npm test` — 274 passed + 8 skipped (baseline 231 + 8; +43 new tests).
+
+---
+
+## Blockers encountered (resolved)
+
+1. **v23 AdGroupType enum missing DEMAND_GEN_MULTI_ASSET_AD_GROUP (proto 21).**
+   Resolution: emit the raw numeric 21 and route DG ad group creation through
+   customer.mutateResources (which doesn't validate against the local enum map).
+   Documented in adGroupBuilder.ts.
+2. **v23 DemandGenMultiAssetAdInfo typed field missing long_headlines.**
+   Resolution: emit `long_headlines` on the payload anyway; mutateResources
+   forwards unknown fields to the server. Documented in validateDemandGenAd.ts.
+3. **BiddingStrategyType uses "TARGET_SPEND" (not "MAXIMIZE_CLICKS").**
+   The user-facing param is `MAXIMIZE_CLICKS` but internally we set the
+   `target_spend` field on the Campaign resource. Documented in campaignBuilder.ts.
