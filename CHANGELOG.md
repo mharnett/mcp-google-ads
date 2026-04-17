@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.2.3] - 2026-04-17
+
+### Fixed
+- **Logger wrote to stdout under Claude Desktop, corrupting the MCP JSON-RPC
+  stream.** The pino destination was gated on `process.stderr.isTTY`; when
+  Claude Desktop launched the server as a subprocess, stderr was a pipe (not
+  a TTY), the transport config was skipped, and pino defaulted to stdout.
+  Claude Desktop's zod validator rejected every message with an
+  `unrecognized_keys: level, time, pid, hostname, msg` schema error and the
+  MCP showed disconnected. Now `pino.destination(2)` is passed unconditionally
+  as the second arg so every run path ends up on stderr. Added a regression
+  test that spawns a subprocess with piped stderr and asserts stdout is empty.
+
 ## [1.2.2] - 2026-04-17
 
 ### Fixed

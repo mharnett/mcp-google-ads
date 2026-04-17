@@ -14,6 +14,15 @@ import pino from "pino";
 // LOGGER
 // ============================================
 
+// CRITICAL: all logger output MUST go to stderr (fd 2). stdout is reserved
+// for MCP JSON-RPC frames; any bytes on stdout that aren't valid JSON-RPC
+// get rejected by Claude Desktop with a schema error listing pino keys
+// (level, time, pid, hostname, msg) as unrecognized_keys.
+//
+// Pass pino.destination(2) as the second arg unconditionally so every path
+// (TTY dev run, non-TTY Claude Desktop subprocess, test mode) ends up on
+// stderr. The transport config only gates pino-pretty formatting, not the
+// destination.
 export const logger = pino(
   {
     level: process.env.LOG_LEVEL || "info",
@@ -25,13 +34,12 @@ export const logger = pino(
           colorize: true,
           singleLine: true,
           translateTime: "SYS:standard",
-          destination: 2, // stderr -- stdout is reserved for MCP JSON-RPC
+          destination: 2,
         },
       },
     }),
   },
-  // When no transport (test mode), write to stderr directly
-  process.env.NODE_ENV === "test" ? pino.destination(2) : undefined,
+  pino.destination(2),
 );
 
 // ============================================
