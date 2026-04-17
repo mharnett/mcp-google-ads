@@ -53,6 +53,18 @@ GoogleAdsManager.createCampaign to use buildCampaignCreatePayload + attach
 criteria post-campaign-create; updated handler to thread through new params.
 All 8 new tests + 231 existing tests still pass (239/8).
 
+### Cycle 8f — normalizeCallToAction maps enum names to display text [hotfix 2026-04-17]
+RED: 7 new tests + 1 existing-contract test that asserted call_to_action_text === "LEARN_MORE"
+— now updated to expect "Learn more". Discovered during live DG ad creation: Google
+rejects the enum-style name with "Invalid call to action text." because
+DemandGenMultiAssetAdInfo.call_to_action_text takes display strings ("Learn more",
+"Sign up", etc.), not the CallToActionType enum names.
+GREEN: added normalizeCallToAction() with a 17-entry mapping (LEARN_MORE → "Learn more",
+etc.). buildDemandGenAdPayload now runs inputs through the normalizer. Unknown values
+pass through so the server's error surfaces instead of a silent fallback. +35 LOC.
+302 → 309 passing, 0 regressions.
+REFACTOR: none.
+
 ### Cycle 8e — isDemandGenAdGroup accepts parent-campaign signal [hotfix 2026-04-17]
 RED: 5 tests for new pure helper `isDemandGenAdGroup(row)`. Reason for red:
 the function didn't exist. Discovered during live DG ad creation on

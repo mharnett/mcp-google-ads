@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { validateDemandGenAd, buildDemandGenAdPayload, isDemandGenAdGroup } from "./validateDemandGenAd.js";
+import { validateDemandGenAd, buildDemandGenAdPayload, isDemandGenAdGroup, normalizeCallToAction } from "./validateDemandGenAd.js";
 
 const BASE_VALID = {
   final_urls: ["https://example.com/"],
@@ -122,7 +122,7 @@ describe("buildDemandGenAdPayload", () => {
     expect(payload.ad_group).toBe("customers/1234567890/adGroups/777");
     const dgAd = payload.ad.demand_gen_multi_asset_ad;
     expect(dgAd.business_name).toBe("Example Org");
-    expect(dgAd.call_to_action_text).toBe("LEARN_MORE");
+    expect(dgAd.call_to_action_text).toBe("Learn more");
     expect(dgAd.marketing_images).toEqual([
       { asset: "customers/1234567890/assets/123" },
     ]);
@@ -202,5 +202,45 @@ describe("isDemandGenAdGroup — accepts campaign channel_type as canonical chec
   it("rejects an empty row", () => {
     expect(isDemandGenAdGroup({})).toBe(false);
     expect(isDemandGenAdGroup(null as any)).toBe(false);
+  });
+});
+
+describe("normalizeCallToAction — maps enum names to Google display text", () => {
+  it("LEARN_MORE -> 'Learn more'", () => {
+    expect(normalizeCallToAction("LEARN_MORE")).toBe("Learn more");
+  });
+  it("SIGN_UP -> 'Sign up'", () => {
+    expect(normalizeCallToAction("SIGN_UP")).toBe("Sign up");
+  });
+  it("VISIT_SITE -> 'Visit site'", () => {
+    expect(normalizeCallToAction("VISIT_SITE")).toBe("Visit site");
+  });
+  it("already display-cased 'Learn more' passes through unchanged", () => {
+    expect(normalizeCallToAction("Learn more")).toBe("Learn more");
+  });
+  it("unknown value passes through unchanged (server decides)", () => {
+    expect(normalizeCallToAction("BANANA_TIME")).toBe("BANANA_TIME");
+  });
+  it("lower-case enum name still maps", () => {
+    expect(normalizeCallToAction("learn_more")).toBe("Learn more");
+  });
+});
+
+describe("buildDemandGenAdPayload — call_to_action_text uses display text", () => {
+  it("sends 'Learn more' when input call_to_action is LEARN_MORE", () => {
+    const payload = buildDemandGenAdPayload({
+      customer_id_clean: "9639325299",
+      ad_group_id: "194364862223",
+      input: {
+        final_urls: ["https://example.com/"],
+        business_name: "Example",
+        call_to_action: "LEARN_MORE",
+        marketing_image_asset_ids: ["123"],
+        headlines: ["H1"],
+        long_headlines: ["Long headline under ninety characters please."],
+        descriptions: ["D1"],
+      },
+    });
+    expect((payload.ad.demand_gen_multi_asset_ad as any).call_to_action_text).toBe("Learn more");
   });
 });

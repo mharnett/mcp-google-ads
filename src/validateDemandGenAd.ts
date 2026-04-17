@@ -70,7 +70,7 @@ export function buildDemandGenAdPayload(args: {
 
   const dgAd: Record<string, any> = {
     business_name: input.business_name,
-    call_to_action_text: input.call_to_action,
+    call_to_action_text: normalizeCallToAction(input.call_to_action),
     marketing_images: input.marketing_image_asset_ids.map(assetRef),
     headlines: input.headlines.map((h) => ({ text: headlineText(h) })),
     descriptions: input.descriptions.map((t) => ({ text: t })),
@@ -183,4 +183,42 @@ export function isDemandGenAdGroup(row: any): boolean {
     campaignChannelType === DEMAND_GEN_CHANNEL_TYPE ||
     campaignChannelType === "DEMAND_GEN"
   );
+}
+
+/**
+ * Google Ads' DemandGenMultiAssetAdInfo.call_to_action_text accepts a closed
+ * set of DISPLAY strings (e.g. "Learn more") — NOT the enum-style names
+ * (e.g. "LEARN_MORE") that are used in the CallToActionType enum. The server
+ * rejects enum-style names with "Invalid call to action text."
+ *
+ * This helper normalizes enum-style names to the display strings Google
+ * accepts. Display-cased strings pass through unchanged. Unknown values pass
+ * through so the server's error (rather than a silent fallback) surfaces.
+ *
+ * Discovered during live Survey Measure launch 2026-04-17.
+ */
+const CTA_DISPLAY_MAP: Record<string, string> = {
+  LEARN_MORE: "Learn more",
+  GET_QUOTE: "Get quote",
+  APPLY_NOW: "Apply now",
+  SIGN_UP: "Sign up",
+  CONTACT_US: "Contact us",
+  SUBSCRIBE: "Subscribe",
+  DOWNLOAD: "Download",
+  BOOK_NOW: "Book now",
+  SHOP_NOW: "Shop now",
+  BUY_NOW: "Buy now",
+  DONATE_NOW: "Donate now",
+  ORDER_NOW: "Order now",
+  PLAY_NOW: "Play now",
+  SEE_MORE: "See more",
+  START_NOW: "Start now",
+  VISIT_SITE: "Visit site",
+  WATCH_NOW: "Watch now",
+};
+
+export function normalizeCallToAction(input: string): string {
+  if (!input) return input;
+  const key = input.toUpperCase();
+  return CTA_DISPLAY_MAP[key] ?? input;
 }
