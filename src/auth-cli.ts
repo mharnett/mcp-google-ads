@@ -23,10 +23,11 @@
 // All auth errors fail fast (invalid_grant, 401, 403) per the repo-wide
 // resilience contract — only network/5xx/rate-limit transients are retried.
 
+import { realpathSync } from "fs";
 import { GoogleAdsApi } from "google-ads-api";
 import http from "http";
 import promptsImport from "prompts";
-import { URL } from "url";
+import { URL, fileURLToPath } from "url";
 import { writeStoredCredentials, credentialsFilePath, CREDENTIALS_FILE_VERSION, type StoredCredentials } from "./credentials.js";
 import {
   EMBEDDED_CLIENT_ID,
@@ -531,11 +532,22 @@ function randomState(): string {
 // ENTRY
 // ============================================
 
-// Only run when invoked as a script (not imported as a module from tests)
-const isMain =
-  import.meta.url === `file://${process.argv[1]}` ||
-  process.argv[1]?.endsWith("/auth-cli.js") ||
-  process.argv[1]?.endsWith("\\auth-cli.js");
+// Only run when invoked as a script (not imported as a module from tests).
+// Compare real paths so npx / .bin symlink invocation is detected correctly —
+// process.argv[1] is the symlink (e.g. .bin/mcp-google-ads-auth) while
+// import.meta.url resolves to the real file, so naive equality fails.
+function isMainModule(): boolean {
+  if (!process.argv[1]) return false;
+  try {
+    const scriptRealPath = realpathSync(process.argv[1]);
+    const moduleRealPath = realpathSync(fileURLToPath(import.meta.url));
+    return scriptRealPath === moduleRealPath;
+  } catch {
+    return false;
+  }
+}
+
+const isMain = isMainModule();
 
 if (isMain) {
   run().catch((err) => {

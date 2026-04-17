@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.2.1] - 2026-04-17
+
+### Fixed
+- **`mcp-google-ads-auth` silently exited when invoked via npx / npm `.bin` symlink.**
+  The entrypoint guard compared `process.argv[1]` (symlink path like
+  `.bin/mcp-google-ads-auth`) to `import.meta.url` (resolved real path to
+  `dist/auth-cli.js`), so `isMain` evaluated false and `run()` never executed —
+  no browser opened, no error printed. Now compares `fs.realpathSync` of both
+  sides. Added regression test that invokes `dist/auth-cli.js` via a symlink.
+
 ## [1.2.0] - 2026-04-17
 
 ### Added
