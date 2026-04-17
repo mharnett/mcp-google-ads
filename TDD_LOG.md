@@ -53,6 +53,19 @@ GoogleAdsManager.createCampaign to use buildCampaignCreatePayload + attach
 criteria post-campaign-create; updated handler to thread through new params.
 All 8 new tests + 231 existing tests still pass (239/8).
 
+### Cycle 8b — Dedicated budget (explicitly_shared: false) [hotfix 2026-04-17]
+RED: `budget is dedicated (not shared)` — field was undefined; Google Ads
+API defaults to explicitly_shared=true when omitted, which makes auto-
+bidding strategies (MAXIMIZE_CONVERSIONS, TARGET_CPA, etc.) reject with
+"Bidding strategy type is incompatible with shared budget". Discovered
+during live DG campaign creation attempt for Survey Measure — 4 orphan
+shared budgets created before the fix.
+GREEN: added `explicitly_shared: false` to the budget payload in
+`campaignBuilder.ts` (+8 LOC incl comment). Updated back-compat test to
+include the new field (contract evolution). 274 → 275 passing, zero
+regressions.
+REFACTOR: none.
+
 ---
 
 ## Commit 2 — Ad group types + image asset upload

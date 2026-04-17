@@ -47,6 +47,12 @@ export function buildCampaignCreatePayload(input: CampaignCreateInput): Campaign
     name: `${input.name} Budget`,
     amount_micros: input.budget_amount_micros,
     delivery_method: enums.BudgetDeliveryMethod.STANDARD,
+    // Google Ads API defaults to explicitly_shared=true when omitted, which
+    // makes auto-bidding strategies (MAXIMIZE_CONVERSIONS, TARGET_CPA, etc.)
+    // reject with "Bidding strategy type is incompatible with shared budget".
+    // Every MCP-created campaign has a 1:1 dedicated budget, so pin this
+    // explicitly to false.
+    explicitly_shared: false,
   };
 
   const channelType = input.channel_type ?? "SEARCH";

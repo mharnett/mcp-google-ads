@@ -9,11 +9,13 @@ describe("buildCampaignCreatePayload — back-compat gate", () => {
       budget_amount_micros: 10_000_000,
     });
 
-    // Budget payload shape
+    // Budget payload shape — always dedicated (explicitly_shared: false)
+    // to stay compatible with auto-bidding strategies.
     expect(plan.budget).toEqual({
       name: "Test Campaign Budget",
       amount_micros: 10_000_000,
       delivery_method: enums.BudgetDeliveryMethod.STANDARD,
+      explicitly_shared: false,
     });
 
     // Campaign payload shape — status paused, SEARCH channel, manual_cpc
@@ -31,6 +33,22 @@ describe("buildCampaignCreatePayload — back-compat gate", () => {
     // No start/end date
     expect(plan.campaign.start_date).toBeUndefined();
     expect(plan.campaign.end_date).toBeUndefined();
+  });
+});
+
+describe("buildCampaignCreatePayload — budget is dedicated (not shared)", () => {
+  it("emits explicitly_shared: false on the budget so auto-bidding strategies work", () => {
+    // Google Ads API defaults explicitly_shared to true when omitted, which
+    // makes MAXIMIZE_CONVERSIONS / TARGET_CPA reject with 'Bidding strategy
+    // type is incompatible with shared budget'. Every campaign we create has
+    // a 1:1 dedicated budget, so this field must always be false.
+    const plan = buildCampaignCreatePayload({
+      name: "Dedicated Budget Test",
+      budget_amount_micros: 10_000_000,
+      channel_type: "DEMAND_GEN",
+      bidding_strategy: "MAXIMIZE_CONVERSIONS",
+    });
+    expect(plan.budget.explicitly_shared).toBe(false);
   });
 });
 
