@@ -1,5 +1,34 @@
 # Changelog
 
+## [1.2.5] - 2026-04-17
+
+### Added
+- **`./auth-cli` subpath export.** Downstream packages (notably the new
+  `mcp-google-ads-auth` stub) can now `import { run } from "mcp-google-ads/auth-cli"`
+  to invoke the OAuth helper programmatically. Complements the existing `.`
+  root export.
+
+## [1.2.4] - 2026-04-17
+
+### Changed
+- **Account picker now forces drill-down past MCCs** so users can't accidentally
+  terminate their selection on a Manager account. Top level shows direct-access
+  leaves plus a "pick an MCC" entry for each MCC with enumerated children;
+  selecting an MCC opens a second picker showing only its leaf clients.
+  Previously the one-flat-list picker let users pick an MCC terminally, which
+  most tools can't operate on — we hit this in production (user picked the
+  Flowspace MCC 232-625-3482 instead of the child 745-851-7309).
+- **Single-account auto-select now refuses MCCs.** If the only accessible
+  account is a Manager, the CLI errors out with a clear message instead of
+  silently picking the wrong thing.
+
+### Added
+- **`scripts/check-embedded.mjs` gates `npm publish`.** `prepublishOnly` now
+  aborts if `EMBEDDED_CLIENT_ID / CLIENT_SECRET / DEVELOPER_TOKEN` aren't in
+  env. Prevents a repeat of the v1.2.1 mistake where a plain `npm publish`
+  from a shell without the release script shipped a credential-less build.
+  Correct publishes still work via `scripts/release.sh`.
+
 ## [1.2.3] - 2026-04-17
 
 ### Fixed

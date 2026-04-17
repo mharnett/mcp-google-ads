@@ -395,37 +395,56 @@ async function pickAccount(
   }
 
   if (accounts.length === 1) {
+    const only = accounts[0];
+    if (only.isManager) {
+      // An MCC is almost never the right terminal selection — the tools operate
+      // on a single leaf customer. If there's only one accessible account and
+      // it's an MCC, fail loudly rather than silently auto-picking it.
+      throw new Error(
+        `Only one accessible account and it is a Manager (MCC): ${only.name} (${only.id}). ` +
+          `Most tools need a child (leaf) customer account. Grant your Google user direct ` +
+          `access to a specific client account under that MCC and re-run the auth helper.`,
+      );
+    }
     process.stderr.write(
-      `\nOnly one account accessible: ${accounts[0].name} (${accounts[0].id}). Auto-selecting.\n`,
+      `\nOnly one account accessible: ${only.name} (${only.id}). Auto-selecting.\n`,
     );
-    return accounts[0];
+    return only;
   }
 
-  // Sort: non-manager accounts grouped under their MCC parent, MCCs first
-  const sorted = [...accounts].sort((a, b) => {
-    const aKey = a.parentMccId ? `${a.parentMccId}:1:${a.name}` : `${a.id}:0:${a.name}`;
-    const bKey = b.parentMccId ? `${b.parentMccId}:1:${b.name}` : `${b.id}:0:${b.name}`;
-    return aKey.localeCompare(bKey);
+  // Filter out MCCs from the top-level picker only when they have enumerated
+  // children (so the user will see those children). A childless MCC (either
+  // because enumeration failed or it genuinely has no accessible children)
+  // is still selectable in case the user really wants to operate at MCC level.
+  const leafChildren = (mccId: string): AccessibleAccount[] =>
+    accounts.filter((a) => a.parentMccId === mccId);
+
+  const topLevel = accounts.filter((a) => {
+    if (a.parentMccId) return false;
+    if (a.isManager && leafChildren(a.id).length > 0) return false;
+    return true;
   });
 
-  const choices = sorted.map((acct) => {
-    const prefix = acct.parentMccId ? "    ↳ " : acct.isManager ? "📁 " : "• ";
-    const mccSuffix = acct.parentMccId ? "" : acct.isManager ? " (MCC)" : "";
-    return {
-      title: `${prefix}${acct.name} — ${acct.id}${mccSuffix}`,
-      value: acct,
-      disabled: acct.isManager && accounts.some((a) => a.parentMccId === acct.id)
-        ? false // MCC is still selectable in case user actually wants it
-        : false,
-    };
-  });
+  const topLevelChoices = topLevel.map((acct) => ({
+    title: acct.isManager
+      ? `📁 ${acct.name} — ${acct.id} (MCC, no enumerated children)`
+      : `• ${acct.name} — ${acct.id}`,
+    value: { kind: "leaf" as const, account: acct },
+  }));
 
-  const response = await prompts(
+  const mccChoices = accounts
+    .filter((a) => a.isManager && leafChildren(a.id).length > 0)
+    .map((mcc) => ({
+      title: `📁 ${mcc.name} — ${mcc.id}  (${leafChildren(mcc.id).length} children)`,
+      value: { kind: "mcc" as const, account: mcc },
+    }));
+
+  const first = await prompts(
     {
       type: "select",
-      name: "account",
+      name: "choice",
       message: "Which Google Ads account should Claude use?",
-      choices,
+      choices: [...topLevelChoices, ...mccChoices],
       initial: 0,
     },
     {
@@ -435,10 +454,37 @@ async function pickAccount(
     },
   );
 
-  if (!response.account) {
-    throw new Error("No account selected");
+  if (!first.choice) throw new Error("No account selected");
+
+  if (first.choice.kind === "leaf") {
+    return first.choice.account as AccessibleAccount;
   }
-  return response.account as AccessibleAccount;
+
+  // User picked an MCC → drill into its children
+  const mcc = first.choice.account as AccessibleAccount;
+  const children = leafChildren(mcc.id);
+  const childChoices = children.map((child) => ({
+    title: `• ${child.name} — ${child.id}`,
+    value: child,
+  }));
+
+  const second = await prompts(
+    {
+      type: "select",
+      name: "account",
+      message: `Pick the client account under ${mcc.name}:`,
+      choices: childChoices,
+      initial: 0,
+    },
+    {
+      onCancel: () => {
+        throw new Error("Cancelled by user");
+      },
+    },
+  );
+
+  if (!second.account) throw new Error("No account selected");
+  return second.account as AccessibleAccount;
 }
 
 // ============================================
