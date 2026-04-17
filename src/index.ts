@@ -38,6 +38,14 @@ import {
   buildCampaignCreatePayload,
   type CampaignCreateInput,
 } from "./campaignBuilder.js";
+import {
+  buildAdGroupCreatePayload,
+  type AdGroupTypeName,
+} from "./adGroupBuilder.js";
+import {
+  prepareImageForUpload,
+  type ImageInput,
+} from "./imageAsset.js";
 import { GoogleAdsApi, enums, resources, MutateOperation } from "google-ads-api";
 import { readFileSync, existsSync } from "fs";
 import { z } from "zod";
@@ -200,6 +208,18 @@ import { onPosixSignal } from "./platform.js";
 // ============================================
 // GOOGLE ADS CLIENT
 // ============================================
+
+/** Map our internal PNG/JPEG/GIF mime-type strings to the Google Ads MimeType enum. */
+function mimeToAssetMimeEnum(mime: "image/png" | "image/jpeg" | "image/gif"): number {
+  switch (mime) {
+    case "image/png":
+      return enums.MimeType.IMAGE_PNG;
+    case "image/jpeg":
+      return enums.MimeType.IMAGE_JPEG;
+    case "image/gif":
+      return enums.MimeType.IMAGE_GIF;
+  }
+}
 
 class GoogleAdsManager {
   private api: GoogleAdsApi;
@@ -541,7 +561,7 @@ class GoogleAdsManager {
   private async autoLabelCreated(
     customerId: string,
     resourceNames: string[],
-    assetType: "campaign" | "ad_group" | "ad" | "keyword" | "shared_set"
+    assetType: "campaign" | "ad_group" | "ad" | "keyword" | "shared_set" | "asset"
   ): Promise<string | null> {
     if (!resourceNames?.length) return null;
     const labelName = this.todayClaudeLabel();
@@ -570,6 +590,25 @@ class GoogleAdsManager {
             await withResilience(() => sharedSetLabels.create(ops), "labelSharedSets");
           } else {
             console.error(`[INFO] sharedSetLabels endpoint not available — skipping auto-label for shared set`);
+          }
+          break;
+        }
+        case "asset": {
+          // Auto-label an uploaded asset via customer.customerAssetLabels.
+          // Some API versions / endpoints expose this differently; fall back
+          // to best-effort logging if the endpoint isn't available in v23.
+          const customer = this.getCustomer(customerId);
+          const customerAssetLabels = (customer as any).customerAssetLabels || (customer as any).assetLabels;
+          if (customerAssetLabels?.create) {
+            const ops = resourceNames.map(rn => ({ asset: rn, label: labelRN }));
+            try {
+              await withResilience(() => customerAssetLabels.create(ops), "labelAssets");
+            } catch (e: any) {
+              // Non-fatal — the asset was created, labeling is best-effort.
+              console.error(`[WARN] asset labeling failed: ${e.message}`);
+            }
+          } else {
+            console.error(`[INFO] customerAssetLabels endpoint not available — skipping auto-label for asset`);
           }
           break;
         }
@@ -714,31 +753,111 @@ class GoogleAdsManager {
     return campaignResult;
   }
 
-  // Create an ad group (paused by default)
+  // Create an ad group (paused by default). Supports SEARCH_STANDARD (default,
+  // back-compat) and DEMAND_GEN_MULTI_ASSET_AD_GROUP. DG path flows through
+  // mutateResources because the v23 client enum map is missing the DG value;
+  // see adGroupBuilder.ts for details.
   async createAdGroup(customerId: string, adGroup: {
     name: string;
     campaign_id: string;
     cpc_bid_micros?: number;
+    type?: AdGroupTypeName;
   }) {
     const customer = this.getCustomer(customerId);
+    const cleanId = customerId.replace(/-/g, "");
 
-    const result = await withResilience(
-      () =>
-        customer.adGroups.create([{
-          name: adGroup.name,
-          campaign: `customers/${customerId.replace(/-/g, "")}/campaigns/${adGroup.campaign_id}`,
-          status: enums.AdGroupStatus.PAUSED, // Always create paused
-          cpc_bid_micros: adGroup.cpc_bid_micros || 1000000, // $1.00 default
-          type: enums.AdGroupType.SEARCH_STANDARD,
-        }]),
-      "createAdGroup"
-    );
+    const payload = buildAdGroupCreatePayload({
+      customer_id_clean: cleanId,
+      name: adGroup.name,
+      campaign_id: adGroup.campaign_id,
+      cpc_bid_micros: adGroup.cpc_bid_micros,
+      type: adGroup.type,
+    });
+
+    let result: any;
+    if (adGroup.type === "DEMAND_GEN_MULTI_ASSET_AD_GROUP") {
+      // Bypass the client-side enum validator. mutateResources accepts the
+      // raw numeric proto value (21).
+      const mutateResp = await withResilience(
+        () =>
+          customer.mutateResources([
+            {
+              entity: "ad_group",
+              operation: "create",
+              resource: payload as any,
+            } as any,
+          ]),
+        "createAdGroup.demandGen"
+      );
+      result = {
+        results: (mutateResp.mutate_operation_responses || [])
+          .map((r: any) => r.ad_group_result)
+          .filter(Boolean),
+      };
+    } else {
+      result = await withResilience(
+        () => customer.adGroups.create([payload as any]),
+        "createAdGroup"
+      );
+    }
 
     // GLOBAL rule: auto-apply Claude-MM-DD-YY label to the new ad group
     const adGroupRNs = ((result as any).results || []).map((r: any) => r.resource_name).filter(Boolean);
     await this.autoLabelCreated(customerId, adGroupRNs, "ad_group");
 
     return result;
+  }
+
+
+  // Create an image asset for use in Demand Gen (or other image-capable) ads.
+  // Validates mime type (PNG/JPEG/GIF), size (≤5MB), and min dimensions (600x314)
+  // before hitting the API. Auto-labels the created asset.
+  async createImageAsset(customerId: string, input: ImageInput) {
+    const prepared = prepareImageForUpload(input);
+    if (!prepared.valid) {
+      throw new Error("Image validation failed:\n" + prepared.errors.join("\n"));
+    }
+
+    const customer = this.getCustomer(customerId);
+
+    const result = await withResilience(
+      () =>
+        customer.assets.create([
+          {
+            name: input.name,
+            type: enums.AssetType.IMAGE,
+            image_asset: {
+              data: prepared.bytes!,
+              file_size: prepared.bytes!.length,
+              mime_type: mimeToAssetMimeEnum(prepared.mime_type!),
+              full_size: {
+                width_pixels: prepared.width!,
+                height_pixels: prepared.height!,
+                url: "",
+              },
+            },
+          } as any,
+        ]),
+      "createImageAsset"
+    );
+
+    const results = (result as any).results || [];
+    const resourceName: string | undefined = results[0]?.resource_name;
+    const assetId = resourceName ? resourceName.split("/").pop() : undefined;
+
+    if (resourceName) {
+      await this.autoLabelCreated(customerId, [resourceName], "asset");
+    }
+
+    return {
+      asset_id: assetId,
+      resource_name: resourceName,
+      name: input.name,
+      bytes: prepared.bytes!.length,
+      mime_type: prepared.mime_type!,
+      width: prepared.width,
+      height: prepared.height,
+    };
   }
 
   // Create a responsive search ad (paused by default)
@@ -2074,6 +2193,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           name: args?.name as string,
           campaign_id: args?.campaign_id as string,
           cpc_bid_micros: args?.cpc_bid ? Math.round((args.cpc_bid as number) * 1000000) : undefined,
+          type: args?.type as AdGroupTypeName | undefined,
         });
         return {
           content: [{
@@ -2869,6 +2989,30 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             text: JSON.stringify(result, null, 2),
           }],
         };
+      }
+
+      case "google_ads_create_image_asset": {
+        const customerId = args?.customer_id as string || "";
+        try {
+          const result = await adsManager.createImageAsset(customerId, {
+            name: args?.name as string,
+            file_path: args?.file_path as string | undefined,
+            base64_data: args?.base64_data as string | undefined,
+          });
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({ success: true, ...result }, null, 2),
+            }],
+          };
+        } catch (e: any) {
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({ success: false, error: e.message }, null, 2),
+            }],
+          };
+        }
       }
 
       default:

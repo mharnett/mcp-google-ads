@@ -155,7 +155,7 @@ export const tools: Tool[] = [
   },
   {
     name: "google_ads_create_ad_group",
-    description: "Create a new ad group (will be PAUSED until approved). Returns ad group ID.",
+    description: "Create a new ad group (will be PAUSED until approved). Returns ad group ID. type defaults to SEARCH_STANDARD for back-compat; use DEMAND_GEN_MULTI_ASSET_AD_GROUP for Demand Gen campaigns.",
     inputSchema: {
       additionalProperties: false,
       type: "object",
@@ -164,6 +164,11 @@ export const tools: Tool[] = [
         campaign_id: { type: "string" },
         name: { type: "string" },
         cpc_bid: { type: "number", description: "CPC bid in dollars" },
+        type: {
+          type: "string",
+          enum: ["SEARCH_STANDARD", "DEMAND_GEN_MULTI_ASSET_AD_GROUP"],
+          description: "Ad group type. Defaults to SEARCH_STANDARD. Use DEMAND_GEN_MULTI_ASSET_AD_GROUP for Demand Gen campaigns.",
+        },
       },
       required: ["campaign_id", "name"],
     },
@@ -790,6 +795,21 @@ export const tools: Tool[] = [
         },
       },
       required: ["keywords"],
+    },
+  },
+  {
+    name: "google_ads_create_image_asset",
+    description: "Upload an image asset for use in Demand Gen (or other image-capable) ads. Provide exactly one of file_path (absolute path to PNG/JPG/GIF on disk) or base64_data (raw base64, no data URL prefix). Validates mime type, max 5MB, min dimensions 600x314 (Demand Gen minimum). Auto-labels the created asset. Returns {asset_id, resource_name, name, bytes, mime_type}.",
+    inputSchema: {
+      additionalProperties: false,
+      type: "object",
+      properties: {
+        customer_id: { type: "string" },
+        name: { type: "string", description: "Human-readable asset name (shown in the Google Ads UI)." },
+        file_path: { type: "string", description: "Absolute path to the image on disk. Mutually exclusive with base64_data." },
+        base64_data: { type: "string", description: "Raw base64-encoded image data (no 'data:image/...;base64,' prefix). Mutually exclusive with file_path." },
+      },
+      required: ["name"],
     },
   },
 ];

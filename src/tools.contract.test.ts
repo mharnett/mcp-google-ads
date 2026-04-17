@@ -43,6 +43,7 @@ describe("Tool Schema Contract", () => {
     "google_ads_update_asset_urls",
     "google_ads_pause_asset_links",
     "google_ads_keyword_volume",
+    "google_ads_create_image_asset",
   ];
 
   it("exports the expected number of tools", () => {
@@ -119,6 +120,25 @@ describe("Tool Schema Contract", () => {
       expect(props.language_id?.type).toBe("string");
       expect(props.start_date?.type).toBe("string");
       expect(props.end_date?.type).toBe("string");
+    });
+
+    it("create_image_asset requires name and accepts file_path or base64_data", () => {
+      const tool = tools.find(t => t.name === "google_ads_create_image_asset");
+      expect(tool).toBeDefined();
+      const schema = tool!.inputSchema as any;
+      expect(schema.required).toContain("name");
+      expect(schema.properties.file_path?.type).toBe("string");
+      expect(schema.properties.base64_data?.type).toBe("string");
+      expect(schema.properties.name?.type).toBe("string");
+    });
+
+    it("create_ad_group accepts type SEARCH_STANDARD | DEMAND_GEN_MULTI_ASSET_AD_GROUP", () => {
+      const tool = tools.find(t => t.name === "google_ads_create_ad_group");
+      const props = (tool!.inputSchema as any).properties;
+      expect(props.type?.enum).toEqual([
+        "SEARCH_STANDARD",
+        "DEMAND_GEN_MULTI_ASSET_AD_GROUP",
+      ]);
     });
 
     it("keyword_performance requires date range", () => {
