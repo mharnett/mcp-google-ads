@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.2.2] - 2026-04-17
+
+### Fixed
+- Re-release of 1.2.1 through `scripts/release.sh` so embedded OAuth client ID,
+  client secret, and developer token are baked into `dist/embedded-secrets.js`
+  at publish time. 1.2.1 was published via plain `npm publish` and shipped
+  without embedded credentials, causing `mcp-google-ads-auth` to refuse to
+  start with "This build of mcp-google-ads was published without embedded
+  OAuth credentials." Users should upgrade to 1.2.2.
+
 ## [1.2.1] - 2026-04-17
 
 ### Fixed
