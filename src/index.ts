@@ -46,6 +46,11 @@ import {
   prepareImageForUpload,
   type ImageInput,
 } from "./imageAsset.js";
+import {
+  validateDemandGenAd,
+  buildDemandGenAdPayload,
+  type DemandGenAdInput,
+} from "./validateDemandGenAd.js";
 import { GoogleAdsApi, enums, resources, MutateOperation } from "google-ads-api";
 import { readFileSync, existsSync } from "fs";
 import { z } from "zod";
@@ -935,6 +940,90 @@ class GoogleAdsManager {
     await this.autoLabelCreated(customerId, adRNs, "ad");
 
     return result;
+  }
+
+  // Create a Demand Gen multi-asset ad (paused by default). Validates character
+  // limits and count caps before hitting the API. Fails fast if the ad_group
+  // isn't a DEMAND_GEN_MULTI_ASSET_AD_GROUP. Uses mutateResources because the
+  // v23 typed helper doesn't know about DG ad types.
+  async createDemandGenMultiAssetAd(
+    customerId: string,
+    input: DemandGenAdInput & { ad_group_id: string; labels?: string[] }
+  ) {
+    // Validate before anything else — catches character/count issues cleanly.
+    const validation = validateDemandGenAd(input);
+    if (!validation.valid) {
+      throw new Error("Demand Gen ad validation failed:\n" + validation.errors.join("\n"));
+    }
+
+    const customer = this.getCustomer(customerId);
+    const cleanId = customerId.replace(/-/g, "");
+
+    // Guard: the ad_group must be a Demand Gen ad group.
+    const agRows = await withResilience(
+      () =>
+        customer.query(
+          `SELECT ad_group.id, ad_group.type FROM ad_group WHERE ad_group.id = ${sanitizeNumericId(
+            input.ad_group_id
+          )}`
+        ),
+      "createDemandGenMultiAssetAd.adGroupLookup"
+    );
+    if (!agRows || agRows.length === 0) {
+      throw new Error(`Ad group ${input.ad_group_id} not found`);
+    }
+    const agType = (agRows[0] as any)?.ad_group?.type;
+    // DG ad group is proto value 21 (not in v23 enum map). We accept either the
+    // numeric 21 or the string "DEMAND_GEN_MULTI_ASSET_AD_GROUP" the server may
+    // return — future-proof against the client library picking up the name.
+    const isDgAdGroup =
+      agType === 21 || agType === "DEMAND_GEN_MULTI_ASSET_AD_GROUP" || agType === "21";
+    if (!isDgAdGroup) {
+      throw new Error(
+        `Ad group ${input.ad_group_id} has type '${agType}', not DEMAND_GEN_MULTI_ASSET_AD_GROUP. Use google_ads_create_ad_group with type=DEMAND_GEN_MULTI_ASSET_AD_GROUP first.`
+      );
+    }
+
+    const payload = buildDemandGenAdPayload({
+      customer_id_clean: cleanId,
+      ad_group_id: input.ad_group_id,
+      input,
+    });
+
+    const mutateResp: any = await withResilience(
+      () =>
+        customer.mutateResources([
+          {
+            entity: "ad_group_ad",
+            operation: "create",
+            resource: payload as any,
+          } as any,
+        ]),
+      "createDemandGenMultiAssetAd"
+    );
+
+    const adGroupAdResult = (mutateResp.mutate_operation_responses || [])
+      .map((r: any) => r.ad_group_ad_result)
+      .filter(Boolean)[0];
+    const resourceName: string | undefined = adGroupAdResult?.resource_name;
+
+    if (resourceName) {
+      await this.autoLabelCreated(customerId, [resourceName], "ad");
+      // Extra caller-supplied labels (on top of the auto Claude-MM-DD-YY label)
+      for (const lbl of input.labels ?? []) {
+        try {
+          const labelRN = await this.ensureLabelExists(customerId, lbl);
+          await this.labelAdGroupAds(customerId, [resourceName], labelRN);
+        } catch (e: any) {
+          console.error(`[WARN] extra label '${lbl}' failed: ${e.message}`);
+        }
+      }
+    }
+
+    return {
+      resource_name: resourceName,
+      ad_id: resourceName ? resourceName.split("~").pop() : undefined,
+    };
   }
 
   // Create keywords (paused by default, auto-labeled for discoverability)
@@ -2989,6 +3078,47 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             text: JSON.stringify(result, null, 2),
           }],
         };
+      }
+
+      case "google_ads_create_demand_gen_multi_asset_ad": {
+        const customerId = args?.customer_id as string || "";
+        try {
+          const result = await adsManager.createDemandGenMultiAssetAd(customerId, {
+            ad_group_id: args?.ad_group_id as string,
+            final_urls: args?.final_urls as string[],
+            business_name: args?.business_name as string,
+            call_to_action: args?.call_to_action as string,
+            marketing_image_asset_ids: args?.marketing_image_asset_ids as string[],
+            square_marketing_image_asset_ids: args?.square_marketing_image_asset_ids as
+              | string[]
+              | undefined,
+            portrait_marketing_image_asset_ids: args?.portrait_marketing_image_asset_ids as
+              | string[]
+              | undefined,
+            logo_image_asset_ids: args?.logo_image_asset_ids as string[] | undefined,
+            headlines: args?.headlines as Array<string | { text: string; pinned_position?: number }>,
+            long_headlines: args?.long_headlines as string[] | undefined,
+            descriptions: args?.descriptions as string[],
+            labels: args?.labels as string[] | undefined,
+          });
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({
+                success: true,
+                message: "Demand Gen multi-asset ad created (PAUSED). Review in Google Ads before enabling.",
+                ...result,
+              }, null, 2),
+            }],
+          };
+        } catch (e: any) {
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({ success: false, error: e.message }, null, 2),
+            }],
+          };
+        }
       }
 
       case "google_ads_create_image_asset": {

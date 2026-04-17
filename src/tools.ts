@@ -798,6 +798,85 @@ export const tools: Tool[] = [
     },
   },
   {
+    name: "google_ads_create_demand_gen_multi_asset_ad",
+    description: "Create a Demand Gen Multi-Asset ad under a DEMAND_GEN_MULTI_ASSET_AD_GROUP (will be PAUSED until approved). Validates character limits and count caps before the API call: headlines (max 5, ≤40 chars each), long_headlines (max 5, ≤90 chars), descriptions (max 5, ≤90 chars). marketing_image_asset_ids is required (1:1 square images, ≥1); square/portrait/logo assets are optional. call_to_action is a string enum value such as 'LEARN_MORE' or 'SHOP_NOW'. Auto-labels the created ad.",
+    inputSchema: {
+      additionalProperties: false,
+      type: "object",
+      properties: {
+        customer_id: { type: "string" },
+        ad_group_id: { type: "string" },
+        final_urls: { type: "array", items: { type: "string" } },
+        business_name: { type: "string" },
+        call_to_action: {
+          type: "string",
+          description: "CallToAction enum value, e.g. LEARN_MORE, SHOP_NOW, SIGN_UP, DOWNLOAD, BOOK_NOW, CONTACT_US, GET_QUOTE, APPLY_NOW, SUBSCRIBE, BUY_NOW, DONATE_NOW, ORDER_NOW, PLAY_NOW, SEE_MORE, START_NOW, VISIT_SITE, WATCH_NOW.",
+        },
+        marketing_image_asset_ids: {
+          type: "array",
+          items: { type: "string" },
+          description: "1.91:1 landscape marketing image asset IDs (min 1). Get IDs from google_ads_create_image_asset.",
+        },
+        square_marketing_image_asset_ids: {
+          type: "array",
+          items: { type: "string" },
+          description: "Optional 1:1 square marketing image asset IDs.",
+        },
+        portrait_marketing_image_asset_ids: {
+          type: "array",
+          items: { type: "string" },
+          description: "Optional 4:5 portrait marketing image asset IDs.",
+        },
+        logo_image_asset_ids: {
+          type: "array",
+          items: { type: "string" },
+          description: "Optional 1:1 logo image asset IDs.",
+        },
+        headlines: {
+          type: "array",
+          description: "Max 5 headlines, each ≤40 characters. Each item is a string or { text, pinned_position? }.",
+          items: {
+            oneOf: [
+              { type: "string" },
+              {
+                type: "object",
+                properties: {
+                  text: { type: "string" },
+                  pinned_position: { type: "number" },
+                },
+                required: ["text"],
+              },
+            ],
+          },
+        },
+        long_headlines: {
+          type: "array",
+          description: "Max 5 long headlines, each ≤90 characters.",
+          items: { type: "string" },
+        },
+        descriptions: {
+          type: "array",
+          description: "Max 5 descriptions, each ≤90 characters.",
+          items: { type: "string" },
+        },
+        labels: {
+          type: "array",
+          items: { type: "string" },
+          description: "Optional additional labels (auto-applied Claude-MM-DD-YY label is added regardless).",
+        },
+      },
+      required: [
+        "ad_group_id",
+        "final_urls",
+        "business_name",
+        "call_to_action",
+        "marketing_image_asset_ids",
+        "headlines",
+        "descriptions",
+      ],
+    },
+  },
+  {
     name: "google_ads_create_image_asset",
     description: "Upload an image asset for use in Demand Gen (or other image-capable) ads. Provide exactly one of file_path (absolute path to PNG/JPG/GIF on disk) or base64_data (raw base64, no data URL prefix). Validates mime type, max 5MB, min dimensions 600x314 (Demand Gen minimum). Auto-labels the created asset. Returns {asset_id, resource_name, name, bytes, mime_type}.",
     inputSchema: {

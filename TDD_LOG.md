@@ -113,3 +113,44 @@ No new test (prepared-image test covers validation; API wiring is mechanical).
 Added mimeToAssetMimeEnum helper, extended autoLabelCreated to support "asset"
 type, added createImageAsset manager method using customer.assets.create, added
 handler case. Build green; full suite 258 passed / 8 skipped.
+
+---
+
+## Commit 3 — Demand Gen multi-asset ad
+
+### Cycle 20 — google_ads_create_demand_gen_multi_asset_ad tool registered
+RED: expected tool list includes the new tool + required-fields check fails.
+GREEN: added tool schema with business_name, CTA, marketing_image_asset_ids,
+optional image arrays, headlines / long_headlines / descriptions, labels.
+REFACTOR: none.
+
+### Cycle 21 — validateDemandGenAd base case
+RED: module validateDemandGenAd.js missing.
+GREEN: created validateDemandGenAd.ts with headlines/descriptions/long_headlines
+caps + required-field checks (~95 LOC).
+REFACTOR: none.
+
+### Cycles 22-27 — per-rule coverage
+11 tests added at once for: headline >40 / >5 / 0; description >90 / >5;
+long_headline >90 / >5; missing final_urls / marketing_images / business_name /
+call_to_action. All pass from cycle 21's GREEN — kept as regression coverage.
+
+### Cycle 28 — buildDemandGenAdPayload
+RED: `maps asset IDs to resource names` — builder not exported.
+GREEN: added buildDemandGenAdPayload; asset IDs expand to
+`customers/{cid}/assets/{id}`; optional image arrays are only set when
+non-empty. long_headlines are emitted to the payload even though the v23
+typed Ad field stub doesn't include them — the payload goes through
+mutateResources which forwards unknown fields to the server.
+
+### Cycle 29 — Wire createDemandGenMultiAssetAd manager + handler
+No new test (builder + validator are tested; API wiring is mechanical).
+Added manager method that:
+  1. pre-validates with validateDemandGenAd;
+  2. queries the ad_group and fails fast if type != 21 (DG ad group) —
+     the guard accepts numeric 21, string "DEMAND_GEN_MULTI_ASSET_AD_GROUP"
+     and "21" to be forward-compat with any future client enum update;
+  3. submits via customer.mutateResources with entity=ad_group_ad;
+  4. auto-labels the resulting ad + applies any caller-supplied labels.
+
+Full suite 274 passed / 8 skipped.
