@@ -34,6 +34,10 @@ import {
   buildUpdateUrlsDryRun,
   buildPauseLinksDryRun,
 } from "./assetHelpers.js";
+import {
+  buildCampaignCreatePayload,
+  type CampaignCreateInput,
+} from "./campaignBuilder.js";
 import { GoogleAdsApi, enums, resources, MutateOperation } from "google-ads-api";
 import { readFileSync, existsSync } from "fs";
 import { z } from "zod";
@@ -658,23 +662,20 @@ class GoogleAdsManager {
     }
   }
 
-  // Create a campaign (paused by default)
-  async createCampaign(customerId: string, campaign: {
-    name: string;
-    budget_amount_micros: number;
-    advertising_channel_type?: string;
-    bidding_strategy_type?: string;
-  }) {
+  // Create a campaign (paused by default). Supports SEARCH (back-compat) and
+  // DEMAND_GEN channels, plus richer bidding strategies, geo/language targeting,
+  // and start/end dates. The pure payload shape is built by
+  // buildCampaignCreatePayload (see campaignBuilder.ts) so it can be unit-tested
+  // independently of the live API.
+  async createCampaign(customerId: string, campaign: CampaignCreateInput) {
     const customer = this.getCustomer(customerId);
+    const cleanId = customerId.replace(/-/g, "");
+
+    const plan = buildCampaignCreatePayload(campaign);
 
     // First create a budget
     const budgetResult = await withResilience(
-      () =>
-        customer.campaignBudgets.create([{
-          name: `${campaign.name} Budget`,
-          amount_micros: campaign.budget_amount_micros,
-          delivery_method: enums.BudgetDeliveryMethod.STANDARD,
-        }]),
+      () => customer.campaignBudgets.create([plan.budget as any]),
       "createCampaign.budget"
     );
 
@@ -684,17 +685,30 @@ class GoogleAdsManager {
     const campaignResult = await withResilience(
       () =>
         customer.campaigns.create([{
-          name: campaign.name,
-          status: enums.CampaignStatus.PAUSED, // Always create paused
-          advertising_channel_type: enums.AdvertisingChannelType.SEARCH,
+          ...plan.campaign,
           campaign_budget: budgetResourceName,
-          manual_cpc: {}, // Default to manual CPC
-        }]),
+        } as any]),
       "createCampaign"
     );
 
-    // GLOBAL rule: auto-apply Claude-MM-DD-YY label to the new campaign
     const campaignRNs = ((campaignResult as any).results || []).map((r: any) => r.resource_name).filter(Boolean);
+
+    // Attach campaign-level criteria (geo targets, language). Each payload
+    // needs the campaign resource name; criteria are only applied for
+    // DEMAND_GEN / explicit targeting (SEARCH with no geo/lang stays a no-op).
+    if (plan.criteria.length > 0 && campaignRNs.length > 0) {
+      const campaignResourceName = campaignRNs[0];
+      const criterionPayloads = plan.criteria.map((c) => ({
+        ...c,
+        campaign: campaignResourceName,
+      }));
+      await withResilience(
+        () => customer.campaignCriteria.create(criterionPayloads as any),
+        "createCampaign.criteria"
+      );
+    }
+
+    // GLOBAL rule: auto-apply Claude-MM-DD-YY label to the new campaign
     await this.autoLabelCreated(customerId, campaignRNs, "campaign");
 
     return campaignResult;
@@ -2033,6 +2047,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const result = await adsManager.createCampaign(customerId, {
           name: sanitizedName,
           budget_amount_micros: Math.round(daily_budget * 1000000),
+          channel_type: args?.channel_type as "SEARCH" | "DEMAND_GEN" | undefined,
+          bidding_strategy: args?.bidding_strategy as any,
+          target_cpa: args?.target_cpa as number | undefined,
+          target_cpc_cap: args?.target_cpc_cap as number | undefined,
+          geo_target_ids: args?.geo_target_ids as string[] | undefined,
+          language_id: args?.language_id as string | undefined,
+          start_date: args?.start_date as string | undefined,
+          end_date: args?.end_date as string | undefined,
         });
         return {
           content: [{

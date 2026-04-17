@@ -103,6 +103,24 @@ describe("Tool Schema Contract", () => {
       expect((tool!.inputSchema as any).required).toContain("daily_budget");
     });
 
+    it("create_campaign accepts channel_type, bidding_strategy, target_cpa, geo_target_ids, language_id, start_date, end_date", () => {
+      const tool = tools.find(t => t.name === "google_ads_create_campaign");
+      const props = (tool!.inputSchema as any).properties;
+      expect(props.channel_type?.enum).toEqual(["SEARCH", "DEMAND_GEN"]);
+      expect(props.bidding_strategy?.enum).toEqual([
+        "MANUAL_CPC",
+        "MAXIMIZE_CLICKS",
+        "MAXIMIZE_CONVERSIONS",
+        "TARGET_CPA",
+      ]);
+      expect(props.target_cpa?.type).toBe("number");
+      expect(props.target_cpc_cap?.type).toBe("number");
+      expect(props.geo_target_ids?.type).toBe("array");
+      expect(props.language_id?.type).toBe("string");
+      expect(props.start_date?.type).toBe("string");
+      expect(props.end_date?.type).toBe("string");
+    });
+
     it("keyword_performance requires date range", () => {
       const tool = tools.find(t => t.name === "google_ads_keyword_performance");
       expect((tool!.inputSchema as any).required).toContain("start_date");

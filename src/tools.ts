@@ -106,7 +106,7 @@ export const tools: Tool[] = [
   },
   {
     name: "google_ads_create_campaign",
-    description: "Create a new campaign (will be PAUSED until approved). Returns campaign ID.",
+    description: "Create a new campaign (will be PAUSED until approved). Defaults: channel_type=SEARCH, bidding_strategy=MANUAL_CPC (SEARCH) or MAXIMIZE_CONVERSIONS (DEMAND_GEN), language_id=1000 (English). For DEMAND_GEN provide geo_target_ids (Google Ads geo target constant IDs, e.g. '21134' for Alaska). TARGET_CPA requires target_cpa (dollars). MAXIMIZE_CLICKS may take target_cpc_cap (dollars). start_date/end_date are YYYY-MM-DD.",
     inputSchema: {
       additionalProperties: false,
       type: "object",
@@ -114,6 +114,41 @@ export const tools: Tool[] = [
         customer_id: { type: "string" },
         name: { type: "string" },
         daily_budget: { type: "number", description: "Daily budget in dollars" },
+        channel_type: {
+          type: "string",
+          enum: ["SEARCH", "DEMAND_GEN"],
+          description: "Advertising channel type. Defaults to SEARCH.",
+        },
+        bidding_strategy: {
+          type: "string",
+          enum: ["MANUAL_CPC", "MAXIMIZE_CLICKS", "MAXIMIZE_CONVERSIONS", "TARGET_CPA"],
+          description: "Bidding strategy. Defaults to MANUAL_CPC for SEARCH, MAXIMIZE_CONVERSIONS for DEMAND_GEN.",
+        },
+        target_cpa: {
+          type: "number",
+          description: "Target CPA in dollars (required if bidding_strategy=TARGET_CPA).",
+        },
+        target_cpc_cap: {
+          type: "number",
+          description: "Optional CPC ceiling in dollars for MAXIMIZE_CLICKS strategy.",
+        },
+        geo_target_ids: {
+          type: "array",
+          items: { type: "string" },
+          description: "Google Ads geo target constant IDs (e.g. '21134' = Alaska, '21141' = Maine).",
+        },
+        language_id: {
+          type: "string",
+          description: "Language constant ID. Defaults to '1000' (English).",
+        },
+        start_date: {
+          type: "string",
+          description: "YYYY-MM-DD start date (optional).",
+        },
+        end_date: {
+          type: "string",
+          description: "YYYY-MM-DD end date (optional).",
+        },
       },
       required: ["name", "daily_budget"],
     },
