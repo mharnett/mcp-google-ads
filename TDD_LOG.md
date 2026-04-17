@@ -53,6 +53,24 @@ GoogleAdsManager.createCampaign to use buildCampaignCreatePayload + attach
 criteria post-campaign-create; updated handler to thread through new params.
 All 8 new tests + 231 existing tests still pass (239/8).
 
+### Cycle 8e — isDemandGenAdGroup accepts parent-campaign signal [hotfix 2026-04-17]
+RED: 5 tests for new pure helper `isDemandGenAdGroup(row)`. Reason for red:
+the function didn't exist. Discovered during live DG ad creation on
+Survey Measure — UI-created DG campaigns auto-generated ad groups whose
+ad_group.type returns undefined from google-ads-api v23 (because proto
+value 21 isn't in the lib's enum map), causing the old type-only guard
+to reject valid DG ad groups.
+GREEN: added isDemandGenAdGroup() to validateDemandGenAd.ts. Function
+returns true when EITHER (a) ad_group.type is 21 / "21" /
+"DEMAND_GEN_MULTI_ASSET_AD_GROUP" (future-proof for when the lib adds
+the name) OR (b) campaign.advertising_channel_type === 14 / "DEMAND_GEN"
+(the authoritative check: DG campaigns can only contain DG ad groups).
+Updated the guard in createDemandGenMultiAssetAd to use the helper and
+the GAQL query to fetch campaign.advertising_channel_type alongside
+ad_group.type. +35 LOC.
+5 new tests; 297 → 302 passing. 0 regressions.
+REFACTOR: none.
+
 ### Cycle 8d — DEMAND_GEN network_settings: content_network=true [hotfix 2026-04-17]
 RED: `DEMAND_GEN sets network_settings: content_network=true, others=false`
 — previous cycle pinned all four flags to false, but Google Ads API then

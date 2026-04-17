@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { validateDemandGenAd, buildDemandGenAdPayload } from "./validateDemandGenAd.js";
+import { validateDemandGenAd, buildDemandGenAdPayload, isDemandGenAdGroup } from "./validateDemandGenAd.js";
 
 const BASE_VALID = {
   final_urls: ["https://example.com/"],
@@ -164,5 +164,43 @@ describe("buildDemandGenAdPayload", () => {
     expect(dgAd.square_marketing_images).toBeUndefined();
     expect(dgAd.portrait_marketing_images).toBeUndefined();
     expect(dgAd.logo_images).toBeUndefined();
+  });
+});
+
+describe("isDemandGenAdGroup — accepts campaign channel_type as canonical check", () => {
+  it("accepts when ad_group.type is undefined but parent campaign is DEMAND_GEN (14)", () => {
+    // Reproduces the Survey Measure bug: google-ads-api v23 returns undefined
+    // for ad_group.type because proto value 21 isn't in its enum map. The
+    // parent campaign's advertising_channel_type (DEMAND_GEN = 14) is the
+    // authoritative signal — DG campaigns can only contain DG ad groups.
+    const row = {
+      ad_group: { id: 194364862223, type: undefined },
+      campaign: { advertising_channel_type: 14 },
+    };
+    expect(isDemandGenAdGroup(row)).toBe(true);
+  });
+
+  it("accepts when ad_group.type is numeric 21 (future: lib catches up)", () => {
+    expect(isDemandGenAdGroup({ ad_group: { type: 21 } })).toBe(true);
+  });
+
+  it("accepts when ad_group.type is the string 'DEMAND_GEN_MULTI_ASSET_AD_GROUP'", () => {
+    expect(
+      isDemandGenAdGroup({ ad_group: { type: "DEMAND_GEN_MULTI_ASSET_AD_GROUP" } })
+    ).toBe(true);
+  });
+
+  it("rejects when ad_group.type is SEARCH_STANDARD (2) and campaign is SEARCH (2)", () => {
+    expect(
+      isDemandGenAdGroup({
+        ad_group: { type: 2 },
+        campaign: { advertising_channel_type: 2 },
+      })
+    ).toBe(false);
+  });
+
+  it("rejects an empty row", () => {
+    expect(isDemandGenAdGroup({})).toBe(false);
+    expect(isDemandGenAdGroup(null as any)).toBe(false);
   });
 });

@@ -49,6 +49,7 @@ import {
 import {
   validateDemandGenAd,
   buildDemandGenAdPayload,
+  isDemandGenAdGroup,
   type DemandGenAdInput,
 } from "./validateDemandGenAd.js";
 import { GoogleAdsApi, enums, resources, MutateOperation } from "google-ads-api";
@@ -959,11 +960,16 @@ class GoogleAdsManager {
     const customer = this.getCustomer(customerId);
     const cleanId = customerId.replace(/-/g, "");
 
-    // Guard: the ad_group must be a Demand Gen ad group.
+    // Guard: the ad_group must belong to a Demand Gen campaign. We also read
+    // the parent campaign's advertising_channel_type because google-ads-api
+    // v23 returns undefined for ad_group.type when the stored proto value
+    // (21 = DEMAND_GEN_MULTI_ASSET_AD_GROUP) isn't in its local enum map. The
+    // parent campaign's channel type is the authoritative check: DG campaigns
+    // can only contain DG ad groups.
     const agRows = await withResilience(
       () =>
         customer.query(
-          `SELECT ad_group.id, ad_group.type FROM ad_group WHERE ad_group.id = ${sanitizeNumericId(
+          `SELECT ad_group.id, ad_group.type, campaign.advertising_channel_type FROM ad_group WHERE ad_group.id = ${sanitizeNumericId(
             input.ad_group_id
           )}`
         ),
@@ -972,15 +978,11 @@ class GoogleAdsManager {
     if (!agRows || agRows.length === 0) {
       throw new Error(`Ad group ${input.ad_group_id} not found`);
     }
-    const agType = (agRows[0] as any)?.ad_group?.type;
-    // DG ad group is proto value 21 (not in v23 enum map). We accept either the
-    // numeric 21 or the string "DEMAND_GEN_MULTI_ASSET_AD_GROUP" the server may
-    // return — future-proof against the client library picking up the name.
-    const isDgAdGroup =
-      agType === 21 || agType === "DEMAND_GEN_MULTI_ASSET_AD_GROUP" || agType === "21";
-    if (!isDgAdGroup) {
+    if (!isDemandGenAdGroup(agRows[0])) {
+      const agType = (agRows[0] as any)?.ad_group?.type;
+      const cType = (agRows[0] as any)?.campaign?.advertising_channel_type;
       throw new Error(
-        `Ad group ${input.ad_group_id} has type '${agType}', not DEMAND_GEN_MULTI_ASSET_AD_GROUP. Use google_ads_create_ad_group with type=DEMAND_GEN_MULTI_ASSET_AD_GROUP first.`
+        `Ad group ${input.ad_group_id} is not a Demand Gen ad group (ad_group.type='${agType}', campaign.advertising_channel_type='${cType}'). It must belong to a DEMAND_GEN campaign.`
       );
     }
 

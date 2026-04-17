@@ -154,3 +154,33 @@ export function validateDemandGenAd(ad: DemandGenAdInput): DemandGenAdValidation
 
   return { valid: errors.length === 0, errors };
 }
+
+/**
+ * DEMAND_GEN channel type enum value. Kept as a literal so this module doesn't
+ * pull in google-ads-api for a single constant that never changes at runtime.
+ * See enums.AdvertisingChannelType.DEMAND_GEN.
+ */
+const DEMAND_GEN_CHANNEL_TYPE = 14;
+
+/**
+ * Decide whether a GAQL row describes a Demand Gen ad group. Accepts two
+ * orthogonal signals:
+ *   1) ad_group.type matches DEMAND_GEN_MULTI_ASSET_AD_GROUP (proto value 21
+ *      or its string name when future libs add it).
+ *   2) campaign.advertising_channel_type === DEMAND_GEN (14). This is the
+ *      authoritative check because DG campaigns can only contain DG ad groups,
+ *      and google-ads-api v23 returns undefined for ad_group.type when the
+ *      stored proto value isn't in its local enum map.
+ */
+export function isDemandGenAdGroup(row: any): boolean {
+  if (!row) return false;
+  const agType = row.ad_group?.type;
+  const campaignChannelType = row.campaign?.advertising_channel_type;
+  return (
+    agType === 21 ||
+    agType === "21" ||
+    agType === "DEMAND_GEN_MULTI_ASSET_AD_GROUP" ||
+    campaignChannelType === DEMAND_GEN_CHANNEL_TYPE ||
+    campaignChannelType === "DEMAND_GEN"
+  );
+}
