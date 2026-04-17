@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.3.0] - 2026-04-17
+
+### Added
+- **`mcp-google-ads-install` CLI** — writes the Claude Desktop config entry so
+  non-technical users never hand-edit `claude_desktop_config.json`. Creates
+  the file if missing, preserves sibling MCPs and unrelated top-level keys,
+  refuses to clobber invalid JSON, idempotent. Accepts `--customer-id` to
+  pin the account ID into the config (skips auth picker later). 9 tests
+  cover fresh-create, nested-directory create, preserve-siblings, idempotency,
+  update-existing, and corrupt-JSON refusal.
+- **`mcp-google-ads-doctor` CLI** — runs a diagnostic check sequence against
+  local state and prints pass/fail/warn per check with actionable next steps.
+  Covers: Node version, Claude Desktop config presence + validity + registration,
+  credentials file presence + required fields, and **MCC-terminal-selection
+  warning** (flags when `customer_id === mcc_customer_id`, which is the exact
+  foot-gun Kellie hit). Collect-all semantics — every check runs regardless of
+  earlier failures. Exit code reflects whether any check failed. 9 tests cover
+  each check's pass and fail path.
+- **`./install-cli` and `./doctor-cli` subpath exports** for downstream stubs.
+
 ## [1.2.5] - 2026-04-17
 
 ### Added
