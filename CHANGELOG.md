@@ -1,6 +1,8 @@
 # Changelog
 
-## [1.4.3] - 2026-04-18
+## [1.4.4] - 2026-04-18
+
+_(v1.4.3 was a stale pre-existing git tag; bumped past it.)_
 
 ### Added
 - **`google_ads_create_sitelink`**: atomic sitelink Asset creation with
