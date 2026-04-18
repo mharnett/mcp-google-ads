@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { enums } from "google-ads-api";
 import {
   parseAssetLinkResourceName,
   validateFinalUrls,
@@ -6,6 +7,10 @@ import {
   normalizePauseAssetLinksArgs,
   buildUpdateUrlsDryRun,
   buildPauseLinksDryRun,
+  normalizeCreateSitelinkArgs,
+  buildCreateSitelinkDryRun,
+  normalizeReplaceSitelinkArgs,
+  buildReplaceSitelinkDryRun,
 } from "./assetHelpers.js";
 
 describe("parseAssetLinkResourceName", () => {
@@ -169,6 +174,175 @@ describe("buildUpdateUrlsDryRun", () => {
     });
     expect(dr.dry_run).toBe(true);
     expect(dr.warning).toMatch(/affects EVERY/);
+  });
+});
+
+describe("normalizeCreateSitelinkArgs", () => {
+  it("accepts a minimal valid call", () => {
+    const r = normalizeCreateSitelinkArgs({
+      link_text: "Resources",
+      final_urls: ["https://flow.space/resources"],
+    });
+    expect("error" in r).toBe(false);
+    if ("error" in r) return;
+    expect(r.link_text).toBe("Resources");
+    expect(r.final_urls).toEqual(["https://flow.space/resources"]);
+    expect(r.confirm).toBe(false);
+  });
+
+  it("trims link_text", () => {
+    const r = normalizeCreateSitelinkArgs({
+      link_text: "  Resources  ",
+      final_urls: ["https://flow.space/x"],
+    });
+    if (!("error" in r)) expect(r.link_text).toBe("Resources");
+  });
+
+  it("rejects link_text longer than 25 chars", () => {
+    const r = normalizeCreateSitelinkArgs({
+      link_text: "x".repeat(26),
+      final_urls: ["https://flow.space/x"],
+    });
+    expect("error" in r).toBe(true);
+  });
+
+  it("rejects empty link_text", () => {
+    const r = normalizeCreateSitelinkArgs({
+      link_text: "",
+      final_urls: ["https://flow.space/x"],
+    });
+    expect("error" in r).toBe(true);
+  });
+
+  it("rejects bad URL", () => {
+    const r = normalizeCreateSitelinkArgs({
+      link_text: "Resources",
+      final_urls: ["not-a-url"],
+    });
+    expect("error" in r).toBe(true);
+  });
+
+  it("accepts optional descriptions", () => {
+    const r = normalizeCreateSitelinkArgs({
+      link_text: "Resources",
+      final_urls: ["https://flow.space/resources"],
+      description1: "Webinars, whitepapers",
+      description2: "and customer case studies",
+    });
+    if (!("error" in r)) {
+      expect(r.description1).toBe("Webinars, whitepapers");
+      expect(r.description2).toBe("and customer case studies");
+    }
+  });
+
+  it("rejects description longer than 35 chars", () => {
+    const r = normalizeCreateSitelinkArgs({
+      link_text: "Resources",
+      final_urls: ["https://flow.space/x"],
+      description1: "x".repeat(36),
+      description2: "ok",
+    });
+    expect("error" in r).toBe(true);
+  });
+
+  it("rejects only one description (both or neither)", () => {
+    const r = normalizeCreateSitelinkArgs({
+      link_text: "Resources",
+      final_urls: ["https://flow.space/x"],
+      description1: "only one",
+    });
+    expect("error" in r).toBe(true);
+  });
+});
+
+describe("buildCreateSitelinkDryRun", () => {
+  it("returns dry_run with the link text + urls", () => {
+    const dr = buildCreateSitelinkDryRun({
+      customer_id: "1234567890",
+      link_text: "Platform",
+      final_urls: ["https://flow.space/platform"],
+    });
+    expect(dr.dry_run).toBe(true);
+    expect(dr.link_text).toBe("Platform");
+  });
+});
+
+describe("normalizeReplaceSitelinkArgs", () => {
+  it("accepts a minimal valid call", () => {
+    const r = normalizeReplaceSitelinkArgs({
+      customer_id: "1234567890",
+      old_asset_id: "286828689294",
+      new_final_urls: ["https://flow.space/resources"],
+    });
+    expect("error" in r).toBe(false);
+    if ("error" in r) return;
+    expect(r.old_asset_id).toBe("286828689294");
+    expect(r.new_final_urls).toEqual(["https://flow.space/resources"]);
+    expect(r.confirm).toBe(false);
+  });
+
+  it("rejects non-numeric old_asset_id", () => {
+    const r = normalizeReplaceSitelinkArgs({
+      old_asset_id: "not-a-number",
+      new_final_urls: ["https://x.com"],
+    });
+    expect("error" in r).toBe(true);
+  });
+
+  it("coerces numeric old_asset_id", () => {
+    const r = normalizeReplaceSitelinkArgs({
+      old_asset_id: 286828689294 as any,
+      new_final_urls: ["https://x.com"],
+    });
+    if (!("error" in r)) expect(r.old_asset_id).toBe("286828689294");
+  });
+
+  it("accepts optional new_link_text override", () => {
+    const r = normalizeReplaceSitelinkArgs({
+      old_asset_id: "1",
+      new_final_urls: ["https://x.com"],
+      new_link_text: "Resources",
+    });
+    if (!("error" in r)) expect(r.new_link_text).toBe("Resources");
+  });
+
+  it("rejects new_link_text > 25 chars", () => {
+    const r = normalizeReplaceSitelinkArgs({
+      old_asset_id: "1",
+      new_final_urls: ["https://x.com"],
+      new_link_text: "x".repeat(26),
+    });
+    expect("error" in r).toBe(true);
+  });
+});
+
+describe("buildReplaceSitelinkDryRun", () => {
+  it("returns dry_run with warning about re-linking", () => {
+    const dr = buildReplaceSitelinkDryRun({
+      customer_id: "1234567890",
+      old_asset_id: "286828689294",
+      new_final_urls: ["https://flow.space/resources"],
+    });
+    expect(dr.dry_run).toBe(true);
+    expect(dr.warning).toMatch(/re-link/);
+    expect(dr.old_asset_id).toBe("286828689294");
+  });
+});
+
+describe("AssetLinkStatus enum guard", () => {
+  // Regression guard: pauseAssetLinks uses enums.AssetLinkStatus.PAUSED. The
+  // previous implementation hardcoded `2` which actually means ENABLED, so the
+  // pause was a silent no-op. If google-ads-api ever reshuffles this enum, we
+  // want a loud test failure rather than another silent no-op.
+  it("PAUSED is 4, not 2", () => {
+    expect(enums.AssetLinkStatus.PAUSED).toBe(4);
+  });
+  it("ENABLED is 2 (distinct from PAUSED)", () => {
+    expect(enums.AssetLinkStatus.ENABLED).toBe(2);
+    expect(enums.AssetLinkStatus.ENABLED).not.toBe(enums.AssetLinkStatus.PAUSED);
+  });
+  it("REMOVED is 3", () => {
+    expect(enums.AssetLinkStatus.REMOVED).toBe(3);
   });
 });
 

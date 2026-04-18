@@ -41,6 +41,8 @@ describe("Tool Schema Contract", () => {
     "google_ads_update_campaign_bidding",
     "google_ads_gaql_query",
     "google_ads_update_asset_urls",
+    "google_ads_create_sitelink",
+    "google_ads_replace_sitelink_url",
     "google_ads_pause_asset_links",
     "google_ads_keyword_volume",
     "google_ads_create_demand_gen_multi_asset_ad",
