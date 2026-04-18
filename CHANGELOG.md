@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.4.2] - 2026-04-18
+
+### Added
+- **`mcp-google-ads-doctor` now checks npm for a newer version.** New check
+  queries `registry.npmjs.org/mcp-google-ads/latest` with a 5s timeout, compares
+  against the installed version, and emits: pass when matched, warn with
+  upgrade instructions when a newer version exists, warn when the registry is
+  unreachable (never fail — offline use must still work). Closes the gap where
+  alpha testers stayed on 1.3.0 for weeks without knowing a fix shipped. The
+  fetcher is injectable for tests (4 new cases: up-to-date, outdated, network
+  error, dev build ahead of latest).
+
+### Changed
+- **Bumped `__minimumSafeVersion` from `1.0.5` to `1.4.1`.** Every release
+  before 1.4.1 crashes Claude Desktop on first launch (dotenv tip on stdout,
+  #2). Running any 1.x before 1.4.1 now prints a deprecation warning to stderr
+  at startup. New convention: bump this on every patch that fixes a critical
+  transport-breaker.
+- **Deprecated 1.3.0 and 1.4.0 on npm** with a pointer to 1.4.1. Anyone
+  installing those versions now sees an upgrade warning from npm itself.
+
 ## [1.4.1] - 2026-04-18
 
 ### Fixed

@@ -76,7 +76,10 @@ try {
 }
 
 // Version safety: warn if running a deprecated or dangerously old version
-const __minimumSafeVersion = "1.0.5"; // minimum version with GAQL sanitization
+// 1.4.1 is the first release with the dotenv-tip-on-stdout fix (#2). Anything
+// earlier crashes Claude Desktop on first launch. Bump this on every patch
+// that fixes a critical transport-breaker.
+const __minimumSafeVersion = "1.4.1";
 const __semverLt = (a: string, b: string) => { const pa = a.split(".").map(Number), pb = b.split(".").map(Number); for (let i = 0; i < 3; i++) { if ((pa[i] || 0) < (pb[i] || 0)) return true; if ((pa[i] || 0) > (pb[i] || 0)) return false; } return false; };
 if (__semverLt(__cliPkg.version, __minimumSafeVersion)) {
   console.error(`[WARNING] Running deprecated version ${__cliPkg.version}. Minimum safe version is ${__minimumSafeVersion}. Please upgrade.`);

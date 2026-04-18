@@ -120,4 +120,57 @@ describe("runDoctor — diagnostic check sequence", () => {
     expect(names).toContain("credentials file exists");
     expect(names).toContain("node version >= 18");
   });
+
+  it("passes the installed-is-latest check when versions match", async () => {
+    const result = await runDoctor({
+      configPath: cfgPath,
+      credentialsPath: credsPath,
+      installedVersion: "1.4.2",
+      fetchLatestVersion: async () => "1.4.2",
+    });
+    const check = findCheck(result, "installed version is up to date");
+    expect(check.status).toBe("pass");
+    expect(check.detail).toContain("1.4.2");
+  });
+
+  it("warns with upgrade instructions when a newer version exists on npm", async () => {
+    const result = await runDoctor({
+      configPath: cfgPath,
+      credentialsPath: credsPath,
+      installedVersion: "1.3.0",
+      fetchLatestVersion: async () => "1.4.2",
+    });
+    const check = findCheck(result, "installed version is up to date");
+    expect(check.status).toBe("warn");
+    expect(check.detail).toContain("1.3.0");
+    expect(check.detail).toContain("1.4.2");
+    expect(check.detail.toLowerCase()).toContain("upgrade");
+  });
+
+  it("warns (not fails) when the npm registry is unreachable", async () => {
+    const result = await runDoctor({
+      configPath: cfgPath,
+      credentialsPath: credsPath,
+      installedVersion: "1.4.2",
+      fetchLatestVersion: async () => {
+        throw new Error("ENOTFOUND registry.npmjs.org");
+      },
+    });
+    const check = findCheck(result, "installed version is up to date");
+    expect(check.status).toBe("warn");
+    expect(check.detail.toLowerCase()).toContain("npm registry");
+    expect(check.detail).toContain("ENOTFOUND");
+  });
+
+  it("treats a local build ahead of npm latest as pass (dev scenario)", async () => {
+    const result = await runDoctor({
+      configPath: cfgPath,
+      credentialsPath: credsPath,
+      installedVersion: "1.5.0",
+      fetchLatestVersion: async () => "1.4.2",
+    });
+    const check = findCheck(result, "installed version is up to date");
+    expect(check.status).toBe("pass");
+    expect(check.detail).toContain("dev build");
+  });
 });

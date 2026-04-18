@@ -17,6 +17,8 @@
 // at-a-time debugging.
 
 import { existsSync, readFileSync } from "fs";
+import { dirname, join } from "path";
+import { fileURLToPath } from "url";
 import { credentialsFilePath } from "./credentials.js";
 import { resolveDefaultConfigPath } from "./install-cli.js";
 
@@ -26,9 +28,13 @@ export interface DoctorCheck {
   detail: string;
 }
 
+export type FetchLatestVersion = () => Promise<string>;
+
 export interface DoctorOptions {
   configPath?: string;
   credentialsPath?: string;
+  fetchLatestVersion?: FetchLatestVersion;
+  installedVersion?: string;
 }
 
 export async function runDoctor(opts: DoctorOptions = {}): Promise<DoctorCheck[]> {
@@ -125,7 +131,83 @@ export async function runDoctor(opts: DoctorOptions = {}): Promise<DoctorCheck[]
         : `leaf account (customer_id=${customerId}${mccId ? `, under MCC ${mccId}` : ", direct access"})`,
   });
 
+  checks.push(await checkInstalledIsLatest(opts));
+
   return checks;
+}
+
+async function checkInstalledIsLatest(opts: DoctorOptions): Promise<DoctorCheck> {
+  const installed = opts.installedVersion ?? readInstalledVersion();
+  const fetcher = opts.fetchLatestVersion ?? fetchLatestVersionFromNpm;
+  const name = "installed version is up to date";
+  if (!installed) {
+    return { name, status: "warn", detail: "could not read installed version from package.json" };
+  }
+  let latest: string;
+  try {
+    latest = await fetcher();
+  } catch (err) {
+    return {
+      name,
+      status: "warn",
+      detail: `could not reach npm registry (${err instanceof Error ? err.message : String(err)}). Installed ${installed}. Skip offline.`,
+    };
+  }
+  if (!latest) {
+    return { name, status: "warn", detail: `registry returned no version. Installed ${installed}.` };
+  }
+  if (installed === latest) {
+    return { name, status: "pass", detail: `${installed} (latest on npm)` };
+  }
+  if (semverLt(installed, latest)) {
+    return {
+      name,
+      status: "warn",
+      detail: `installed ${installed}, latest on npm is ${latest}. Upgrade: npx -y mcp-google-ads@latest (and fully quit + reopen Claude Desktop).`,
+    };
+  }
+  return { name, status: "pass", detail: `${installed} (ahead of npm latest ${latest}; dev build?)` };
+}
+
+function readInstalledVersion(): string | null {
+  try {
+    const pkgPath = join(dirname(fileURLToPath(import.meta.url)), "..", "package.json");
+    const pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
+    return typeof pkg.version === "string" ? pkg.version : null;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchLatestVersionFromNpm(): Promise<string> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 5_000);
+  try {
+    const res = await fetch("https://registry.npmjs.org/mcp-google-ads/latest", {
+      signal: controller.signal,
+      headers: { Accept: "application/json" },
+    });
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}`);
+    }
+    const body = (await res.json()) as { version?: unknown };
+    if (typeof body.version !== "string") {
+      throw new Error("registry response missing version field");
+    }
+    return body.version;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function semverLt(a: string, b: string): boolean {
+  const pa = a.split(".").map((x) => parseInt(x, 10) || 0);
+  const pb = b.split(".").map((x) => parseInt(x, 10) || 0);
+  for (let i = 0; i < 3; i++) {
+    if ((pa[i] ?? 0) < (pb[i] ?? 0)) return true;
+    if ((pa[i] ?? 0) > (pb[i] ?? 0)) return false;
+  }
+  return false;
 }
 
 function checkNodeVersion(): DoctorCheck {
@@ -180,7 +262,6 @@ export async function run(argv: string[] = process.argv.slice(2)): Promise<numbe
   return checks.some((c) => c.status === "fail") ? 1 : 0;
 }
 
-import { fileURLToPath } from "url";
 import { realpathSync } from "fs";
 
 function isMainModule(): boolean {
