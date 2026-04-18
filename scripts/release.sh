@@ -48,11 +48,14 @@ export EMBEDDED_CLIENT_ID EMBEDDED_CLIENT_SECRET EMBEDDED_DEVELOPER_TOKEN
 echo "==> Running npm ci..."
 npm ci
 
-echo "==> Running full test suite (including portability checks)..."
-npm test
-
 echo "==> Building with embedded credentials (esbuild --define)..."
 npm run build
+
+echo "==> Running full test suite (including portability checks)..."
+# Tests must run after build -- dist/ is gitignored, and several tests
+# (resilience.stdout, harness.graceful-shutdown, stdout-cleanliness)
+# spawn compiled artifacts from dist/.
+npm test
 
 echo "==> Verifying embedded-secrets.js contains baked-in values..."
 if grep -q '""' dist/embedded-secrets.js 2>/dev/null && \
