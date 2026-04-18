@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.4.3] - 2026-04-18
+
+### Added
+- **`google_ads_create_sitelink`**: atomic sitelink Asset creation with
+  `link_text` + `final_urls` + optional paired descriptions. Dry-run default.
+- **`google_ads_replace_sitelink_url`**: create-new + re-link-everywhere +
+  remove-old workflow for fixing broken sitelink URLs. Needed because
+  `Asset.final_urls` is immutable on sitelinks -- `update_asset_urls` returns
+  "The field cannot be set". Preserves `link_text` and descriptions from the
+  old asset unless overridden. Dry-run default. Old Asset is preserved, only
+  its ENABLED links are migrated.
+
+### Fixed
+- **`pauseAssetLinks` enum bug.** `AssetLinkStatus` is
+  `UNSPECIFIED=0, UNKNOWN=1, ENABLED=2, REMOVED=3, PAUSED=4`. The old code set
+  status to `2` intending PAUSED, which was actually ENABLED -- silent no-op.
+  Now uses `enums.AssetLinkStatus.PAUSED` directly, with a regression guard
+  test asserting the library values.
+
 ## [1.4.2] - 2026-04-18
 
 ### Added
