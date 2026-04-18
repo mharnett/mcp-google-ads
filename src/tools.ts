@@ -106,7 +106,7 @@ export const tools: Tool[] = [
   },
   {
     name: "google_ads_create_campaign",
-    description: "Create a new campaign (will be PAUSED until approved). Returns campaign ID.",
+    description: "Create a new campaign (will be PAUSED until approved). Defaults: channel_type=SEARCH, bidding_strategy=MANUAL_CPC (SEARCH) or MAXIMIZE_CONVERSIONS (DEMAND_GEN), language_id=1000 (English). For DEMAND_GEN provide geo_target_ids (Google Ads geo target constant IDs, e.g. '21134' for Alaska). TARGET_CPA requires target_cpa (dollars). MAXIMIZE_CLICKS may take target_cpc_cap (dollars). start_date/end_date are YYYY-MM-DD.",
     inputSchema: {
       additionalProperties: false,
       type: "object",
@@ -114,13 +114,48 @@ export const tools: Tool[] = [
         customer_id: { type: "string" },
         name: { type: "string" },
         daily_budget: { type: "number", description: "Daily budget in dollars" },
+        channel_type: {
+          type: "string",
+          enum: ["SEARCH", "DEMAND_GEN"],
+          description: "Advertising channel type. Defaults to SEARCH.",
+        },
+        bidding_strategy: {
+          type: "string",
+          enum: ["MANUAL_CPC", "MAXIMIZE_CLICKS", "MAXIMIZE_CONVERSIONS", "TARGET_CPA"],
+          description: "Bidding strategy. Defaults to MANUAL_CPC for SEARCH, MAXIMIZE_CONVERSIONS for DEMAND_GEN.",
+        },
+        target_cpa: {
+          type: "number",
+          description: "Target CPA in dollars (required if bidding_strategy=TARGET_CPA).",
+        },
+        target_cpc_cap: {
+          type: "number",
+          description: "Optional CPC ceiling in dollars for MAXIMIZE_CLICKS strategy.",
+        },
+        geo_target_ids: {
+          type: "array",
+          items: { type: "string" },
+          description: "Google Ads geo target constant IDs (e.g. '21134' = Alaska, '21141' = Maine).",
+        },
+        language_id: {
+          type: "string",
+          description: "Language constant ID. Defaults to '1000' (English).",
+        },
+        start_date: {
+          type: "string",
+          description: "YYYY-MM-DD start date (optional).",
+        },
+        end_date: {
+          type: "string",
+          description: "YYYY-MM-DD end date (optional).",
+        },
       },
       required: ["name", "daily_budget"],
     },
   },
   {
     name: "google_ads_create_ad_group",
-    description: "Create a new ad group (will be PAUSED until approved). Returns ad group ID.",
+    description: "Create a new ad group (will be PAUSED until approved). Returns ad group ID. type defaults to SEARCH_STANDARD for back-compat; use DEMAND_GEN_MULTI_ASSET_AD_GROUP for Demand Gen campaigns.",
     inputSchema: {
       additionalProperties: false,
       type: "object",
@@ -129,6 +164,11 @@ export const tools: Tool[] = [
         campaign_id: { type: "string" },
         name: { type: "string" },
         cpc_bid: { type: "number", description: "CPC bid in dollars" },
+        type: {
+          type: "string",
+          enum: ["SEARCH_STANDARD", "DEMAND_GEN_MULTI_ASSET_AD_GROUP"],
+          description: "Ad group type. Defaults to SEARCH_STANDARD. Use DEMAND_GEN_MULTI_ASSET_AD_GROUP for Demand Gen campaigns.",
+        },
       },
       required: ["campaign_id", "name"],
     },
@@ -755,6 +795,100 @@ export const tools: Tool[] = [
         },
       },
       required: ["keywords"],
+    },
+  },
+  {
+    name: "google_ads_create_demand_gen_multi_asset_ad",
+    description: "Create a Demand Gen Multi-Asset ad under a DEMAND_GEN_MULTI_ASSET_AD_GROUP (will be PAUSED until approved). Validates character limits and count caps before the API call: headlines (max 5, ≤40 chars each), long_headlines (max 5, ≤90 chars), descriptions (max 5, ≤90 chars). marketing_image_asset_ids is required (1:1 square images, ≥1); square/portrait/logo assets are optional. call_to_action is a string enum value such as 'LEARN_MORE' or 'SHOP_NOW'. Auto-labels the created ad.",
+    inputSchema: {
+      additionalProperties: false,
+      type: "object",
+      properties: {
+        customer_id: { type: "string" },
+        ad_group_id: { type: "string" },
+        final_urls: { type: "array", items: { type: "string" } },
+        business_name: { type: "string" },
+        call_to_action: {
+          type: "string",
+          description: "CallToAction enum value, e.g. LEARN_MORE, SHOP_NOW, SIGN_UP, DOWNLOAD, BOOK_NOW, CONTACT_US, GET_QUOTE, APPLY_NOW, SUBSCRIBE, BUY_NOW, DONATE_NOW, ORDER_NOW, PLAY_NOW, SEE_MORE, START_NOW, VISIT_SITE, WATCH_NOW.",
+        },
+        marketing_image_asset_ids: {
+          type: "array",
+          items: { type: "string" },
+          description: "1.91:1 landscape marketing image asset IDs (min 1). Get IDs from google_ads_create_image_asset.",
+        },
+        square_marketing_image_asset_ids: {
+          type: "array",
+          items: { type: "string" },
+          description: "Optional 1:1 square marketing image asset IDs.",
+        },
+        portrait_marketing_image_asset_ids: {
+          type: "array",
+          items: { type: "string" },
+          description: "Optional 4:5 portrait marketing image asset IDs.",
+        },
+        logo_image_asset_ids: {
+          type: "array",
+          items: { type: "string" },
+          description: "Optional 1:1 logo image asset IDs.",
+        },
+        headlines: {
+          type: "array",
+          description: "Max 5 headlines, each ≤40 characters. Each item is a string or { text, pinned_position? }.",
+          items: {
+            oneOf: [
+              { type: "string" },
+              {
+                type: "object",
+                properties: {
+                  text: { type: "string" },
+                  pinned_position: { type: "number" },
+                },
+                required: ["text"],
+              },
+            ],
+          },
+        },
+        long_headlines: {
+          type: "array",
+          description: "Max 5 long headlines, each ≤90 characters.",
+          items: { type: "string" },
+        },
+        descriptions: {
+          type: "array",
+          description: "Max 5 descriptions, each ≤90 characters.",
+          items: { type: "string" },
+        },
+        labels: {
+          type: "array",
+          items: { type: "string" },
+          description: "Optional additional labels (auto-applied Claude-MM-DD-YY label is added regardless).",
+        },
+      },
+      required: [
+        "ad_group_id",
+        "final_urls",
+        "business_name",
+        "call_to_action",
+        "marketing_image_asset_ids",
+        "headlines",
+        "descriptions",
+      ],
+    },
+  },
+  {
+    name: "google_ads_create_image_asset",
+    description: "Upload an image asset for use in Demand Gen (or other image-capable) ads. Provide exactly one of file_path (absolute path to PNG/JPG/GIF on disk) or base64_data (raw base64, no data URL prefix). Validates mime type, max 5MB, min dimensions 600x314 (Demand Gen minimum). Auto-labels the created asset. Returns {asset_id, resource_name, name, bytes, mime_type}.",
+    inputSchema: {
+      additionalProperties: false,
+      type: "object",
+      properties: {
+        customer_id: { type: "string" },
+        name: { type: "string", description: "Human-readable asset name (shown in the Google Ads UI)." },
+        file_path: { type: "string", description: "Absolute path to the image on disk. Mutually exclusive with base64_data." },
+        base64_data: { type: "string", description: "Raw base64-encoded image data (no 'data:image/...;base64,' prefix). Mutually exclusive with file_path." },
+      },
+      required: ["name"],
     },
   },
 ];

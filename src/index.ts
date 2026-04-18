@@ -9,7 +9,9 @@ import { fileURLToPath } from "url";
 // cross-platform conversion from file:// URL to a native OS path.
 const __moduleDir = dirname(fileURLToPath(import.meta.url));
 
-dotenvConfig({ path: join(__moduleDir, "..", ".env") });
+// quiet: true -- dotenv v17 prints a tip line to stdout by default, which
+// corrupts MCP JSON-RPC and breaks Claude Desktop on first launch. See #2.
+dotenvConfig({ path: join(__moduleDir, "..", ".env"), quiet: true });
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -19,6 +21,11 @@ import {
   Tool,
 } from "@modelcontextprotocol/sdk/types.js";
 import { tools } from "./tools.js";
+import {
+  assertWriteAllowed,
+  filterTools,
+  isWriteEnabled,
+} from "./writeGate.js";
 import { validateRsa } from "./validateRsa.js";
 import {
   validateRemoveInput,
@@ -34,6 +41,24 @@ import {
   buildUpdateUrlsDryRun,
   buildPauseLinksDryRun,
 } from "./assetHelpers.js";
+import {
+  buildCampaignCreatePayload,
+  type CampaignCreateInput,
+} from "./campaignBuilder.js";
+import {
+  buildAdGroupCreatePayload,
+  type AdGroupTypeName,
+} from "./adGroupBuilder.js";
+import {
+  prepareImageForUpload,
+  type ImageInput,
+} from "./imageAsset.js";
+import {
+  validateDemandGenAd,
+  buildDemandGenAdPayload,
+  isDemandGenAdGroup,
+  type DemandGenAdInput,
+} from "./validateDemandGenAd.js";
 import { GoogleAdsApi, enums, resources, MutateOperation } from "google-ads-api";
 import { readFileSync, existsSync } from "fs";
 import { z } from "zod";
@@ -51,7 +76,10 @@ try {
 }
 
 // Version safety: warn if running a deprecated or dangerously old version
-const __minimumSafeVersion = "1.0.5"; // minimum version with GAQL sanitization
+// 1.4.1 is the first release with the dotenv-tip-on-stdout fix (#2). Anything
+// earlier crashes Claude Desktop on first launch. Bump this on every patch
+// that fixes a critical transport-breaker.
+const __minimumSafeVersion = "1.4.1";
 const __semverLt = (a: string, b: string) => { const pa = a.split(".").map(Number), pb = b.split(".").map(Number); for (let i = 0; i < 3; i++) { if ((pa[i] || 0) < (pb[i] || 0)) return true; if ((pa[i] || 0) > (pb[i] || 0)) return false; } return false; };
 if (__semverLt(__cliPkg.version, __minimumSafeVersion)) {
   console.error(`[WARNING] Running deprecated version ${__cliPkg.version}. Minimum safe version is ${__minimumSafeVersion}. Please upgrade.`);
@@ -196,6 +224,18 @@ import { onPosixSignal } from "./platform.js";
 // ============================================
 // GOOGLE ADS CLIENT
 // ============================================
+
+/** Map our internal PNG/JPEG/GIF mime-type strings to the Google Ads MimeType enum. */
+function mimeToAssetMimeEnum(mime: "image/png" | "image/jpeg" | "image/gif"): number {
+  switch (mime) {
+    case "image/png":
+      return enums.MimeType.IMAGE_PNG;
+    case "image/jpeg":
+      return enums.MimeType.IMAGE_JPEG;
+    case "image/gif":
+      return enums.MimeType.IMAGE_GIF;
+  }
+}
 
 class GoogleAdsManager {
   private api: GoogleAdsApi;
@@ -537,7 +577,7 @@ class GoogleAdsManager {
   private async autoLabelCreated(
     customerId: string,
     resourceNames: string[],
-    assetType: "campaign" | "ad_group" | "ad" | "keyword" | "shared_set"
+    assetType: "campaign" | "ad_group" | "ad" | "keyword" | "shared_set" | "asset"
   ): Promise<string | null> {
     if (!resourceNames?.length) return null;
     const labelName = this.todayClaudeLabel();
@@ -566,6 +606,25 @@ class GoogleAdsManager {
             await withResilience(() => sharedSetLabels.create(ops), "labelSharedSets");
           } else {
             console.error(`[INFO] sharedSetLabels endpoint not available — skipping auto-label for shared set`);
+          }
+          break;
+        }
+        case "asset": {
+          // Auto-label an uploaded asset via customer.customerAssetLabels.
+          // Some API versions / endpoints expose this differently; fall back
+          // to best-effort logging if the endpoint isn't available in v23.
+          const customer = this.getCustomer(customerId);
+          const customerAssetLabels = (customer as any).customerAssetLabels || (customer as any).assetLabels;
+          if (customerAssetLabels?.create) {
+            const ops = resourceNames.map(rn => ({ asset: rn, label: labelRN }));
+            try {
+              await withResilience(() => customerAssetLabels.create(ops), "labelAssets");
+            } catch (e: any) {
+              // Non-fatal — the asset was created, labeling is best-effort.
+              console.error(`[WARN] asset labeling failed: ${e.message}`);
+            }
+          } else {
+            console.error(`[INFO] customerAssetLabels endpoint not available — skipping auto-label for asset`);
           }
           break;
         }
@@ -658,23 +717,20 @@ class GoogleAdsManager {
     }
   }
 
-  // Create a campaign (paused by default)
-  async createCampaign(customerId: string, campaign: {
-    name: string;
-    budget_amount_micros: number;
-    advertising_channel_type?: string;
-    bidding_strategy_type?: string;
-  }) {
+  // Create a campaign (paused by default). Supports SEARCH (back-compat) and
+  // DEMAND_GEN channels, plus richer bidding strategies, geo/language targeting,
+  // and start/end dates. The pure payload shape is built by
+  // buildCampaignCreatePayload (see campaignBuilder.ts) so it can be unit-tested
+  // independently of the live API.
+  async createCampaign(customerId: string, campaign: CampaignCreateInput) {
     const customer = this.getCustomer(customerId);
+    const cleanId = customerId.replace(/-/g, "");
+
+    const plan = buildCampaignCreatePayload(campaign);
 
     // First create a budget
     const budgetResult = await withResilience(
-      () =>
-        customer.campaignBudgets.create([{
-          name: `${campaign.name} Budget`,
-          amount_micros: campaign.budget_amount_micros,
-          delivery_method: enums.BudgetDeliveryMethod.STANDARD,
-        }]),
+      () => customer.campaignBudgets.create([plan.budget as any]),
       "createCampaign.budget"
     );
 
@@ -684,47 +740,140 @@ class GoogleAdsManager {
     const campaignResult = await withResilience(
       () =>
         customer.campaigns.create([{
-          name: campaign.name,
-          status: enums.CampaignStatus.PAUSED, // Always create paused
-          advertising_channel_type: enums.AdvertisingChannelType.SEARCH,
+          ...plan.campaign,
           campaign_budget: budgetResourceName,
-          manual_cpc: {}, // Default to manual CPC
-        }]),
+        } as any]),
       "createCampaign"
     );
 
-    // GLOBAL rule: auto-apply Claude-MM-DD-YY label to the new campaign
     const campaignRNs = ((campaignResult as any).results || []).map((r: any) => r.resource_name).filter(Boolean);
+
+    // Attach campaign-level criteria (geo targets, language). Each payload
+    // needs the campaign resource name; criteria are only applied for
+    // DEMAND_GEN / explicit targeting (SEARCH with no geo/lang stays a no-op).
+    if (plan.criteria.length > 0 && campaignRNs.length > 0) {
+      const campaignResourceName = campaignRNs[0];
+      const criterionPayloads = plan.criteria.map((c) => ({
+        ...c,
+        campaign: campaignResourceName,
+      }));
+      await withResilience(
+        () => customer.campaignCriteria.create(criterionPayloads as any),
+        "createCampaign.criteria"
+      );
+    }
+
+    // GLOBAL rule: auto-apply Claude-MM-DD-YY label to the new campaign
     await this.autoLabelCreated(customerId, campaignRNs, "campaign");
 
     return campaignResult;
   }
 
-  // Create an ad group (paused by default)
+  // Create an ad group (paused by default). Supports SEARCH_STANDARD (default,
+  // back-compat) and DEMAND_GEN_MULTI_ASSET_AD_GROUP. DG path flows through
+  // mutateResources because the v23 client enum map is missing the DG value;
+  // see adGroupBuilder.ts for details.
   async createAdGroup(customerId: string, adGroup: {
     name: string;
     campaign_id: string;
     cpc_bid_micros?: number;
+    type?: AdGroupTypeName;
   }) {
     const customer = this.getCustomer(customerId);
+    const cleanId = customerId.replace(/-/g, "");
 
-    const result = await withResilience(
-      () =>
-        customer.adGroups.create([{
-          name: adGroup.name,
-          campaign: `customers/${customerId.replace(/-/g, "")}/campaigns/${adGroup.campaign_id}`,
-          status: enums.AdGroupStatus.PAUSED, // Always create paused
-          cpc_bid_micros: adGroup.cpc_bid_micros || 1000000, // $1.00 default
-          type: enums.AdGroupType.SEARCH_STANDARD,
-        }]),
-      "createAdGroup"
-    );
+    const payload = buildAdGroupCreatePayload({
+      customer_id_clean: cleanId,
+      name: adGroup.name,
+      campaign_id: adGroup.campaign_id,
+      cpc_bid_micros: adGroup.cpc_bid_micros,
+      type: adGroup.type,
+    });
+
+    let result: any;
+    if (adGroup.type === "DEMAND_GEN_MULTI_ASSET_AD_GROUP") {
+      // Bypass the client-side enum validator. mutateResources accepts the
+      // raw numeric proto value (21).
+      const mutateResp = await withResilience(
+        () =>
+          customer.mutateResources([
+            {
+              entity: "ad_group",
+              operation: "create",
+              resource: payload as any,
+            } as any,
+          ]),
+        "createAdGroup.demandGen"
+      );
+      result = {
+        results: (mutateResp.mutate_operation_responses || [])
+          .map((r: any) => r.ad_group_result)
+          .filter(Boolean),
+      };
+    } else {
+      result = await withResilience(
+        () => customer.adGroups.create([payload as any]),
+        "createAdGroup"
+      );
+    }
 
     // GLOBAL rule: auto-apply Claude-MM-DD-YY label to the new ad group
     const adGroupRNs = ((result as any).results || []).map((r: any) => r.resource_name).filter(Boolean);
     await this.autoLabelCreated(customerId, adGroupRNs, "ad_group");
 
     return result;
+  }
+
+
+  // Create an image asset for use in Demand Gen (or other image-capable) ads.
+  // Validates mime type (PNG/JPEG/GIF), size (≤5MB), and min dimensions (600x314)
+  // before hitting the API. Auto-labels the created asset.
+  async createImageAsset(customerId: string, input: ImageInput) {
+    const prepared = prepareImageForUpload(input);
+    if (!prepared.valid) {
+      throw new Error("Image validation failed:\n" + prepared.errors.join("\n"));
+    }
+
+    const customer = this.getCustomer(customerId);
+
+    const result = await withResilience(
+      () =>
+        customer.assets.create([
+          {
+            name: input.name,
+            type: enums.AssetType.IMAGE,
+            image_asset: {
+              data: prepared.bytes!,
+              file_size: prepared.bytes!.length,
+              mime_type: mimeToAssetMimeEnum(prepared.mime_type!),
+              full_size: {
+                width_pixels: prepared.width!,
+                height_pixels: prepared.height!,
+                url: "",
+              },
+            },
+          } as any,
+        ]),
+      "createImageAsset"
+    );
+
+    const results = (result as any).results || [];
+    const resourceName: string | undefined = results[0]?.resource_name;
+    const assetId = resourceName ? resourceName.split("/").pop() : undefined;
+
+    if (resourceName) {
+      await this.autoLabelCreated(customerId, [resourceName], "asset");
+    }
+
+    return {
+      asset_id: assetId,
+      resource_name: resourceName,
+      name: input.name,
+      bytes: prepared.bytes!.length,
+      mime_type: prepared.mime_type!,
+      width: prepared.width,
+      height: prepared.height,
+    };
   }
 
   // Create a responsive search ad (paused by default)
@@ -802,6 +951,91 @@ class GoogleAdsManager {
     await this.autoLabelCreated(customerId, adRNs, "ad");
 
     return result;
+  }
+
+  // Create a Demand Gen multi-asset ad (paused by default). Validates character
+  // limits and count caps before hitting the API. Fails fast if the ad_group
+  // isn't a DEMAND_GEN_MULTI_ASSET_AD_GROUP. Uses mutateResources because the
+  // v23 typed helper doesn't know about DG ad types.
+  async createDemandGenMultiAssetAd(
+    customerId: string,
+    input: DemandGenAdInput & { ad_group_id: string; labels?: string[] }
+  ) {
+    // Validate before anything else — catches character/count issues cleanly.
+    const validation = validateDemandGenAd(input);
+    if (!validation.valid) {
+      throw new Error("Demand Gen ad validation failed:\n" + validation.errors.join("\n"));
+    }
+
+    const customer = this.getCustomer(customerId);
+    const cleanId = customerId.replace(/-/g, "");
+
+    // Guard: the ad_group must belong to a Demand Gen campaign. We also read
+    // the parent campaign's advertising_channel_type because google-ads-api
+    // v23 returns undefined for ad_group.type when the stored proto value
+    // (21 = DEMAND_GEN_MULTI_ASSET_AD_GROUP) isn't in its local enum map. The
+    // parent campaign's channel type is the authoritative check: DG campaigns
+    // can only contain DG ad groups.
+    const agRows = await withResilience(
+      () =>
+        customer.query(
+          `SELECT ad_group.id, ad_group.type, campaign.advertising_channel_type FROM ad_group WHERE ad_group.id = ${sanitizeNumericId(
+            input.ad_group_id
+          )}`
+        ),
+      "createDemandGenMultiAssetAd.adGroupLookup"
+    );
+    if (!agRows || agRows.length === 0) {
+      throw new Error(`Ad group ${input.ad_group_id} not found`);
+    }
+    if (!isDemandGenAdGroup(agRows[0])) {
+      const agType = (agRows[0] as any)?.ad_group?.type;
+      const cType = (agRows[0] as any)?.campaign?.advertising_channel_type;
+      throw new Error(
+        `Ad group ${input.ad_group_id} is not a Demand Gen ad group (ad_group.type='${agType}', campaign.advertising_channel_type='${cType}'). It must belong to a DEMAND_GEN campaign.`
+      );
+    }
+
+    const payload = buildDemandGenAdPayload({
+      customer_id_clean: cleanId,
+      ad_group_id: input.ad_group_id,
+      input,
+    });
+
+    const mutateResp: any = await withResilience(
+      () =>
+        customer.mutateResources([
+          {
+            entity: "ad_group_ad",
+            operation: "create",
+            resource: payload as any,
+          } as any,
+        ]),
+      "createDemandGenMultiAssetAd"
+    );
+
+    const adGroupAdResult = (mutateResp.mutate_operation_responses || [])
+      .map((r: any) => r.ad_group_ad_result)
+      .filter(Boolean)[0];
+    const resourceName: string | undefined = adGroupAdResult?.resource_name;
+
+    if (resourceName) {
+      await this.autoLabelCreated(customerId, [resourceName], "ad");
+      // Extra caller-supplied labels (on top of the auto Claude-MM-DD-YY label)
+      for (const lbl of input.labels ?? []) {
+        try {
+          const labelRN = await this.ensureLabelExists(customerId, lbl);
+          await this.labelAdGroupAds(customerId, [resourceName], labelRN);
+        } catch (e: any) {
+          console.error(`[WARN] extra label '${lbl}' failed: ${e.message}`);
+        }
+      }
+    }
+
+    return {
+      resource_name: resourceName,
+      ad_id: resourceName ? resourceName.split("~").pop() : undefined,
+    };
   }
 
   // Create keywords (paused by default, auto-labeled for discoverability)
@@ -1905,7 +2139,7 @@ const server = new Server(
 
 // Handle list tools
 server.setRequestHandler(ListToolsRequestSchema, async () => {
-  return { tools };
+  return { tools: filterTools(tools) };
 });
 
 // Handle tool calls
@@ -1913,6 +2147,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
 
   try {
+    assertWriteAllowed(name);
     switch (name) {
       case "google_ads_get_client_context": {
         const cwd = args?.working_directory as string;
@@ -2033,6 +2268,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const result = await adsManager.createCampaign(customerId, {
           name: sanitizedName,
           budget_amount_micros: Math.round(daily_budget * 1000000),
+          channel_type: args?.channel_type as "SEARCH" | "DEMAND_GEN" | undefined,
+          bidding_strategy: args?.bidding_strategy as any,
+          target_cpa: args?.target_cpa as number | undefined,
+          target_cpc_cap: args?.target_cpc_cap as number | undefined,
+          geo_target_ids: args?.geo_target_ids as string[] | undefined,
+          language_id: args?.language_id as string | undefined,
+          start_date: args?.start_date as string | undefined,
+          end_date: args?.end_date as string | undefined,
         });
         return {
           content: [{
@@ -2052,6 +2295,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           name: args?.name as string,
           campaign_id: args?.campaign_id as string,
           cpc_bid_micros: args?.cpc_bid ? Math.round((args.cpc_bid as number) * 1000000) : undefined,
+          type: args?.type as AdGroupTypeName | undefined,
         });
         return {
           content: [{
@@ -2849,6 +3093,71 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
       }
 
+      case "google_ads_create_demand_gen_multi_asset_ad": {
+        const customerId = args?.customer_id as string || "";
+        try {
+          const result = await adsManager.createDemandGenMultiAssetAd(customerId, {
+            ad_group_id: args?.ad_group_id as string,
+            final_urls: args?.final_urls as string[],
+            business_name: args?.business_name as string,
+            call_to_action: args?.call_to_action as string,
+            marketing_image_asset_ids: args?.marketing_image_asset_ids as string[],
+            square_marketing_image_asset_ids: args?.square_marketing_image_asset_ids as
+              | string[]
+              | undefined,
+            portrait_marketing_image_asset_ids: args?.portrait_marketing_image_asset_ids as
+              | string[]
+              | undefined,
+            logo_image_asset_ids: args?.logo_image_asset_ids as string[] | undefined,
+            headlines: args?.headlines as Array<string | { text: string; pinned_position?: number }>,
+            long_headlines: args?.long_headlines as string[] | undefined,
+            descriptions: args?.descriptions as string[],
+            labels: args?.labels as string[] | undefined,
+          });
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({
+                success: true,
+                message: "Demand Gen multi-asset ad created (PAUSED). Review in Google Ads before enabling.",
+                ...result,
+              }, null, 2),
+            }],
+          };
+        } catch (e: any) {
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({ success: false, error: e.message }, null, 2),
+            }],
+          };
+        }
+      }
+
+      case "google_ads_create_image_asset": {
+        const customerId = args?.customer_id as string || "";
+        try {
+          const result = await adsManager.createImageAsset(customerId, {
+            name: args?.name as string,
+            file_path: args?.file_path as string | undefined,
+            base64_data: args?.base64_data as string | undefined,
+          });
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({ success: true, ...result }, null, 2),
+            }],
+          };
+        } catch (e: any) {
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({ success: false, error: e.message }, null, 2),
+            }],
+          };
+        }
+      }
+
       default:
         throw new Error(`Unknown tool: ${name}`);
     }
@@ -2907,6 +3216,14 @@ async function main() {
       logger.warn({ error: err.message }, "Auth check returned non-auth error (may be OK)");
     }
   }
+
+  const writeMode = isWriteEnabled();
+  logger.info(
+    { writeEnabled: writeMode, envVar: "GOOGLE_ADS_MCP_WRITE" },
+    writeMode
+      ? "Write operations ENABLED (mutating tools exposed)"
+      : "Read-only mode (write tools hidden -- set GOOGLE_ADS_MCP_WRITE=true to enable)",
+  );
 
   const transport = new StdioServerTransport();
   await server.connect(transport);

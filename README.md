@@ -1,6 +1,6 @@
 # MCP Google Ads Server
 
-An MCP (Model Context Protocol) server for the Google Ads API with built-in safeguards for review before changes go live. Production-proven with MCC (Manager Account) support, 34 tools for campaign management, reporting, and optimization.
+An MCP (Model Context Protocol) server for the Google Ads API with built-in safeguards for review before changes go live. Production-proven with MCC (Manager Account) support, 36 tools for campaign management, reporting, and optimization. v1.2.0 adds Demand Gen campaign creation end-to-end.
 
 ## Features
 
@@ -103,6 +103,18 @@ Alternatively, set credentials via environment variables (these override `config
 | `GOOGLE_ADS_CLIENT_ID` | Yes | OAuth 2.0 client ID |
 | `GOOGLE_ADS_CLIENT_SECRET` | Yes | OAuth 2.0 client secret |
 | `GOOGLE_ADS_REFRESH_TOKEN` | Yes | OAuth 2.0 refresh token |
+| `GOOGLE_ADS_MCP_WRITE` | No | Set to `true` to expose mutating tools (create/update/pause/enable/remove/apply). Default: read-only. |
+
+### Read-only by default
+
+The server ships read-only. Mutating tools (anything that creates, updates,
+pauses, enables, removes, links, or applies) are hidden from the tool list
+until you set `GOOGLE_ADS_MCP_WRITE=true` in the MCP server environment.
+If a write tool is somehow invoked without that flag, the server returns a
+clear error pointing at the env var.
+
+This is deliberate: a casual chat message like "activate the Fundraising
+campaign" should not move live ad spend without an explicit opt-in.
 
 ### 4. Add to Claude Code
 
@@ -148,7 +160,7 @@ Restart Claude Code.
 5. Claude enables (requires your approval prompt)
 ```
 
-### Available Tools (34)
+### Available Tools (36)
 
 #### Context & Discovery
 | Tool | Description |
@@ -162,9 +174,11 @@ Restart Claude Code.
 #### Campaign Management
 | Tool | Description |
 |------|-------------|
-| `google_ads_create_campaign` | Create campaign (PAUSED) |
-| `google_ads_create_ad_group` | Create ad group (PAUSED) |
+| `google_ads_create_campaign` | Create campaign (PAUSED). Supports SEARCH + DEMAND_GEN channels, richer bidding (MANUAL_CPC / MAXIMIZE_CLICKS / MAXIMIZE_CONVERSIONS / TARGET_CPA), geo + language targeting, start/end dates |
+| `google_ads_create_ad_group` | Create ad group (PAUSED). `type` accepts SEARCH_STANDARD (default) or DEMAND_GEN_MULTI_ASSET_AD_GROUP |
 | `google_ads_create_responsive_search_ad` | Create RSA with validation (PAUSED) |
+| `google_ads_create_image_asset` | Upload PNG/JPG/GIF image asset (validates ≤5MB, ≥600×314) for use in Demand Gen ads |
+| `google_ads_create_demand_gen_multi_asset_ad` | Create a Demand Gen multi-asset ad (PAUSED) — validates char/count caps before API call, fails fast if ad_group isn't DG |
 | `google_ads_create_keywords` | Create keywords (PAUSED) |
 | `google_ads_validate_ad` | Validate RSA without creating |
 | `google_ads_enable_items` | Enable items (make LIVE) — **requires approval** |
@@ -232,6 +246,55 @@ Restart Claude Code.
 # Run custom GAQL
 "Run a GAQL query to get all ad groups with CTR below 2%"
 ```
+
+### Example: Create a Demand Gen Campaign End-to-End
+
+```
+# 1. Campaign: $75/day, DEMAND_GEN channel, MAXIMIZE_CONVERSIONS default,
+#    targeting Alaska (21134) + Maine (21141) in English
+google_ads_create_campaign({
+  name: "DG - Spring Promo",
+  daily_budget: 75,
+  channel_type: "DEMAND_GEN",
+  geo_target_ids: ["21134", "21141"],
+  start_date: "2026-05-01",
+  end_date: "2026-06-30"
+})
+# → campaign_id: 555123
+
+# 2. Ad group: DEMAND_GEN_MULTI_ASSET_AD_GROUP
+google_ads_create_ad_group({
+  campaign_id: "555123",
+  name: "DG AG 1",
+  type: "DEMAND_GEN_MULTI_ASSET_AD_GROUP"
+})
+# → ad_group_id: 555456
+
+# 3. Image assets (PNG/JPG/GIF, ≥600×314, ≤5MB). Returns {asset_id, ...}
+google_ads_create_image_asset({ name: "hero-landscape", file_path: "/abs/path/hero.png" })
+# → asset_id: 42001
+google_ads_create_image_asset({ name: "hero-square",    file_path: "/abs/path/square.png" })
+# → asset_id: 42002
+google_ads_create_image_asset({ name: "logo",           file_path: "/abs/path/logo.png" })
+# → asset_id: 42003
+
+# 4. Demand Gen multi-asset ad (PAUSED). Validates char + count caps first.
+google_ads_create_demand_gen_multi_asset_ad({
+  ad_group_id: "555456",
+  final_urls: ["https://example.com/spring"],
+  business_name: "Example Org",
+  call_to_action: "LEARN_MORE",
+  marketing_image_asset_ids: ["42001"],          // 1.91:1 landscape, ≥1 required
+  square_marketing_image_asset_ids: ["42002"],   // 1:1 optional
+  logo_image_asset_ids: ["42003"],               // logo optional
+  headlines: ["Spring Sale Now On", "Save 20% Today"],     // max 5, ≤40 chars each
+  long_headlines: ["A longer pitch under ninety characters."], // max 5, ≤90 chars
+  descriptions: ["Shop the latest looks.", "Free returns."]   // max 5, ≤90 chars each
+})
+# → resource_name: customers/.../adGroupAds/555456~67890000
+```
+
+After all four calls the campaign, ad group, and ad all live in your account in PAUSED state and are labeled `Claude-MM-DD-YY`. Review in the Google Ads UI, then enable via `google_ads_enable_items`.
 
 ## Safety Features
 

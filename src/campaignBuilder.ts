@@ -1,0 +1,137 @@
+import { enums } from "google-ads-api";
+
+/**
+ * Pure builders for campaign creation. Produces the raw operation payloads
+ * that would be submitted via customer.campaigns.create / campaignBudgets.create
+ * / campaignCriteria.create. Kept as pure functions so they can be unit tested
+ * without needing a live Google Ads API client.
+ *
+ * Note: we return the payloads, not the operations, so callers can still use
+ * typed create(...) paths. For criteria, we return an array that may be empty.
+ */
+
+export type ChannelType = "SEARCH" | "DEMAND_GEN";
+export type BiddingStrategy = "MANUAL_CPC" | "MAXIMIZE_CLICKS" | "MAXIMIZE_CONVERSIONS" | "TARGET_CPA";
+
+export interface CampaignCreateInput {
+  name: string;
+  budget_amount_micros: number;
+  channel_type?: ChannelType;
+  bidding_strategy?: BiddingStrategy;
+  target_cpa?: number;         // dollars
+  target_cpc_cap?: number;     // dollars, optional cap for MAXIMIZE_CLICKS
+  geo_target_ids?: string[];
+  language_id?: string;        // default "1000" (English)
+  start_date?: string;         // YYYY-MM-DD
+  end_date?: string;           // YYYY-MM-DD
+}
+
+export interface CampaignCreatePayload {
+  budget: Record<string, any>;
+  campaign: Record<string, any>;
+  /** Campaign-criterion payloads. `campaign` resource name is applied later
+   *  (after the campaign exists). Here the shape is pre-resolution. */
+  criteria: Array<Record<string, any>>;
+}
+
+/**
+ * Build the operation payloads for a campaign creation. Does NOT attach
+ * resource_name references that only exist post-budget-create; the caller
+ * still has to call the budget first, then interpolate.
+ *
+ * Back-compat: calling with just {name, budget_amount_micros} produces the
+ * exact same SEARCH + manual_cpc + no-criteria shape as v1.1.
+ */
+export function buildCampaignCreatePayload(input: CampaignCreateInput): CampaignCreatePayload {
+  const budget = {
+    name: `${input.name} Budget`,
+    amount_micros: input.budget_amount_micros,
+    delivery_method: enums.BudgetDeliveryMethod.STANDARD,
+    // Google Ads API defaults to explicitly_shared=true when omitted, which
+    // makes auto-bidding strategies (MAXIMIZE_CONVERSIONS, TARGET_CPA, etc.)
+    // reject with "Bidding strategy type is incompatible with shared budget".
+    // Every MCP-created campaign has a 1:1 dedicated budget, so pin this
+    // explicitly to false.
+    explicitly_shared: false,
+  };
+
+  const channelType = input.channel_type ?? "SEARCH";
+  const channelEnum =
+    channelType === "DEMAND_GEN"
+      ? enums.AdvertisingChannelType.DEMAND_GEN
+      : enums.AdvertisingChannelType.SEARCH;
+
+  // Default bidding: SEARCH → MANUAL_CPC (back-compat); DEMAND_GEN → MAXIMIZE_CONVERSIONS.
+  const strategy: BiddingStrategy =
+    input.bidding_strategy ?? (channelType === "DEMAND_GEN" ? "MAXIMIZE_CONVERSIONS" : "MANUAL_CPC");
+
+  const campaign: Record<string, any> = {
+    name: input.name,
+    status: enums.CampaignStatus.PAUSED,
+    advertising_channel_type: channelEnum,
+  };
+
+  // DEMAND_GEN campaigns serve on YouTube, Discover, and Gmail. Google Ads
+  // API treats those surfaces as part of the content network, so
+  // target_content_network must be true — all-false rejects with
+  // "Must target at least one network." Search-side flags stay false since
+  // DG never runs on Search or Partner Search. SEARCH path retains the
+  // historical behavior of omitting network_settings (server defaults).
+  if (channelType === "DEMAND_GEN") {
+    campaign.network_settings = {
+      target_google_search: false,
+      target_search_network: false,
+      target_content_network: true,
+      target_partner_search_network: false,
+    };
+  }
+
+  if (input.start_date) campaign.start_date = input.start_date;
+  if (input.end_date) campaign.end_date = input.end_date;
+
+  switch (strategy) {
+    case "MANUAL_CPC":
+      campaign.manual_cpc = {};
+      break;
+    case "MAXIMIZE_CONVERSIONS":
+      campaign.maximize_conversions = {};
+      break;
+    case "TARGET_CPA": {
+      if (typeof input.target_cpa !== "number") {
+        throw new Error("bidding_strategy=TARGET_CPA requires target_cpa (dollars)");
+      }
+      campaign.target_cpa = { target_cpa_micros: Math.round(input.target_cpa * 1_000_000) };
+      break;
+    }
+    case "MAXIMIZE_CLICKS": {
+      // Google Ads API calls this "target_spend". Optional cpc_bid_ceiling_micros
+      // caps per-click spend when the user wants MAXIMIZE_CLICKS with a ceiling.
+      const cap: Record<string, any> = {};
+      if (typeof input.target_cpc_cap === "number") {
+        cap.cpc_bid_ceiling_micros = Math.round(input.target_cpc_cap * 1_000_000);
+      }
+      campaign.target_spend = cap;
+      break;
+    }
+  }
+
+  const criteria: Array<Record<string, any>> = [];
+  for (const geoId of input.geo_target_ids ?? []) {
+    criteria.push({ location: { geo_target_constant: `geoTargetConstants/${geoId}` } });
+  }
+
+  // Always add a language criterion when geo targeting or language is being set
+  // (default to English "1000"). When neither is provided, leave criteria empty
+  // so the back-compat SEARCH case stays a no-op.
+  const hasGeo = (input.geo_target_ids?.length ?? 0) > 0;
+  if (hasGeo || input.language_id) {
+    const langId = input.language_id ?? "1000";
+    criteria.push({ language: { language_constant: `languageConstants/${langId}` } });
+  }
+
+  return {
+    budget,
+    campaign,
+    criteria,
+  };
+}

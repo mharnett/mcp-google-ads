@@ -1,12 +1,14 @@
 {
   "name": "mcp-google-ads",
   "mcpName": "io.github.mharnett/google-ads",
-  "version": "1.1.0",
-  "description": "MCP server for Google Ads API with MCC support, 34 tools for campaign management, reporting, and optimization. Safe by default -- all changes created PAUSED.",
+  "version": "1.4.2",
+  "description": "MCP server for Google Ads API with MCC support, 41 tools for campaign management, reporting, and optimization. Read-only by default -- mutating tools require GOOGLE_ADS_MCP_WRITE=true. All creates/updates land PAUSED.",
   "main": "dist/index.js",
   "bin": {
     "mcp-google-ads": "dist/index.js",
-    "mcp-google-ads-auth": "dist/auth-cli.js"
+    "mcp-google-ads-auth": "dist/auth-cli.js",
+    "mcp-google-ads-install": "dist/install-cli.js",
+    "mcp-google-ads-doctor": "dist/doctor-cli.js"
   },
   "types": "dist/index.d.ts",
   "type": "module",
@@ -14,6 +16,18 @@
     ".": {
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
+    },
+    "./auth-cli": {
+      "import": "./dist/auth-cli.js",
+      "types": "./dist/auth-cli.d.ts"
+    },
+    "./install-cli": {
+      "import": "./dist/install-cli.js",
+      "types": "./dist/install-cli.d.ts"
+    },
+    "./doctor-cli": {
+      "import": "./dist/doctor-cli.js",
+      "types": "./dist/doctor-cli.d.ts"
     }
   },
   "files": [
@@ -33,7 +47,7 @@
     "dev:auth": "tsx src/auth-cli.ts",
     "test": "vitest run",
     "test:portability": "vitest run src/portability.test.ts",
-    "prepublishOnly": "npm run build && npm test"
+    "prepublishOnly": "node scripts/check-embedded.mjs && npm run build && npm test"
   },
   "keywords": [
     "mcp",

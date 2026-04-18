@@ -43,6 +43,8 @@ describe("Tool Schema Contract", () => {
     "google_ads_update_asset_urls",
     "google_ads_pause_asset_links",
     "google_ads_keyword_volume",
+    "google_ads_create_demand_gen_multi_asset_ad",
+    "google_ads_create_image_asset",
   ];
 
   it("exports the expected number of tools", () => {
@@ -101,6 +103,64 @@ describe("Tool Schema Contract", () => {
       const tool = tools.find(t => t.name === "google_ads_create_campaign");
       expect((tool!.inputSchema as any).required).toContain("name");
       expect((tool!.inputSchema as any).required).toContain("daily_budget");
+    });
+
+    it("create_campaign accepts channel_type, bidding_strategy, target_cpa, geo_target_ids, language_id, start_date, end_date", () => {
+      const tool = tools.find(t => t.name === "google_ads_create_campaign");
+      const props = (tool!.inputSchema as any).properties;
+      expect(props.channel_type?.enum).toEqual(["SEARCH", "DEMAND_GEN"]);
+      expect(props.bidding_strategy?.enum).toEqual([
+        "MANUAL_CPC",
+        "MAXIMIZE_CLICKS",
+        "MAXIMIZE_CONVERSIONS",
+        "TARGET_CPA",
+      ]);
+      expect(props.target_cpa?.type).toBe("number");
+      expect(props.target_cpc_cap?.type).toBe("number");
+      expect(props.geo_target_ids?.type).toBe("array");
+      expect(props.language_id?.type).toBe("string");
+      expect(props.start_date?.type).toBe("string");
+      expect(props.end_date?.type).toBe("string");
+    });
+
+    it("create_demand_gen_multi_asset_ad has the required DG ad schema", () => {
+      const tool = tools.find(t => t.name === "google_ads_create_demand_gen_multi_asset_ad");
+      expect(tool).toBeDefined();
+      const schema = tool!.inputSchema as any;
+      // Required fields: ad_group_id, final_urls, business_name, call_to_action, marketing_image_asset_ids, headlines, descriptions
+      expect(schema.required).toContain("ad_group_id");
+      expect(schema.required).toContain("final_urls");
+      expect(schema.required).toContain("business_name");
+      expect(schema.required).toContain("call_to_action");
+      expect(schema.required).toContain("marketing_image_asset_ids");
+      expect(schema.required).toContain("headlines");
+      expect(schema.required).toContain("descriptions");
+
+      // Optional arrays
+      expect(schema.properties.square_marketing_image_asset_ids?.type).toBe("array");
+      expect(schema.properties.portrait_marketing_image_asset_ids?.type).toBe("array");
+      expect(schema.properties.logo_image_asset_ids?.type).toBe("array");
+      expect(schema.properties.long_headlines?.type).toBe("array");
+      expect(schema.properties.labels?.type).toBe("array");
+    });
+
+    it("create_image_asset requires name and accepts file_path or base64_data", () => {
+      const tool = tools.find(t => t.name === "google_ads_create_image_asset");
+      expect(tool).toBeDefined();
+      const schema = tool!.inputSchema as any;
+      expect(schema.required).toContain("name");
+      expect(schema.properties.file_path?.type).toBe("string");
+      expect(schema.properties.base64_data?.type).toBe("string");
+      expect(schema.properties.name?.type).toBe("string");
+    });
+
+    it("create_ad_group accepts type SEARCH_STANDARD | DEMAND_GEN_MULTI_ASSET_AD_GROUP", () => {
+      const tool = tools.find(t => t.name === "google_ads_create_ad_group");
+      const props = (tool!.inputSchema as any).properties;
+      expect(props.type?.enum).toEqual([
+        "SEARCH_STANDARD",
+        "DEMAND_GEN_MULTI_ASSET_AD_GROUP",
+      ]);
     });
 
     it("keyword_performance requires date range", () => {
