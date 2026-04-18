@@ -159,6 +159,157 @@ export interface PauseLinksDryRun {
   };
 }
 
+// ============================================
+// CREATE SITELINK
+// ============================================
+
+export interface CreateSitelinkArgs {
+  customer_id?: string;
+  link_text: string;
+  final_urls: string[];
+  description1?: string;
+  description2?: string;
+  confirm?: boolean;
+}
+
+export interface CreateSitelinkDryRun {
+  dry_run: true;
+  message: string;
+  customer_id: string;
+  link_text: string;
+  final_urls: string[];
+  description1?: string;
+  description2?: string;
+}
+
+function validateSitelinkText(value: unknown, field: string, max: number): { ok: true; value: string } | { ok: false; error: string } {
+  if (typeof value !== "string") return { ok: false, error: `${field} must be a string` };
+  const t = value.trim();
+  if (!t) return { ok: false, error: `${field} must be non-empty` };
+  if (t.length > max) return { ok: false, error: `${field} exceeds ${max} chars (got ${t.length})` };
+  return { ok: true, value: t };
+}
+
+export function normalizeCreateSitelinkArgs(raw: Record<string, unknown> | undefined): CreateSitelinkArgs | { error: string } {
+  const r = raw ?? {};
+  const customer_id = typeof r.customer_id === "string" ? r.customer_id : undefined;
+
+  const linkText = validateSitelinkText(r.link_text, "link_text", 25);
+  if (!linkText.ok) return { error: linkText.error };
+
+  const urls = validateFinalUrls(r.final_urls);
+  if (!urls.ok) return { error: urls.error };
+
+  const out: CreateSitelinkArgs = {
+    customer_id,
+    link_text: linkText.value,
+    final_urls: urls.urls,
+    confirm: r.confirm === true || r.confirm === "true",
+  };
+
+  if (r.description1 !== undefined && r.description1 !== null && r.description1 !== "") {
+    const d = validateSitelinkText(r.description1, "description1", 35);
+    if (!d.ok) return { error: d.error };
+    out.description1 = d.value;
+  }
+  if (r.description2 !== undefined && r.description2 !== null && r.description2 !== "") {
+    const d = validateSitelinkText(r.description2, "description2", 35);
+    if (!d.ok) return { error: d.error };
+    out.description2 = d.value;
+  }
+  if ((out.description1 && !out.description2) || (!out.description1 && out.description2)) {
+    return { error: "description1 and description2 must both be set or both omitted" };
+  }
+  return out;
+}
+
+export function buildCreateSitelinkDryRun(args: CreateSitelinkArgs): CreateSitelinkDryRun {
+  return {
+    dry_run: true,
+    message: "DRY RUN. Nothing created. Pass confirm: true to actually create the sitelink asset.",
+    customer_id: args.customer_id ?? "",
+    link_text: args.link_text,
+    final_urls: args.final_urls,
+    description1: args.description1,
+    description2: args.description2,
+  };
+}
+
+// ============================================
+// REPLACE SITELINK URL
+// ============================================
+
+export interface ReplaceSitelinkArgs {
+  customer_id?: string;
+  old_asset_id: string;
+  new_final_urls: string[];
+  new_link_text?: string;
+  new_description1?: string;
+  new_description2?: string;
+  confirm?: boolean;
+}
+
+export interface ReplaceSitelinkDryRun {
+  dry_run: true;
+  message: string;
+  customer_id: string;
+  old_asset_id: string;
+  new_final_urls: string[];
+  new_link_text_override?: string;
+  warning: string;
+}
+
+export function normalizeReplaceSitelinkArgs(raw: Record<string, unknown> | undefined): ReplaceSitelinkArgs | { error: string } {
+  const r = raw ?? {};
+  const customer_id = typeof r.customer_id === "string" ? r.customer_id : undefined;
+
+  const assetIdRaw = typeof r.old_asset_id === "string" ? r.old_asset_id.trim()
+    : typeof r.old_asset_id === "number" ? String(r.old_asset_id)
+    : "";
+  if (!assetIdRaw || !/^\d+$/.test(assetIdRaw)) {
+    return { error: `invalid old_asset_id: ${JSON.stringify(r.old_asset_id)}. Expected numeric asset ID.` };
+  }
+
+  const urls = validateFinalUrls(r.new_final_urls);
+  if (!urls.ok) return { error: urls.error };
+
+  const out: ReplaceSitelinkArgs = {
+    customer_id,
+    old_asset_id: assetIdRaw,
+    new_final_urls: urls.urls,
+    confirm: r.confirm === true || r.confirm === "true",
+  };
+
+  if (r.new_link_text !== undefined && r.new_link_text !== null && r.new_link_text !== "") {
+    const d = validateSitelinkText(r.new_link_text, "new_link_text", 25);
+    if (!d.ok) return { error: d.error };
+    out.new_link_text = d.value;
+  }
+  if (r.new_description1 !== undefined && r.new_description1 !== null && r.new_description1 !== "") {
+    const d = validateSitelinkText(r.new_description1, "new_description1", 35);
+    if (!d.ok) return { error: d.error };
+    out.new_description1 = d.value;
+  }
+  if (r.new_description2 !== undefined && r.new_description2 !== null && r.new_description2 !== "") {
+    const d = validateSitelinkText(r.new_description2, "new_description2", 35);
+    if (!d.ok) return { error: d.error };
+    out.new_description2 = d.value;
+  }
+  return out;
+}
+
+export function buildReplaceSitelinkDryRun(args: ReplaceSitelinkArgs): ReplaceSitelinkDryRun {
+  return {
+    dry_run: true,
+    message: "DRY RUN. Nothing changed. Pass confirm: true to replace the sitelink.",
+    customer_id: args.customer_id ?? "",
+    old_asset_id: args.old_asset_id,
+    new_final_urls: args.new_final_urls,
+    new_link_text_override: args.new_link_text,
+    warning: "Will create a NEW sitelink asset, re-link every campaign/ad-group/customer link currently pointing at old_asset_id, then remove the old links. The old Asset itself is NOT deleted and can still be re-used manually.",
+  };
+}
+
 export function buildPauseLinksDryRun(args: PauseAssetLinksArgs): PauseLinksDryRun {
   const would: PauseLinksDryRun["would_pause"] = {
     customer_asset: [],

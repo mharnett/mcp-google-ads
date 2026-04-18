@@ -40,6 +40,10 @@ import {
   normalizePauseAssetLinksArgs,
   buildUpdateUrlsDryRun,
   buildPauseLinksDryRun,
+  normalizeCreateSitelinkArgs,
+  buildCreateSitelinkDryRun,
+  normalizeReplaceSitelinkArgs,
+  buildReplaceSitelinkDryRun,
 } from "./assetHelpers.js";
 import {
   buildCampaignCreatePayload,
@@ -1573,8 +1577,9 @@ class GoogleAdsManager {
       else throw new Error(`Unrecognized asset-link resource name: ${rn}`);
     }
 
-    // Status enum: 2 = PAUSED per google-ads-api
-    const PAUSED = 2;
+    // AssetLinkStatus enum: UNSPECIFIED=0, UNKNOWN=1, ENABLED=2, REMOVED=3, PAUSED=4.
+    // (Was set to 2 previously, which silently no-op'd since links were already ENABLED=2.)
+    const PAUSED = enums.AssetLinkStatus.PAUSED;
     const result = { customer_id: cleanId, paused: { customer_asset: 0, campaign_asset: 0, ad_group_asset: 0 } };
 
     if (byLevel.customer_asset.length > 0) {
@@ -1603,6 +1608,269 @@ class GoogleAdsManager {
     }
 
     return result;
+  }
+
+  // ============================================
+  // SITELINK CREATE + REPLACE
+  // ============================================
+
+  async createSitelink(customerId: string, args: {
+    link_text: string;
+    final_urls: string[];
+    description1?: string;
+    description2?: string;
+  }) {
+    const customer = this.getCustomer(customerId);
+    const cleanId = customerId.replace(/-/g, "");
+
+    const sitelink: any = { link_text: args.link_text };
+    if (args.description1) sitelink.description1 = args.description1;
+    if (args.description2) sitelink.description2 = args.description2;
+
+    const result = await withResilience(
+      () =>
+        customer.assets.create([
+          {
+            type: enums.AssetType.SITELINK,
+            final_urls: args.final_urls,
+            sitelink_asset: sitelink,
+          } as any,
+        ]),
+      "createSitelink"
+    );
+
+    const results = (result as any).results || [];
+    const resourceName: string | undefined = results[0]?.resource_name;
+    const assetId = resourceName ? resourceName.split("/").pop() : undefined;
+
+    if (resourceName) {
+      await this.autoLabelCreated(customerId, [resourceName], "asset");
+    }
+
+    return {
+      customer_id: cleanId,
+      asset_id: assetId,
+      resource_name: resourceName,
+      link_text: args.link_text,
+      final_urls: args.final_urls,
+      description1: args.description1,
+      description2: args.description2,
+    };
+  }
+
+  async replaceSitelinkUrl(customerId: string, args: {
+    old_asset_id: string;
+    new_final_urls: string[];
+    new_link_text?: string;
+    new_description1?: string;
+    new_description2?: string;
+  }) {
+    const customer = this.getCustomer(customerId);
+    const cleanId = customerId.replace(/-/g, "");
+
+    // 1. Load the old asset so we can preserve link_text / descriptions.
+    const oldAssetRows = await withResilience(
+      () =>
+        customer.query(`
+          SELECT
+            asset.id,
+            asset.type,
+            asset.final_urls,
+            asset.sitelink_asset.link_text,
+            asset.sitelink_asset.description1,
+            asset.sitelink_asset.description2
+          FROM asset
+          WHERE asset.id = ${args.old_asset_id}
+        `),
+      "replaceSitelinkUrl.queryAsset"
+    );
+
+    const oldAsset = (oldAssetRows as any[])[0]?.asset;
+    if (!oldAsset) {
+      throw new Error(`Asset ${args.old_asset_id} not found in customer ${cleanId}`);
+    }
+    // AssetType.SITELINK = 13
+    if (oldAsset.type !== enums.AssetType.SITELINK && oldAsset.type !== 13) {
+      throw new Error(
+        `Asset ${args.old_asset_id} is type ${oldAsset.type} (not SITELINK). ` +
+        `This tool only replaces sitelink assets; use google_ads_update_asset_urls for other asset types.`
+      );
+    }
+
+    const link_text = args.new_link_text ?? oldAsset.sitelink_asset?.link_text;
+    if (!link_text) {
+      throw new Error(
+        `Old asset has no link_text and none was provided. ` +
+        `Pass new_link_text to override.`
+      );
+    }
+    const description1 = args.new_description1 ?? oldAsset.sitelink_asset?.description1 ?? undefined;
+    const description2 = args.new_description2 ?? oldAsset.sitelink_asset?.description2 ?? undefined;
+
+    // 2. Find every ENABLED attachment of the old asset.
+    const campaignLinksRows = await withResilience(
+      () =>
+        customer.query(`
+          SELECT
+            campaign_asset.resource_name,
+            campaign_asset.campaign,
+            campaign_asset.field_type,
+            campaign_asset.status
+          FROM campaign_asset
+          WHERE campaign_asset.asset = 'customers/${cleanId}/assets/${args.old_asset_id}'
+            AND campaign_asset.field_type = 'SITELINK'
+            AND campaign_asset.status = 'ENABLED'
+        `),
+      "replaceSitelinkUrl.queryCampaignAssets"
+    );
+
+    const adGroupLinksRows = await withResilience(
+      () =>
+        customer.query(`
+          SELECT
+            ad_group_asset.resource_name,
+            ad_group_asset.ad_group,
+            ad_group_asset.field_type,
+            ad_group_asset.status
+          FROM ad_group_asset
+          WHERE ad_group_asset.asset = 'customers/${cleanId}/assets/${args.old_asset_id}'
+            AND ad_group_asset.field_type = 'SITELINK'
+            AND ad_group_asset.status = 'ENABLED'
+        `),
+      "replaceSitelinkUrl.queryAdGroupAssets"
+    );
+
+    const customerLinksRows = await withResilience(
+      () =>
+        customer.query(`
+          SELECT
+            customer_asset.resource_name,
+            customer_asset.field_type,
+            customer_asset.status
+          FROM customer_asset
+          WHERE customer_asset.asset = 'customers/${cleanId}/assets/${args.old_asset_id}'
+            AND customer_asset.field_type = 'SITELINK'
+            AND customer_asset.status = 'ENABLED'
+        `),
+      "replaceSitelinkUrl.queryCustomerAssets"
+    );
+
+    const campaignLinks = (campaignLinksRows as any[]).map(r => ({
+      resource_name: r.campaign_asset.resource_name,
+      campaign: r.campaign_asset.campaign,
+    }));
+    const adGroupLinks = (adGroupLinksRows as any[]).map(r => ({
+      resource_name: r.ad_group_asset.resource_name,
+      ad_group: r.ad_group_asset.ad_group,
+    }));
+    const customerLinks = (customerLinksRows as any[]).map(r => ({
+      resource_name: r.customer_asset.resource_name,
+    }));
+
+    // 3. Create the new sitelink asset.
+    const newSitelink: any = { link_text };
+    if (description1) newSitelink.description1 = description1;
+    if (description2) newSitelink.description2 = description2;
+
+    const createResult = await withResilience(
+      () =>
+        customer.assets.create([
+          {
+            type: enums.AssetType.SITELINK,
+            final_urls: args.new_final_urls,
+            sitelink_asset: newSitelink,
+          } as any,
+        ]),
+      "replaceSitelinkUrl.createAsset"
+    );
+    const newAssetResource: string | undefined = (createResult as any).results?.[0]?.resource_name;
+    if (!newAssetResource) {
+      throw new Error("Failed to create replacement sitelink asset (no resource_name in response)");
+    }
+    const newAssetId = newAssetResource.split("/").pop() || "";
+
+    await this.autoLabelCreated(customerId, [newAssetResource], "asset");
+
+    // 4. Create new links pointing at the new asset (one batch per level).
+    const SITELINK_FIELD_TYPE = enums.AssetFieldType.SITELINK;
+
+    if (campaignLinks.length > 0) {
+      await withResilience(
+        () =>
+          customer.campaignAssets.create(
+            campaignLinks.map(l => ({
+              campaign: l.campaign,
+              asset: newAssetResource,
+              field_type: SITELINK_FIELD_TYPE,
+            })) as any,
+          ),
+        "replaceSitelinkUrl.createCampaignAssets"
+      );
+    }
+
+    if (adGroupLinks.length > 0) {
+      await withResilience(
+        () =>
+          customer.adGroupAssets.create(
+            adGroupLinks.map(l => ({
+              ad_group: l.ad_group,
+              asset: newAssetResource,
+              field_type: SITELINK_FIELD_TYPE,
+            })) as any,
+          ),
+        "replaceSitelinkUrl.createAdGroupAssets"
+      );
+    }
+
+    if (customerLinks.length > 0) {
+      await withResilience(
+        () =>
+          customer.customerAssets.create(
+            customerLinks.map(() => ({
+              asset: newAssetResource,
+              field_type: SITELINK_FIELD_TYPE,
+            })) as any,
+          ),
+        "replaceSitelinkUrl.createCustomerAssets"
+      );
+    }
+
+    // 5. Remove the old links. New ones are already in place so no serving gap.
+    if (campaignLinks.length > 0) {
+      await withResilience(
+        () => customer.campaignAssets.remove(campaignLinks.map(l => l.resource_name)),
+        "replaceSitelinkUrl.removeCampaignAssets"
+      );
+    }
+    if (adGroupLinks.length > 0) {
+      await withResilience(
+        () => customer.adGroupAssets.remove(adGroupLinks.map(l => l.resource_name)),
+        "replaceSitelinkUrl.removeAdGroupAssets"
+      );
+    }
+    if (customerLinks.length > 0) {
+      await withResilience(
+        () => customer.customerAssets.remove(customerLinks.map(l => l.resource_name)),
+        "replaceSitelinkUrl.removeCustomerAssets"
+      );
+    }
+
+    return {
+      customer_id: cleanId,
+      old_asset_id: args.old_asset_id,
+      new_asset_id: newAssetId,
+      new_asset_resource_name: newAssetResource,
+      link_text,
+      final_urls: args.new_final_urls,
+      description1,
+      description2,
+      relinked: {
+        campaign_assets: campaignLinks.length,
+        ad_group_assets: adGroupLinks.length,
+        customer_assets: customerLinks.length,
+      },
+      note: "The old Asset is not deleted; only its ENABLED links were migrated. Paused/removed links on the old asset were left alone.",
+    };
   }
 
   // ============================================
@@ -3028,6 +3296,43 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
         const customerId = normalized.customer_id || "";
         const result = await adsManager.updateAssetUrls(customerId, normalized.updates);
+        return { content: [{ type: "text", text: JSON.stringify({ success: true, ...result }, null, 2) }] };
+      }
+
+      case "google_ads_create_sitelink": {
+        const normalized = normalizeCreateSitelinkArgs(args as Record<string, unknown>);
+        if ("error" in normalized) {
+          return { content: [{ type: "text", text: JSON.stringify({ error: normalized.error }, null, 2) }] };
+        }
+        if (!normalized.confirm) {
+          return { content: [{ type: "text", text: JSON.stringify(buildCreateSitelinkDryRun(normalized), null, 2) }] };
+        }
+        const customerId = normalized.customer_id || "";
+        const result = await adsManager.createSitelink(customerId, {
+          link_text: normalized.link_text,
+          final_urls: normalized.final_urls,
+          description1: normalized.description1,
+          description2: normalized.description2,
+        });
+        return { content: [{ type: "text", text: JSON.stringify({ success: true, ...result }, null, 2) }] };
+      }
+
+      case "google_ads_replace_sitelink_url": {
+        const normalized = normalizeReplaceSitelinkArgs(args as Record<string, unknown>);
+        if ("error" in normalized) {
+          return { content: [{ type: "text", text: JSON.stringify({ error: normalized.error }, null, 2) }] };
+        }
+        if (!normalized.confirm) {
+          return { content: [{ type: "text", text: JSON.stringify(buildReplaceSitelinkDryRun(normalized), null, 2) }] };
+        }
+        const customerId = normalized.customer_id || "";
+        const result = await adsManager.replaceSitelinkUrl(customerId, {
+          old_asset_id: normalized.old_asset_id,
+          new_final_urls: normalized.new_final_urls,
+          new_link_text: normalized.new_link_text,
+          new_description1: normalized.new_description1,
+          new_description2: normalized.new_description2,
+        });
         return { content: [{ type: "text", text: JSON.stringify({ success: true, ...result }, null, 2) }] };
       }
 

@@ -751,6 +751,55 @@ export const tools: Tool[] = [
     },
   },
   {
+    name: "google_ads_create_sitelink",
+    description: "Create a new sitelink Asset (link_text + final_urls, optional two description lines). Sitelinks are shared across campaigns/ad groups -- use google_ads_replace_sitelink_url if the goal is to fix a broken URL on an existing sitelink (sitelink final_urls are immutable; the correct pattern is create new + re-link). DRY-RUN BY DEFAULT: omit `confirm` or pass `confirm: false` to preview.",
+    inputSchema: {
+      additionalProperties: false,
+      type: "object",
+      properties: {
+        customer_id: { type: "string" },
+        link_text: { type: "string", description: "Clickable sitelink label (max 25 chars)." },
+        final_urls: {
+          type: "array",
+          items: { type: "string" },
+          description: "Destination URLs. Must start with http:// or https://.",
+        },
+        description1: { type: "string", description: "Optional description line 1 (max 35 chars). If set, description2 must also be set." },
+        description2: { type: "string", description: "Optional description line 2 (max 35 chars). If set, description1 must also be set." },
+        confirm: {
+          type: "boolean",
+          description: "Must be true to actually create. Omit or false for dry-run preview.",
+        },
+      },
+      required: ["link_text", "final_urls"],
+    },
+  },
+  {
+    name: "google_ads_replace_sitelink_url",
+    description: "Fix a broken/outdated sitelink URL. Google Ads treats sitelink Asset.final_urls as immutable, so this creates a new sitelink asset with the corrected URL (preserving link_text + descriptions from the old one unless overridden), re-links every campaign / ad-group / customer-level attachment to the new asset, then removes the old links. The old Asset itself is NOT deleted. DRY-RUN BY DEFAULT.",
+    inputSchema: {
+      additionalProperties: false,
+      type: "object",
+      properties: {
+        customer_id: { type: "string" },
+        old_asset_id: { type: "string", description: "Numeric ID of the existing sitelink asset to replace." },
+        new_final_urls: {
+          type: "array",
+          items: { type: "string" },
+          description: "New destination URLs for the replacement sitelink. Must start with http:// or https://.",
+        },
+        new_link_text: { type: "string", description: "Optional override for the sitelink click text (default: preserve from old asset). Max 25 chars." },
+        new_description1: { type: "string", description: "Optional override for description line 1 (default: preserve from old asset). Max 35 chars." },
+        new_description2: { type: "string", description: "Optional override for description line 2 (default: preserve from old asset). Max 35 chars." },
+        confirm: {
+          type: "boolean",
+          description: "Must be true to actually replace. Omit or false for dry-run preview.",
+        },
+      },
+      required: ["old_asset_id", "new_final_urls"],
+    },
+  },
+  {
     name: "google_ads_pause_asset_links",
     description: "Pause asset links (customer_asset, campaign_asset, or ad_group_asset). Use this to stop a sitelink from serving without deleting the underlying asset. DRY-RUN BY DEFAULT: omit `confirm` or pass `confirm: false` to get a preview. Resource name form: customers/{cid}/customerAssets/{assetId}~SITELINK, customers/{cid}/campaignAssets/{campId}~{assetId}~SITELINK, or customers/{cid}/adGroupAssets/{agId}~{assetId}~SITELINK.",
     inputSchema: {
