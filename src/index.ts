@@ -19,6 +19,11 @@ import {
   Tool,
 } from "@modelcontextprotocol/sdk/types.js";
 import { tools } from "./tools.js";
+import {
+  assertWriteAllowed,
+  filterTools,
+  isWriteEnabled,
+} from "./writeGate.js";
 import { validateRsa } from "./validateRsa.js";
 import {
   validateRemoveInput,
@@ -2129,7 +2134,7 @@ const server = new Server(
 
 // Handle list tools
 server.setRequestHandler(ListToolsRequestSchema, async () => {
-  return { tools };
+  return { tools: filterTools(tools) };
 });
 
 // Handle tool calls
@@ -2137,6 +2142,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
 
   try {
+    assertWriteAllowed(name);
     switch (name) {
       case "google_ads_get_client_context": {
         const cwd = args?.working_directory as string;
@@ -3205,6 +3211,14 @@ async function main() {
       logger.warn({ error: err.message }, "Auth check returned non-auth error (may be OK)");
     }
   }
+
+  const writeMode = isWriteEnabled();
+  logger.info(
+    { writeEnabled: writeMode, envVar: "GOOGLE_ADS_MCP_WRITE" },
+    writeMode
+      ? "Write operations ENABLED (mutating tools exposed)"
+      : "Read-only mode (write tools hidden -- set GOOGLE_ADS_MCP_WRITE=true to enable)",
+  );
 
   const transport = new StdioServerTransport();
   await server.connect(transport);

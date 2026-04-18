@@ -103,6 +103,18 @@ Alternatively, set credentials via environment variables (these override `config
 | `GOOGLE_ADS_CLIENT_ID` | Yes | OAuth 2.0 client ID |
 | `GOOGLE_ADS_CLIENT_SECRET` | Yes | OAuth 2.0 client secret |
 | `GOOGLE_ADS_REFRESH_TOKEN` | Yes | OAuth 2.0 refresh token |
+| `GOOGLE_ADS_MCP_WRITE` | No | Set to `true` to expose mutating tools (create/update/pause/enable/remove/apply). Default: read-only. |
+
+### Read-only by default
+
+The server ships read-only. Mutating tools (anything that creates, updates,
+pauses, enables, removes, links, or applies) are hidden from the tool list
+until you set `GOOGLE_ADS_MCP_WRITE=true` in the MCP server environment.
+If a write tool is somehow invoked without that flag, the server returns a
+clear error pointing at the env var.
+
+This is deliberate: a casual chat message like "activate the Fundraising
+campaign" should not move live ad spend without an explicit opt-in.
 
 ### 4. Add to Claude Code
 

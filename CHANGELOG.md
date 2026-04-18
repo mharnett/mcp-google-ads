@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.4.0] - 2026-04-18
+
+### Changed (BREAKING for write users)
+- **Read-only by default.** Mutating tools (`create_*`, `update_*`, `pause_*`,
+  `enable_*`, `remove_*`, `apply_label`, `link_*`, `unlink_*`, plus all negative
+  keyword writes) are hidden from the tool list and refused at call time unless
+  `GOOGLE_ADS_MCP_WRITE=true` is set in the MCP server environment.
+  Motivation: on 2026-04-17 a casual Slack request activated a live campaign
+  with zero friction. Write-by-default is a foot-gun; end users cannot be
+  expected to wire up permission gates. All 24 mutating tools now go through
+  a single gate (`src/writeGate.ts`) with unit coverage that asserts every
+  registered tool is classified as READ or WRITE (drift alarm on new tools).
+- Read tools (`list_*`, `get_*`, `*_performance`, `gaql_query`, `validate_ad`,
+  `search_term_*`, `keyword_volume`, `list_conversion_actions`) are unchanged.
+
 ## [1.3.0] - 2026-04-17
 
 ### Added

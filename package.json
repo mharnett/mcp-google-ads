@@ -1,8 +1,8 @@
 {
   "name": "mcp-google-ads",
   "mcpName": "io.github.mharnett/google-ads",
-  "version": "1.3.0",
-  "description": "MCP server for Google Ads API with MCC support, 36 tools for campaign management, reporting, and optimization -- now includes Demand Gen campaign creation end-to-end. Safe by default -- all changes created PAUSED.",
+  "version": "1.4.0",
+  "description": "MCP server for Google Ads API with MCC support, 41 tools for campaign management, reporting, and optimization. Read-only by default -- mutating tools require GOOGLE_ADS_MCP_WRITE=true. All creates/updates land PAUSED.",
   "main": "dist/index.js",
   "bin": {
     "mcp-google-ads": "dist/index.js",
