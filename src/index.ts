@@ -9,7 +9,9 @@ import { fileURLToPath } from "url";
 // cross-platform conversion from file:// URL to a native OS path.
 const __moduleDir = dirname(fileURLToPath(import.meta.url));
 
-dotenvConfig({ path: join(__moduleDir, "..", ".env") });
+// quiet: true -- dotenv v17 prints a tip line to stdout by default, which
+// corrupts MCP JSON-RPC and breaks Claude Desktop on first launch. See #2.
+dotenvConfig({ path: join(__moduleDir, "..", ".env"), quiet: true });
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";

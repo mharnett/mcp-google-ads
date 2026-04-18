@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.4.1] - 2026-04-18
+
+### Fixed
+- **dotenv tip line was contaminating stdout and breaking Claude Desktop on
+  first launch.** Since dotenv v17, `config()` prints a `[dotenv@...] injecting
+  env ... tip: ...` line to stdout (via `console.log`) unless `{ quiet: true }`
+  is passed. stdout is reserved for MCP JSON-RPC, so that single line caused
+  an `unrecognized_keys` / JSON parse error on every fresh install. Reported
+  externally during alpha onboarding (gear emoji rendered as `◇` in some
+  terminals). Fix: pass `{ quiet: true }` to the dotenv call in `src/index.ts`.
+  New regression test `src/stdout-cleanliness.test.ts` spawns the bin with
+  stripped credentials and asserts every non-empty line on stdout parses as
+  JSON. Suite audit confirmed the other 6 marketing-suite packages do not
+  import dotenv and are unaffected. Refs #2.
+
 ## [1.4.0] - 2026-04-18
 
 ### Changed (BREAKING for write users)
