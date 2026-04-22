@@ -64,6 +64,7 @@ import {
   type DemandGenAdInput,
 } from "./validateDemandGenAd.js";
 import { GoogleAdsApi, enums, resources, MutateOperation } from "google-ads-api";
+import { buildAdGroupAdResourceName } from "./resourceNames.js";
 import { readFileSync, existsSync } from "fs";
 import { z } from "zod";
 import v8 from "v8";
@@ -1194,13 +1195,48 @@ class GoogleAdsManager {
     return result;
   }
 
+  // Resolve plain ad IDs to the composite ad_group_ad resource name
+  // (`customers/{cid}/adGroupAds/{adGroupId}~{adId}`) required by every
+  // adGroupAd mutation and label endpoint. Passing just `{adId}` is a
+  // Google Ads API error — this helper fixes that by looking up the
+  // adGroupId for each adId via GAQL in a single query.
+  private async resolveAdGroupAdResourceNames(
+    customerId: string,
+    adIds: string[]
+  ): Promise<string[]> {
+    if (!adIds || adIds.length === 0) return [];
+    const cleanId = customerId.replace(/-/g, "");
+    const customer = this.getCustomer(customerId);
+    const sanitized = adIds.map(id => sanitizeNumericId(String(id)));
+    const query = `SELECT ad_group.id, ad_group_ad.ad.id FROM ad_group_ad WHERE ad_group_ad.ad.id IN (${sanitized.join(",")})`;
+    const rows: any[] = await withResilience(
+      () => customer.query(query),
+      "resolveAdGroupAdResourceNames"
+    );
+    const resolved: string[] = [];
+    const foundIds = new Set<string>();
+    for (const row of rows) {
+      const adGroupId = row?.ad_group?.id;
+      const adId = row?.ad_group_ad?.ad?.id;
+      if (adGroupId != null && adId != null) {
+        resolved.push(buildAdGroupAdResourceName(cleanId, adGroupId, adId));
+        foundIds.add(String(adId));
+      }
+    }
+    const missing = sanitized.filter(id => !foundIds.has(id));
+    if (missing.length > 0) {
+      throw new Error(
+        `Could not resolve ad_group_id for ${missing.length}/${adIds.length} ad IDs: ${missing.join(", ")}`
+      );
+    }
+    return resolved;
+  }
+
   // Enable ads (auto-labels with today's Claude-MM-DD-YY + any custom labels)
   async enableAds(customerId: string, adIds: string[], labels?: string[]) {
     const customer = this.getCustomer(customerId);
 
-    const resourceNames = adIds.map(
-      adId => `customers/${customerId.replace(/-/g, "")}/adGroupAds/${adId}`
-    );
+    const resourceNames = await this.resolveAdGroupAdResourceNames(customerId, adIds);
     const operations = resourceNames.map(rn => ({
       resource_name: rn,
       status: enums.AdGroupAdStatus.ENABLED,
@@ -1286,9 +1322,7 @@ class GoogleAdsManager {
   async pauseAds(customerId: string, adIds: string[], labels?: string[]) {
     const customer = this.getCustomer(customerId);
 
-    const resourceNames = adIds.map(
-      adId => `customers/${customerId.replace(/-/g, "")}/adGroupAds/${adId}`
-    );
+    const resourceNames = await this.resolveAdGroupAdResourceNames(customerId, adIds);
     const operations = resourceNames.map(rn => ({
       resource_name: rn,
       status: enums.AdGroupAdStatus.PAUSED,
@@ -1339,8 +1373,7 @@ class GoogleAdsManager {
   // Remove ads permanently. Reports on removed ads still work.
   async removeAds(customerId: string, adIds: string[]) {
     const customer = this.getCustomer(customerId);
-    const cleanId = customerId.replace(/-/g, "");
-    const resourceNames = adIds.map(id => `customers/${cleanId}/adGroupAds/${id}`);
+    const resourceNames = await this.resolveAdGroupAdResourceNames(customerId, adIds);
     return withResilience(() => customer.adGroupAds.remove(resourceNames), "removeAds");
   }
 
@@ -1383,7 +1416,7 @@ class GoogleAdsManager {
       result.ad_groups_labeled = rns.length;
     }
     if (targets.adIds?.length) {
-      const rns = targets.adIds.map(id => `customers/${cleanId}/adGroupAds/${id}`);
+      const rns = await this.resolveAdGroupAdResourceNames(customerId, targets.adIds);
       await this.labelAdGroupAds(customerId, rns, labelRN);
       result.ads_labeled = rns.length;
     }
