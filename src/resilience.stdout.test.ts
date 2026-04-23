@@ -1,5 +1,6 @@
 import { spawnSync } from "child_process";
 import { resolve } from "path";
+import { pathToFileURL } from "url";
 import { describe, expect, it } from "vitest";
 
 // Regression: Claude Desktop runs the MCP server with stderr piped (not a
@@ -10,7 +11,9 @@ import { describe, expect, it } from "vitest";
 // schema error. Logs MUST go to stderr; stdout is reserved for JSON-RPC.
 describe("logger destination under non-TTY subprocess (Claude Desktop)", () => {
   it("writes log output to stderr, never stdout", () => {
-    const harness = resolve(__dirname, "..", "dist", "resilience.js");
+    const harness = pathToFileURL(
+      resolve(__dirname, "..", "dist", "resilience.js"),
+    ).href;
     const probe = `
 import { logger } from ${JSON.stringify(harness)};
 logger.info({ probe: "stdout-pollution-check" }, "canary log line");
