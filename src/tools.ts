@@ -494,6 +494,24 @@ export const tools: Tool[] = [
     },
   },
   {
+    name: "google_ads_enable_keywords",
+    description: "Enable paused keywords by their criterion resource names. REQUIRES USER APPROVAL. Use after reviewing in Google Ads UI. Auto-applies today's `Claude-MM-DD-YY` label; pass `labels` to attach additional custom labels so different enable operations stay distinguishable.",
+    inputSchema: {
+      additionalProperties: false,
+      type: "object",
+      properties: {
+        customer_id: { type: "string" },
+        criterion_resource_names: { type: "array", items: { type: "string" }, description: "Full resource names like customers/123/adGroupCriteria/456~789" },
+        labels: {
+          type: "array",
+          items: { type: "string" },
+          description: "Optional custom labels to apply to every enabled keyword (in addition to the auto-applied `Claude-MM-DD-YY` label). Labels are created if they don't exist.",
+        },
+      },
+      required: ["criterion_resource_names"],
+    },
+  },
+  {
     name: "google_ads_update_campaign_tracking",
     description: "Update campaign tracking parameters: final URL suffix, tracking URL template, and/or custom URL parameters. Use google_ads_get_campaign_tracking first to see current values.",
     inputSchema: {

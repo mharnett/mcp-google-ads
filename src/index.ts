@@ -1093,6 +1093,21 @@ class GoogleAdsManager {
     return result;
   }
 
+  // Enable keywords (auto-labels with today's Claude-MM-DD-YY + any custom labels)
+  async enableKeywords(customerId: string, criterionResourceNames: string[], labels?: string[]) {
+    const customer = this.getCustomer(customerId);
+
+    const operations = criterionResourceNames.map(rn => ({
+      resource_name: rn,
+      status: enums.AdGroupCriterionStatus.ENABLED,
+    }));
+
+    const result = await withResilience(() => customer.adGroupCriteria.update(operations), "enableKeywords");
+    await this.autoLabelCreated(customerId, criterionResourceNames, "keyword");
+    await this.applyCustomLabels(customerId, criterionResourceNames, "keyword", labels);
+    return result;
+  }
+
   // Create a new shared negative keyword list at account level
   async createSharedSet(customerId: string, name: string) {
     const customer = this.getCustomer(customerId);
@@ -3063,6 +3078,25 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             text: JSON.stringify({
               success: true,
               message: "Keywords paused",
+              results: result,
+            }, null, 2),
+          }],
+        };
+      }
+
+      case "google_ads_enable_keywords": {
+        const customerId = args?.customer_id as string || "";
+        const result = await adsManager.enableKeywords(
+          customerId,
+          args?.criterion_resource_names as string[],
+          args?.labels as string[] | undefined,
+        );
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              success: true,
+              message: "Keywords enabled and now LIVE",
               results: result,
             }, null, 2),
           }],

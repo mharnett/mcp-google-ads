@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.4.5] - 2026-04-23
+
+### Added
+- **`google_ads_enable_keywords`**: flip paused keywords (ad group criteria)
+  to ENABLED by criterion resource name. Mirrors the existing
+  `pause_keywords` tool for the reverse direction, which `enable_items`
+  doesn't cover (that tool only handles campaigns, ad groups, and ads).
+  Auto-applies today's `Claude-MM-DD-YY` label and accepts optional custom
+  labels for audit-trail discoverability, matching `enable_items` behavior.
+
 ## [1.4.4] - 2026-04-18
 
 _(v1.4.3 was a stale pre-existing git tag; bumped past it.)_

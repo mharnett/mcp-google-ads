@@ -27,6 +27,7 @@ describe("Tool Schema Contract", () => {
     "google_ads_remove_campaign_negatives",
     "google_ads_remove_adgroup_negatives",
     "google_ads_pause_keywords",
+    "google_ads_enable_keywords",
     "google_ads_update_campaign_tracking",
     "google_ads_keyword_performance",
     "google_ads_keyword_performance_by_conversion",
