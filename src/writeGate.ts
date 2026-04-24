@@ -18,6 +18,7 @@ export const WRITE_TOOLS: ReadonlySet<string> = new Set([
   "google_ads_enable_items",
   "google_ads_pause_items",
   "google_ads_pause_keywords",
+  "google_ads_enable_keywords",
   "google_ads_pause_asset_links",
   "google_ads_remove_items",
   "google_ads_remove_shared_negatives",
