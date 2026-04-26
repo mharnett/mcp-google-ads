@@ -944,6 +944,26 @@ export const tools: Tool[] = [
     },
   },
   {
+    name: "google_ads_create_page_feed",
+    description: "Create an AI Max / DSA page feed (AssetSet of type PAGE_FEED) and attach it to a campaign. Each URL becomes a PageFeedAsset tagged with the given label. Use this to constrain AI Max final-URL expansion to a specific list of landing pages. Returns the AssetSet resource name and the number of URLs added.",
+    inputSchema: {
+      additionalProperties: false,
+      type: "object",
+      properties: {
+        customer_id: { type: "string" },
+        campaign_id: { type: "string", description: "Numeric campaign ID to attach the page feed to." },
+        name: { type: "string", description: "Display name for the AssetSet (shown in Business Data)." },
+        urls: {
+          type: "array",
+          items: { type: "string" },
+          description: "List of full landing page URLs to include.",
+        },
+        label: { type: "string", description: "Custom label applied to all feed items (default: 'page-feed')." },
+      },
+      required: ["campaign_id", "name", "urls"],
+    },
+  },
+  {
     name: "google_ads_create_image_asset",
     description: "Upload an image asset for use in Demand Gen (or other image-capable) ads. Provide exactly one of file_path (absolute path to PNG/JPG/GIF on disk) or base64_data (raw base64, no data URL prefix). Validates mime type, max 5MB, min dimensions 600x314 (Demand Gen minimum). Auto-labels the created asset. Returns {asset_id, resource_name, name, bytes, mime_type}.",
     inputSchema: {

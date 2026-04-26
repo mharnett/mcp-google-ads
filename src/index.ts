@@ -3506,6 +3506,84 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
       }
 
+      case "google_ads_create_page_feed": {
+        const customerId = args?.customer_id as string || "";
+        const campaignId = args?.campaign_id as string;
+        const feedName = args?.name as string;
+        const urls = args?.urls as string[];
+        const label = (args?.label as string | undefined) ?? "page-feed";
+
+        try {
+          const customer = adsManager.getCustomer(customerId);
+
+          // 1. Create one PageFeedAsset per URL
+          const assetCreateResult = await withResilience(
+            () => customer.assets.create(
+              urls.map((url: string) => ({
+                type: enums.AssetType.PAGE_FEED,
+                page_feed_asset: { page_url: url, labels: [label] },
+              } as any))
+            ),
+            "createPageFeedAssets"
+          );
+          const assetResources: string[] = ((assetCreateResult as any).results || [])
+            .map((r: any) => r.resource_name);
+
+          // 2. Create a PAGE_FEED AssetSet
+          const assetSetCreateResult = await withResilience(
+            () => (customer as any).asset_sets.create([{
+              name: feedName,
+              type: enums.AssetSetType.PAGE_FEED,
+            }]),
+            "createAssetSet"
+          );
+          const assetSetResource: string =
+            ((assetSetCreateResult as any).results || [])[0]?.resource_name;
+
+          // 3. Link each asset to the AssetSet
+          await withResilience(
+            () => (customer as any).asset_set_assets.create(
+              assetResources.map((assetResource: string) => ({
+                asset_set: assetSetResource,
+                asset: assetResource,
+              }))
+            ),
+            "linkAssetsToSet"
+          );
+
+          // 4. Attach AssetSet to campaign
+          const casCreateResult = await withResilience(
+            () => (customer as any).campaign_asset_sets.create([{
+              campaign: `customers/${customerId}/campaigns/${campaignId}`,
+              asset_set: assetSetResource,
+            }]),
+            "attachAssetSetToCampaign"
+          );
+          const casResource: string =
+            ((casCreateResult as any).results || [])[0]?.resource_name;
+
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({
+                success: true,
+                asset_set_resource: assetSetResource,
+                campaign_asset_set_resource: casResource,
+                urls_added: urls.length,
+                label,
+              }, null, 2),
+            }],
+          };
+        } catch (e: any) {
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({ success: false, error: e.message }, null, 2),
+            }],
+          };
+        }
+      }
+
       case "google_ads_create_image_asset": {
         const customerId = args?.customer_id as string || "";
         try {
