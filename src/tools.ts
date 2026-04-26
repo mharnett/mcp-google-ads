@@ -978,4 +978,195 @@ export const tools: Tool[] = [
       required: ["name"],
     },
   },
+  // ============================================
+  // EXPERIMENT TOOLS
+  // ============================================
+  {
+    name: "google_ads_create_experiment",
+    description: "Create a SEARCH_CUSTOM experiment (A/B test) on an existing campaign. Google automatically creates a treatment campaign as a copy of the base. Returns experiment_id and treatment_campaign_id so you can modify the treatment arm (e.g. change final URLs, add RSAs) before scheduling. Use google_ads_schedule_experiment to go live.",
+    inputSchema: {
+      additionalProperties: false,
+      type: "object",
+      properties: {
+        customer_id: { type: "string" },
+        base_campaign_id: {
+          type: "string",
+          description: "Numeric ID of the base (control) campaign.",
+        },
+        name: {
+          type: "string",
+          description: "Human-readable experiment name.",
+        },
+        description: {
+          type: "string",
+          description: "Optional description.",
+        },
+        suffix: {
+          type: "string",
+          description: "Suffix appended to the auto-created treatment campaign name. Defaults to ' [EXP]'.",
+        },
+        traffic_split_percent: {
+          type: "number",
+          description: "Percent of traffic sent to the treatment arm (1–99). Defaults to 50.",
+        },
+        start_date: {
+          type: "string",
+          description: "YYYY-MM-DD start date. Defaults to today.",
+        },
+        end_date: {
+          type: "string",
+          description: "YYYY-MM-DD end date.",
+        },
+      },
+      required: ["base_campaign_id", "name"],
+    },
+  },
+  {
+    name: "google_ads_list_experiments",
+    description: "List all experiments in the account, optionally filtered by base campaign ID.",
+    inputSchema: {
+      additionalProperties: false,
+      type: "object",
+      properties: {
+        customer_id: { type: "string" },
+        campaign_id: {
+          type: "string",
+          description: "Optional: filter to experiments on this base campaign.",
+        },
+        status_filter: {
+          type: "string",
+          enum: ["ALL", "SETUP", "ENABLED", "HALTED", "PROMOTED", "GRADUATED"],
+          description: "Filter by status. Defaults to ALL (excluding REMOVED).",
+        },
+      },
+    },
+  },
+  {
+    name: "google_ads_get_experiment",
+    description: "Get full details for an experiment including its arms and treatment campaign ID.",
+    inputSchema: {
+      additionalProperties: false,
+      type: "object",
+      properties: {
+        customer_id: { type: "string" },
+        experiment_id: {
+          type: "string",
+          description: "Numeric experiment ID (from google_ads_create_experiment or google_ads_list_experiments).",
+        },
+      },
+      required: ["experiment_id"],
+    },
+  },
+  {
+    name: "google_ads_schedule_experiment",
+    description: "Start a SETUP experiment so it begins serving traffic. Moves status from SETUP → ENABLED.",
+    inputSchema: {
+      additionalProperties: false,
+      type: "object",
+      properties: {
+        customer_id: { type: "string" },
+        experiment_id: { type: "string" },
+      },
+      required: ["experiment_id"],
+    },
+  },
+  {
+    name: "google_ads_end_experiment",
+    description: "Halt a running experiment. Traffic returns entirely to the base (control) campaign. Moves status to HALTED.",
+    inputSchema: {
+      additionalProperties: false,
+      type: "object",
+      properties: {
+        customer_id: { type: "string" },
+        experiment_id: { type: "string" },
+      },
+      required: ["experiment_id"],
+    },
+  },
+  {
+    name: "google_ads_promote_experiment",
+    description: "Graduate the treatment arm to become the permanent campaign (replaces base). Use when the treatment wins. Moves status to PROMOTED.",
+    inputSchema: {
+      additionalProperties: false,
+      type: "object",
+      properties: {
+        customer_id: { type: "string" },
+        experiment_id: { type: "string" },
+        validate_only: {
+          type: "boolean",
+          description: "Dry-run: validate without actually promoting. Defaults to false.",
+        },
+      },
+      required: ["experiment_id"],
+    },
+  },
+  {
+    name: "google_ads_update_campaign_ad_urls",
+    description: "Bulk-replace the final URL on every enabled ad in a campaign. Used to point an experiment treatment campaign at a new landing page. Returns a dry-run preview unless execute=true.",
+    inputSchema: {
+      additionalProperties: false,
+      type: "object",
+      properties: {
+        customer_id: { type: "string" },
+        campaign_id: {
+          type: "string",
+          description: "Campaign whose ads will be updated.",
+        },
+        new_final_url: {
+          type: "string",
+          description: "The new final URL to set on all ads (e.g. 'https://www.forcepoint.com/form/dlp-free-trial').",
+        },
+        execute: {
+          type: "boolean",
+          description: "Set true to apply changes. Omit or false for a dry-run preview of affected ads.",
+        },
+      },
+      required: ["campaign_id", "new_final_url"],
+    },
+  },
+  {
+    name: "google_ads_rename_ad_group",
+    description: "Rename an ad group. DRY-RUN BY DEFAULT: omit `confirm` or pass `confirm: false` to preview the change.",
+    inputSchema: {
+      additionalProperties: false,
+      type: "object",
+      properties: {
+        customer_id: { type: "string" },
+        ad_group_id: { type: "string", description: "Numeric ID of the ad group to rename." },
+        new_name: { type: "string", description: "New ad group name." },
+        confirm: {
+          type: "boolean",
+          description: "Must be true to apply the rename. Omit or false for dry-run preview.",
+        },
+      },
+      required: ["ad_group_id", "new_name"],
+    },
+  },
+  {
+    name: "google_ads_link_asset_to_campaign",
+    description: "Link an existing asset to one or more campaigns by field type. Supports SITELINK, CALLOUT, and STRUCTURED_SNIPPET. Create the asset first (e.g. with google_ads_create_sitelink), then use this to attach it to campaigns. DRY-RUN BY DEFAULT: omit `confirm` or pass `confirm: false` to preview.",
+    inputSchema: {
+      additionalProperties: false,
+      type: "object",
+      properties: {
+        customer_id: { type: "string" },
+        asset_id: { type: "string", description: "Numeric ID of the existing asset to link." },
+        campaign_ids: {
+          type: "array",
+          items: { type: "string" },
+          description: "IDs of campaigns to link the asset to.",
+        },
+        field_type: {
+          type: "string",
+          enum: ["SITELINK", "CALLOUT", "STRUCTURED_SNIPPET"],
+          description: "Asset field type — determines how the asset appears in ads.",
+        },
+        confirm: {
+          type: "boolean",
+          description: "Must be true to apply. Omit or false for dry-run preview.",
+        },
+      },
+      required: ["asset_id", "campaign_ids", "field_type"],
+    },
+  },
 ];

@@ -35,6 +35,14 @@ export const WRITE_TOOLS: ReadonlySet<string> = new Set([
   "google_ads_update_asset_urls",
   "google_ads_create_sitelink",
   "google_ads_replace_sitelink_url",
+  "google_ads_create_page_feed",
+  "google_ads_create_experiment",
+  "google_ads_schedule_experiment",
+  "google_ads_end_experiment",
+  "google_ads_promote_experiment",
+  "google_ads_update_campaign_ad_urls",
+  "google_ads_rename_ad_group",
+  "google_ads_link_asset_to_campaign",
 ]);
 
 export function isWriteTool(name: string): boolean {

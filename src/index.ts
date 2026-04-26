@@ -50,6 +50,14 @@ import {
   type CampaignCreateInput,
 } from "./campaignBuilder.js";
 import {
+  buildExperimentPayload,
+  buildControlArmPayload,
+  buildTreatmentArmPayload,
+  experimentIdFromResourceName,
+  campaignIdFromResourceName,
+  type ExperimentCreateInput,
+} from "./experimentBuilder.js";
+import {
   buildAdGroupCreatePayload,
   type AdGroupTypeName,
 } from "./adGroupBuilder.js";
@@ -573,7 +581,7 @@ class GoogleAdsManager {
     const mm = String(now.getMonth() + 1).padStart(2, "0");
     const dd = String(now.getDate()).padStart(2, "0");
     const yy = String(now.getFullYear()).slice(-2);
-    return `Claude-${mm}-${dd}-${yy}`;
+    return `claude-${mm}-${dd}-${yy}`;
   }
 
   // Apply today's Claude-MM-DD-YY label to newly created assets.
@@ -1918,6 +1926,398 @@ class GoogleAdsManager {
         customer_assets: customerLinks.length,
       },
       note: "The old Asset is not deleted; only its ENABLED links were migrated. Paused/removed links on the old asset were left alone.",
+    };
+  }
+
+  // ============================================
+  // AD GROUP RENAME
+  // ============================================
+
+  async renameAdGroup(customerId: string, adGroupId: string, newName: string) {
+    const customer = this.getCustomer(customerId);
+    const cleanId = customerId.replace(/-/g, "");
+    const resourceName = `customers/${cleanId}/adGroups/${adGroupId}`;
+
+    await withResilience(
+      () => customer.adGroups.update([{ resource_name: resourceName, name: newName } as any]),
+      "renameAdGroup"
+    );
+
+    await this.autoLabelCreated(customerId, [resourceName], "ad_group");
+
+    return {
+      customer_id: cleanId,
+      ad_group_id: adGroupId,
+      resource_name: resourceName,
+      new_name: newName,
+    };
+  }
+
+  // ============================================
+  // LINK ASSET TO CAMPAIGN
+  // ============================================
+
+  async linkAssetToCampaign(customerId: string, args: {
+    asset_id: string;
+    campaign_ids: string[];
+    field_type: string;
+  }) {
+    const customer = this.getCustomer(customerId);
+    const cleanId = customerId.replace(/-/g, "");
+
+    const fieldTypeMap: Record<string, any> = {
+      SITELINK: enums.AssetFieldType.SITELINK,
+      CALLOUT: enums.AssetFieldType.CALLOUT,
+      STRUCTURED_SNIPPET: enums.AssetFieldType.STRUCTURED_SNIPPET,
+    };
+
+    const fieldType = fieldTypeMap[args.field_type.toUpperCase()];
+    if (fieldType === undefined) {
+      throw new Error(
+        `Unknown field_type: "${args.field_type}". Supported values: SITELINK, CALLOUT, STRUCTURED_SNIPPET`
+      );
+    }
+
+    const assetResource = `customers/${cleanId}/assets/${args.asset_id}`;
+    const operations = args.campaign_ids.map(id => ({
+      campaign: `customers/${cleanId}/campaigns/${id}`,
+      asset: assetResource,
+      field_type: fieldType,
+    }));
+
+    const result = await withResilience(
+      () => customer.campaignAssets.create(operations as any),
+      "linkAssetToCampaign"
+    );
+
+    const results = (result as any).results || [];
+    const resourceNames: string[] = results.map((r: any) => r.resource_name).filter(Boolean);
+
+    return {
+      customer_id: cleanId,
+      asset_id: args.asset_id,
+      asset_resource_name: assetResource,
+      field_type: args.field_type,
+      campaigns_linked: args.campaign_ids.length,
+      resource_names: resourceNames,
+    };
+  }
+
+  // ============================================
+  // EXPERIMENT METHODS
+  // ============================================
+
+  async createExperiment(customerId: string, input: ExperimentCreateInput) {
+    const customer = this.getCustomer(customerId);
+    const cleanId = customerId.replace(/-/g, "");
+    const trafficSplit = input.traffic_split_percent ?? 50;
+
+    // 1. Create the experiment resource (SETUP status)
+    const experimentPayload = buildExperimentPayload(input);
+    const expResult = await withResilience(
+      () => customer.experiments.create([experimentPayload as any]),
+      "createExperiment.create"
+    );
+    const expResourceName: string = (expResult as any).results?.[0]?.resource_name;
+    if (!expResourceName) {
+      throw new Error("Experiment creation returned no resource_name");
+    }
+    const experimentId = experimentIdFromResourceName(expResourceName);
+
+    // 2. Create control arm (base campaign, unchanged)
+    const baseCampaignRN = `customers/${cleanId}/campaigns/${input.base_campaign_id}`;
+    const controlArm = buildControlArmPayload(expResourceName, baseCampaignRN, trafficSplit);
+    await withResilience(
+      () => customer.experimentArms.create([controlArm as any]),
+      "createExperiment.controlArm"
+    );
+
+    // 3. Create treatment arm (empty campaigns — Google auto-creates a copy)
+    const treatmentArm = buildTreatmentArmPayload(expResourceName, trafficSplit);
+    const treatmentResult = await withResilience(
+      () => customer.experimentArms.create([treatmentArm as any]),
+      "createExperiment.treatmentArm"
+    );
+    const treatmentArmRN: string = (treatmentResult as any).results?.[0]?.resource_name;
+
+    // 4. Query the treatment arm to get the auto-created treatment campaign id
+    let treatmentCampaignId: string | null = null;
+    if (treatmentArmRN) {
+      const armRows = await withResilience(
+        () => customer.query(`
+          SELECT experiment_arm.resource_name, experiment_arm.in_design_campaigns
+          FROM experiment_arm
+          WHERE experiment_arm.resource_name = '${treatmentArmRN}'
+        `),
+        "createExperiment.queryTreatmentArm"
+      );
+      const inDesign: string[] = (armRows as any[])[0]?.experiment_arm?.in_design_campaigns ?? [];
+      if (inDesign.length > 0) {
+        treatmentCampaignId = campaignIdFromResourceName(inDesign[0]);
+      }
+    }
+
+    await this.autoLabelCreated(customerId, [expResourceName], "experiment" as any);
+
+    return {
+      customer_id: cleanId,
+      experiment_id: experimentId,
+      experiment_resource_name: expResourceName,
+      treatment_campaign_id: treatmentCampaignId,
+      name: input.name,
+      traffic_split_percent: trafficSplit,
+      status: "SETUP",
+      note: treatmentCampaignId
+        ? `Treatment campaign ${treatmentCampaignId} created. Use google_ads_update_campaign_ad_urls to change landing pages, then google_ads_schedule_experiment to go live.`
+        : "Treatment campaign not yet available — query google_ads_get_experiment in a few seconds.",
+    };
+  }
+
+  async listExperiments(customerId: string, options: {
+    campaignId?: string;
+    statusFilter?: string;
+  } = {}) {
+    const customer = this.getCustomer(customerId);
+    const statusClause = options.statusFilter && options.statusFilter !== "ALL"
+      ? `AND experiment.status = '${options.statusFilter}'`
+      : `AND experiment.status != 'REMOVED'`;
+
+    const rows = await withResilience(
+      () => customer.query(`
+        SELECT
+          experiment.resource_name,
+          experiment.experiment_id,
+          experiment.name,
+          experiment.description,
+          experiment.status,
+          experiment.type,
+          experiment.start_date,
+          experiment.end_date,
+          experiment.suffix
+        FROM experiment
+        WHERE experiment.type = 'SEARCH_CUSTOM'
+        ${statusClause}
+        ORDER BY experiment.name
+      `),
+      "listExperiments"
+    );
+
+    let experiments = (rows as any[]).map(r => ({
+      experiment_id: String(r.experiment?.experiment_id ?? ""),
+      resource_name: r.experiment?.resource_name ?? "",
+      name: r.experiment?.name ?? "",
+      description: r.experiment?.description ?? "",
+      status: r.experiment?.status ?? "",
+      start_date: r.experiment?.start_date ?? "",
+      end_date: r.experiment?.end_date ?? "",
+      suffix: r.experiment?.suffix ?? "",
+    }));
+
+    // If campaignId filter requested, get arms to cross-reference
+    if (options.campaignId) {
+      const armRows = await withResilience(
+        () => customer.query(`
+          SELECT experiment_arm.experiment, experiment_arm.campaigns, experiment_arm.control
+          FROM experiment_arm
+          WHERE experiment_arm.control = TRUE
+        `),
+        "listExperiments.arms"
+      );
+      const cleanCid = customerId.replace(/-/g, "");
+      const targetRN = `customers/${cleanCid}/campaigns/${options.campaignId}`;
+      const expRNsForCampaign = new Set(
+        (armRows as any[])
+          .filter(r => (r.experiment_arm?.campaigns ?? []).includes(targetRN))
+          .map(r => r.experiment_arm?.experiment)
+      );
+      experiments = experiments.filter(e => expRNsForCampaign.has(e.resource_name));
+    }
+
+    return { customer_id: customerId.replace(/-/g, ""), experiments };
+  }
+
+  async getExperiment(customerId: string, experimentId: string) {
+    const customer = this.getCustomer(customerId);
+    const cleanId = customerId.replace(/-/g, "");
+    const expRN = `customers/${cleanId}/experiments/${experimentId}`;
+
+    const [expRows, armRows] = await Promise.all([
+      withResilience(
+        () => customer.query(`
+          SELECT
+            experiment.resource_name,
+            experiment.experiment_id,
+            experiment.name,
+            experiment.description,
+            experiment.status,
+            experiment.type,
+            experiment.start_date,
+            experiment.end_date,
+            experiment.suffix
+          FROM experiment
+          WHERE experiment.resource_name = '${expRN}'
+        `),
+        "getExperiment.exp"
+      ),
+      withResilience(
+        () => customer.query(`
+          SELECT
+            experiment_arm.resource_name,
+            experiment_arm.name,
+            experiment_arm.control,
+            experiment_arm.traffic_split,
+            experiment_arm.campaigns,
+            experiment_arm.in_design_campaigns
+          FROM experiment_arm
+          WHERE experiment_arm.experiment = '${expRN}'
+        `),
+        "getExperiment.arms"
+      ),
+    ]);
+
+    if ((expRows as any[]).length === 0) {
+      throw new Error(`Experiment ${experimentId} not found`);
+    }
+
+    const exp = (expRows as any[])[0].experiment;
+    const arms = (armRows as any[]).map(r => {
+      const arm = r.experiment_arm;
+      const isControl: boolean = arm?.control ?? false;
+      const campaigns: string[] = arm?.campaigns ?? [];
+      const inDesignCampaigns: string[] = arm?.in_design_campaigns ?? [];
+      return {
+        name: arm?.name ?? "",
+        control: isControl,
+        traffic_split: arm?.traffic_split ?? 0,
+        campaign_ids: campaigns.map(campaignIdFromResourceName),
+        treatment_campaign_ids: inDesignCampaigns.map(campaignIdFromResourceName),
+      };
+    });
+
+    const treatmentArm = arms.find(a => !a.control);
+    const treatmentCampaignId = treatmentArm?.treatment_campaign_ids?.[0] ?? null;
+
+    return {
+      experiment_id: String(exp?.experiment_id ?? experimentId),
+      resource_name: exp?.resource_name ?? expRN,
+      name: exp?.name ?? "",
+      description: exp?.description ?? "",
+      status: exp?.status ?? "",
+      start_date: exp?.start_date ?? "",
+      end_date: exp?.end_date ?? "",
+      suffix: exp?.suffix ?? "",
+      arms,
+      treatment_campaign_id: treatmentCampaignId,
+    };
+  }
+
+  async scheduleExperiment(customerId: string, experimentId: string) {
+    const customer = this.getCustomer(customerId);
+    const cleanId = customerId.replace(/-/g, "");
+    const expRN = `customers/${cleanId}/experiments/${experimentId}`;
+    await withResilience(
+      () => (customer.experiments as any).schedule(expRN),
+      "scheduleExperiment"
+    );
+    return { customer_id: cleanId, experiment_id: experimentId, status: "SCHEDULED" };
+  }
+
+  async endExperiment(customerId: string, experimentId: string) {
+    const customer = this.getCustomer(customerId);
+    const cleanId = customerId.replace(/-/g, "");
+    const expRN = `customers/${cleanId}/experiments/${experimentId}`;
+    await withResilience(
+      () => (customer.experiments as any).end(expRN),
+      "endExperiment"
+    );
+    return { customer_id: cleanId, experiment_id: experimentId, status: "HALTED" };
+  }
+
+  async promoteExperiment(customerId: string, experimentId: string, validateOnly = false) {
+    const customer = this.getCustomer(customerId);
+    const cleanId = customerId.replace(/-/g, "");
+    const expRN = `customers/${cleanId}/experiments/${experimentId}`;
+    await withResilience(
+      () => (customer.experiments as any).promote(expRN, { validate_only: validateOnly }),
+      "promoteExperiment"
+    );
+    return {
+      customer_id: cleanId,
+      experiment_id: experimentId,
+      status: validateOnly ? "VALIDATED (not promoted)" : "PROMOTED",
+    };
+  }
+
+  async updateCampaignAdUrls(customerId: string, campaignId: string, newFinalUrl: string, execute = false) {
+    const customer = this.getCustomer(customerId);
+    const cleanId = customerId.replace(/-/g, "");
+
+    // 1. Fetch all non-removed ads in the campaign
+    const rows = await withResilience(
+      () => customer.query(`
+        SELECT
+          ad_group_ad.resource_name,
+          ad_group_ad.ad.id,
+          ad_group_ad.ad.final_urls,
+          ad_group_ad.status,
+          ad_group.name,
+          campaign.name
+        FROM ad_group_ad
+        WHERE campaign.id = ${sanitizeNumericId(campaignId)}
+          AND ad_group_ad.status != 'REMOVED'
+        ORDER BY ad_group.name
+      `),
+      "updateCampaignAdUrls.query"
+    );
+
+    const ads = (rows as any[]).map(r => ({
+      resource_name: r.ad_group_ad?.resource_name,
+      ad_id: String(r.ad_group_ad?.ad?.id ?? ""),
+      current_final_urls: r.ad_group_ad?.ad?.final_urls ?? [],
+      ad_group_name: r.ad_group?.name ?? "",
+      status: r.ad_group_ad?.status ?? "",
+    }));
+
+    const preview = ads.map(a => ({
+      ad_id: a.ad_id,
+      ad_group: a.ad_group_name,
+      from: a.current_final_urls,
+      to: [newFinalUrl],
+    }));
+
+    if (!execute) {
+      return {
+        customer_id: cleanId,
+        campaign_id: campaignId,
+        dry_run: true,
+        ads_to_update: ads.length,
+        preview,
+        note: "Set execute=true to apply these changes.",
+      };
+    }
+
+    // 2. Bulk update
+    const updates = ads.map(a => ({
+      resource_name: a.resource_name,
+      ad: { final_urls: [newFinalUrl] },
+    }));
+
+    if (updates.length > 0) {
+      await withResilience(
+        () => customer.adGroupAds.update(updates as any),
+        "updateCampaignAdUrls.update"
+      );
+    }
+
+    await this.autoLabelCreated(customerId, ads.map(a => a.resource_name).filter(Boolean), "ad" as any);
+
+    return {
+      customer_id: cleanId,
+      campaign_id: campaignId,
+      dry_run: false,
+      ads_updated: updates.length,
+      new_final_url: newFinalUrl,
+      preview,
     };
   }
 
@@ -3416,6 +3816,69 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         return { content: [{ type: "text", text: JSON.stringify({ success: true, ...result }, null, 2) }] };
       }
 
+      case "google_ads_rename_ad_group": {
+        const customerId = args?.customer_id as string || "";
+        const adGroupId = args?.ad_group_id as string;
+        const newName = args?.new_name as string;
+
+        if (!adGroupId || !newName) {
+          return { content: [{ type: "text", text: JSON.stringify({ error: "ad_group_id and new_name are required." }, null, 2) }] };
+        }
+
+        if (!args?.confirm) {
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({
+                dry_run: true,
+                action: "rename_ad_group",
+                ad_group_id: adGroupId,
+                new_name: newName,
+                message: "Pass confirm: true to apply the rename.",
+              }, null, 2),
+            }],
+          };
+        }
+
+        const renameResult = await adsManager.renameAdGroup(customerId, adGroupId, newName);
+        return { content: [{ type: "text", text: JSON.stringify({ success: true, ...renameResult }, null, 2) }] };
+      }
+
+      case "google_ads_link_asset_to_campaign": {
+        const customerId = args?.customer_id as string || "";
+        const assetId = args?.asset_id as string;
+        const campaignIds = args?.campaign_ids as string[];
+        const fieldType = args?.field_type as string;
+
+        if (!assetId || !campaignIds?.length || !fieldType) {
+          return { content: [{ type: "text", text: JSON.stringify({ error: "asset_id, campaign_ids (non-empty), and field_type are required." }, null, 2) }] };
+        }
+
+        if (!args?.confirm) {
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({
+                dry_run: true,
+                action: "link_asset_to_campaign",
+                asset_id: assetId,
+                campaign_ids: campaignIds,
+                field_type: fieldType,
+                campaigns_to_link: campaignIds.length,
+                message: "Pass confirm: true to apply the links.",
+              }, null, 2),
+            }],
+          };
+        }
+
+        const linkResult = await adsManager.linkAssetToCampaign(customerId, {
+          asset_id: assetId,
+          campaign_ids: campaignIds,
+          field_type: fieldType,
+        });
+        return { content: [{ type: "text", text: JSON.stringify({ success: true, ...linkResult }, null, 2) }] };
+      }
+
       case "google_ads_gaql_query": {
         const customerId = args?.customer_id as string || "";
         const query = args?.query as string;
@@ -3605,6 +4068,99 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               text: JSON.stringify({ success: false, error: e.message }, null, 2),
             }],
           };
+        }
+      }
+
+      // ============================================
+      // EXPERIMENT DISPATCH
+      // ============================================
+
+      case "google_ads_create_experiment": {
+        assertWriteAllowed(name);
+        const customerId = args?.customer_id as string || "";
+        try {
+          const result = await adsManager.createExperiment(customerId, {
+            base_campaign_id: args?.base_campaign_id as string,
+            name: args?.name as string,
+            description: args?.description as string | undefined,
+            suffix: args?.suffix as string | undefined,
+            traffic_split_percent: args?.traffic_split_percent as number | undefined,
+            start_date: args?.start_date as string | undefined,
+            end_date: args?.end_date as string | undefined,
+          });
+          return { content: [{ type: "text", text: JSON.stringify({ success: true, ...result }, null, 2) }] };
+        } catch (e: any) {
+          return { content: [{ type: "text", text: JSON.stringify({ success: false, error: e.message }, null, 2) }] };
+        }
+      }
+
+      case "google_ads_list_experiments": {
+        const customerId = args?.customer_id as string || "";
+        const result = await adsManager.listExperiments(customerId, {
+          campaignId: args?.campaign_id as string | undefined,
+          statusFilter: args?.status_filter as string | undefined,
+        });
+        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+      }
+
+      case "google_ads_get_experiment": {
+        const customerId = args?.customer_id as string || "";
+        try {
+          const result = await adsManager.getExperiment(customerId, args?.experiment_id as string);
+          return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+        } catch (e: any) {
+          return { content: [{ type: "text", text: JSON.stringify({ success: false, error: e.message }, null, 2) }] };
+        }
+      }
+
+      case "google_ads_schedule_experiment": {
+        assertWriteAllowed(name);
+        const customerId = args?.customer_id as string || "";
+        try {
+          const result = await adsManager.scheduleExperiment(customerId, args?.experiment_id as string);
+          return { content: [{ type: "text", text: JSON.stringify({ success: true, ...result }, null, 2) }] };
+        } catch (e: any) {
+          return { content: [{ type: "text", text: JSON.stringify({ success: false, error: e.message }, null, 2) }] };
+        }
+      }
+
+      case "google_ads_end_experiment": {
+        assertWriteAllowed(name);
+        const customerId = args?.customer_id as string || "";
+        try {
+          const result = await adsManager.endExperiment(customerId, args?.experiment_id as string);
+          return { content: [{ type: "text", text: JSON.stringify({ success: true, ...result }, null, 2) }] };
+        } catch (e: any) {
+          return { content: [{ type: "text", text: JSON.stringify({ success: false, error: e.message }, null, 2) }] };
+        }
+      }
+
+      case "google_ads_promote_experiment": {
+        assertWriteAllowed(name);
+        const customerId = args?.customer_id as string || "";
+        try {
+          const validateOnly = args?.validate_only === true;
+          const result = await adsManager.promoteExperiment(customerId, args?.experiment_id as string, validateOnly);
+          return { content: [{ type: "text", text: JSON.stringify({ success: true, ...result }, null, 2) }] };
+        } catch (e: any) {
+          return { content: [{ type: "text", text: JSON.stringify({ success: false, error: e.message }, null, 2) }] };
+        }
+      }
+
+      case "google_ads_update_campaign_ad_urls": {
+        const customerId = args?.customer_id as string || "";
+        const execute = args?.execute === true;
+        if (execute) assertWriteAllowed(name);
+        try {
+          const result = await adsManager.updateCampaignAdUrls(
+            customerId,
+            args?.campaign_id as string,
+            args?.new_final_url as string,
+            execute,
+          );
+          return { content: [{ type: "text", text: JSON.stringify({ success: true, ...result }, null, 2) }] };
+        } catch (e: any) {
+          return { content: [{ type: "text", text: JSON.stringify({ success: false, error: e.message }, null, 2) }] };
         }
       }
 

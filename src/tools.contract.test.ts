@@ -47,7 +47,17 @@ describe("Tool Schema Contract", () => {
     "google_ads_pause_asset_links",
     "google_ads_keyword_volume",
     "google_ads_create_demand_gen_multi_asset_ad",
+    "google_ads_create_page_feed",
     "google_ads_create_image_asset",
+    "google_ads_create_experiment",
+    "google_ads_list_experiments",
+    "google_ads_get_experiment",
+    "google_ads_schedule_experiment",
+    "google_ads_end_experiment",
+    "google_ads_promote_experiment",
+    "google_ads_update_campaign_ad_urls",
+    "google_ads_rename_ad_group",
+    "google_ads_link_asset_to_campaign",
   ];
 
   it("exports the expected number of tools", () => {
