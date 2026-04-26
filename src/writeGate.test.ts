@@ -27,6 +27,8 @@ const READ_TOOLS = [
   "google_ads_search_term_insight_terms",
   "google_ads_gaql_query",
   "google_ads_keyword_volume",
+  "google_ads_list_experiments",
+  "google_ads_get_experiment",
 ];
 
 describe("writeGate", () => {
