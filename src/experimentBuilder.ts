@@ -45,7 +45,7 @@ export function buildExperimentPayload(input: ExperimentCreateInput): Experiment
     suffix: input.suffix ?? " [EXP]",
     type: enums.ExperimentType.SEARCH_CUSTOM, // 7
     status: enums.ExperimentStatus.SETUP,     // 6
-    ...(input.start_date ? { start_date: input.start_date } : {}),
+...(input.start_date ? { start_date: input.start_date } : {}),
     ...(input.end_date ? { end_date: input.end_date } : {}),
   };
 }

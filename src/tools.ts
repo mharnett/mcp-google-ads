@@ -1137,6 +1137,22 @@ export const tools: Tool[] = [
     },
   },
   {
+    name: "google_ads_remove_experiment",
+    description: "Permanently remove an experiment that is in SETUP status. Use to clean up orphaned or misconfigured experiments before recreating them. Only works on SETUP experiments (not yet scheduled/running).",
+    inputSchema: {
+      additionalProperties: false,
+      type: "object",
+      properties: {
+        customer_id: { type: "string" },
+        experiment_id: {
+          type: "string",
+          description: "Numeric experiment ID to remove.",
+        },
+      },
+      required: ["experiment_id"],
+    },
+  },
+  {
     name: "google_ads_update_campaign_ad_urls",
     description: "Bulk-replace the final URL on every enabled ad in a campaign. Used to point an experiment treatment campaign at a new landing page. Returns a dry-run preview unless execute=true.",
     inputSchema: {

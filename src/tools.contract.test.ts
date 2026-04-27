@@ -57,6 +57,7 @@ describe("Tool Schema Contract", () => {
     "google_ads_schedule_experiment",
     "google_ads_end_experiment",
     "google_ads_promote_experiment",
+    "google_ads_remove_experiment",
     "google_ads_update_campaign_ad_urls",
     "google_ads_rename_ad_group",
     "google_ads_link_asset_to_campaign",

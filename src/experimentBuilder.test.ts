@@ -19,6 +19,16 @@ describe("buildExperimentPayload", () => {
     expect(payload.status).toBe(enums.ExperimentStatus.SETUP);
   });
 
+  it("arms must be created together in one batch call (API validates sum=100 at mutation time)", () => {
+    // Documented constraint: traffic_split values across all arms must sum to 100.
+    // The API validates this on every mutation, so both arms must be passed in a
+    // single create call — sequential creates would fail (50 alone ≠ 100).
+    const expRN = "customers/123/experiments/456";
+    const control = buildControlArmPayload(expRN, "customers/123/campaigns/789", 50);
+    const treatment = buildTreatmentArmPayload(expRN, 50);
+    expect(control.traffic_split + treatment.traffic_split).toBe(100);
+  });
+
   it("defaults suffix to ' [EXP]'", () => {
     const payload = buildExperimentPayload({
       base_campaign_id: "12345",

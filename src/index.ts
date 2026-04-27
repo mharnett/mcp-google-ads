@@ -1403,7 +1403,11 @@ class GoogleAdsManager {
   async pauseAds(customerId: string, adIds: string[], labels?: string[]) {
     const customer = this.getCustomer(customerId);
 
-    const resourceNames = await this.resolveAdGroupAdResourceNames(customerId, adIds);
+    // If adIds are ad_group_ad resource names (e.g. "customers/.../adGroupAds/..."),
+    // use them directly so we don't accidentally pause the same ad in other campaigns.
+    const resourceNames = adIds.some(id => id.startsWith("customers/"))
+      ? adIds
+      : await this.resolveAdGroupAdResourceNames(customerId, adIds);
     const operations = resourceNames.map(rn => ({
       resource_name: rn,
       status: enums.AdGroupAdStatus.PAUSED,
@@ -2082,21 +2086,17 @@ class GoogleAdsManager {
     }
     const experimentId = experimentIdFromResourceName(expResourceName);
 
-    // 2. Create control arm (base campaign, unchanged)
+    // 2+3. Create both arms in a SINGLE call — the API validates that arm splits
+    //      sum to 100 at mutation time, so sequential creates would fail (50 ≠ 100).
     const baseCampaignRN = `customers/${cleanId}/campaigns/${input.base_campaign_id}`;
     const controlArm = buildControlArmPayload(expResourceName, baseCampaignRN, trafficSplit);
-    await withResilience(
-      () => customer.experimentArms.create([controlArm as any]),
-      "createExperiment.controlArm"
-    );
-
-    // 3. Create treatment arm (empty campaigns — Google auto-creates a copy)
     const treatmentArm = buildTreatmentArmPayload(expResourceName, trafficSplit);
-    const treatmentResult = await withResilience(
-      () => customer.experimentArms.create([treatmentArm as any]),
-      "createExperiment.treatmentArm"
+    const armsResult = await withResilience(
+      () => customer.experimentArms.create([controlArm as any, treatmentArm as any]),
+      "createExperiment.arms"
     );
-    const treatmentArmRN: string = (treatmentResult as any).results?.[0]?.resource_name;
+    // Treatment arm is the second result (index 1)
+    const treatmentArmRN: string = (armsResult as any).results?.[1]?.resource_name;
 
     // 4. Query the treatment arm to get the auto-created treatment campaign id
     let treatmentCampaignId: string | null = null;
@@ -2274,7 +2274,7 @@ class GoogleAdsManager {
     const cleanId = customerId.replace(/-/g, "");
     const expRN = `customers/${cleanId}/experiments/${experimentId}`;
     await withResilience(
-      () => (customer.experiments as any).schedule(expRN),
+      () => (customer.experiments as any).scheduleExperiment({ resource_name: expRN }),
       "scheduleExperiment"
     );
     return { customer_id: cleanId, experiment_id: experimentId, status: "SCHEDULED" };
@@ -2285,7 +2285,7 @@ class GoogleAdsManager {
     const cleanId = customerId.replace(/-/g, "");
     const expRN = `customers/${cleanId}/experiments/${experimentId}`;
     await withResilience(
-      () => (customer.experiments as any).end(expRN),
+      () => (customer.experiments as any).endExperiment({ resource_name: expRN }),
       "endExperiment"
     );
     return { customer_id: cleanId, experiment_id: experimentId, status: "HALTED" };
@@ -2296,13 +2296,28 @@ class GoogleAdsManager {
     const cleanId = customerId.replace(/-/g, "");
     const expRN = `customers/${cleanId}/experiments/${experimentId}`;
     await withResilience(
-      () => (customer.experiments as any).promote(expRN, { validate_only: validateOnly }),
+      () => (customer.experiments as any).promoteExperiment({ resource_name: expRN, validate_only: validateOnly }),
       "promoteExperiment"
     );
     return {
       customer_id: cleanId,
       experiment_id: experimentId,
       status: validateOnly ? "VALIDATED (not promoted)" : "PROMOTED",
+    };
+  }
+
+  async removeExperiment(customerId: string, experimentId: string) {
+    const customer = this.getCustomer(customerId);
+    const cleanId = customerId.replace(/-/g, "");
+    const expRN = `customers/${cleanId}/experiments/${experimentId}`;
+    await withResilience(
+      () => customer.experiments.remove([expRN]),
+      "removeExperiment"
+    );
+    return {
+      customer_id: cleanId,
+      experiment_id: experimentId,
+      status: "REMOVED",
     };
   }
 
@@ -4237,6 +4252,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         try {
           const validateOnly = args?.validate_only === true;
           const result = await adsManager.promoteExperiment(customerId, args?.experiment_id as string, validateOnly);
+          return { content: [{ type: "text", text: JSON.stringify({ success: true, ...result }, null, 2) }] };
+        } catch (e: any) {
+          return { content: [{ type: "text", text: JSON.stringify({ success: false, error: e.message }, null, 2) }] };
+        }
+      }
+
+      case "google_ads_remove_experiment": {
+        assertWriteAllowed(name);
+        const customerId = args?.customer_id as string || "";
+        try {
+          const result = await adsManager.removeExperiment(customerId, args?.experiment_id as string);
           return { content: [{ type: "text", text: JSON.stringify({ success: true, ...result }, null, 2) }] };
         } catch (e: any) {
           return { content: [{ type: "text", text: JSON.stringify({ success: false, error: e.message }, null, 2) }] };
