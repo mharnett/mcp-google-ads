@@ -423,6 +423,42 @@ export const tools: Tool[] = [
     },
   },
   {
+    name: "google_ads_set_ad_group_location_targeting",
+    description: "Add location (geo) targeting criteria at the ad group level. Required for Demand Gen campaigns — Demand Gen sets location at ad group level, not campaign level. Pass numeric geo target IDs (e.g. '2840' for USA). Existing criteria are NOT removed.",
+    inputSchema: {
+      additionalProperties: false,
+      type: "object",
+      properties: {
+        customer_id: { type: "string" },
+        ad_group_id: { type: "string" },
+        geo_target_ids: {
+          type: "array",
+          items: { type: "string" },
+          description: "Numeric geo target constant IDs, e.g. ['2840', '2124'] for USA + Canada.",
+        },
+      },
+      required: ["ad_group_id", "geo_target_ids"],
+    },
+  },
+  {
+    name: "google_ads_set_campaign_location_targeting",
+    description: "Add location (geo) targeting criteria to an existing campaign. Mirrors the geo_target_ids parameter available at campaign creation. Pass the numeric geo target IDs (e.g. '2840' for USA, '2124' for Canada). Existing location criteria are NOT removed — call GAQL to check first if needed.",
+    inputSchema: {
+      additionalProperties: false,
+      type: "object",
+      properties: {
+        customer_id: { type: "string" },
+        campaign_id: { type: "string" },
+        geo_target_ids: {
+          type: "array",
+          items: { type: "string" },
+          description: "Numeric geo target constant IDs, e.g. ['2840', '2124'] for USA + Canada.",
+        },
+      },
+      required: ["campaign_id", "geo_target_ids"],
+    },
+  },
+  {
     name: "google_ads_add_campaign_negatives",
     description: "Add negative keywords at the campaign level. Use for campaign-specific negatives that shouldn't be in a shared list.",
     inputSchema: {

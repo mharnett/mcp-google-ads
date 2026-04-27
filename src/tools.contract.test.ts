@@ -23,6 +23,8 @@ describe("Tool Schema Contract", () => {
     "google_ads_unlink_shared_set",
     "google_ads_add_shared_negatives",
     "google_ads_remove_shared_negatives",
+    "google_ads_set_ad_group_location_targeting",
+    "google_ads_set_campaign_location_targeting",
     "google_ads_add_campaign_negatives",
     "google_ads_remove_campaign_negatives",
     "google_ads_remove_adgroup_negatives",

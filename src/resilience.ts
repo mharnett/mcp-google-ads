@@ -150,10 +150,17 @@ export async function withResilience<T>(
       error = err;
     } else {
       // Try to get message from nested errors array (google-ads-api pattern)
-      const nested = (err as any)?.errors?.[0];
-      const msg = nested?.message
+      const errors = (err as any)?.errors || [];
+      const nested = errors[0];
+      const baseMsg = nested?.message
         || (typeof (err as any)?.message === "string" ? (err as any).message : null)
         || (() => { try { return JSON.stringify(err); } catch { return String(err); } })();
+      // Include field path info if present (helps diagnose "required field" errors)
+      const fieldPath = nested?.location?.field_path_elements?.map((e: any) => e.field_name).join(".");
+      const errorCode = nested?.error_code ? JSON.stringify(nested.error_code) : undefined;
+      const allMessages = errors.slice(1).map((e: any) => e?.message).filter(Boolean);
+      const extra = [fieldPath && `field: ${fieldPath}`, errorCode && `code: ${errorCode}`, ...allMessages.map((m: string) => `also: ${m}`)].filter(Boolean).join("; ");
+      const msg = extra ? `${baseMsg} (${extra})` : baseMsg;
       error = new Error(msg);
       (error as any).cause = err;
     }

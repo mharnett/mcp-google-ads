@@ -749,15 +749,31 @@ class GoogleAdsManager {
 
     const budgetResourceName = budgetResult.results[0].resource_name;
 
-    // Then create the campaign
-    const campaignResult = await withResilience(
-      () =>
-        customer.campaigns.create([{
-          ...plan.campaign,
-          campaign_budget: budgetResourceName,
-        } as any]),
-      "createCampaign"
-    );
+    const campaignPayload = { ...plan.campaign, campaign_budget: budgetResourceName };
+
+    // DEMAND_GEN campaigns require fields not in the v23 client schema
+    // (contains_eu_political_advertising, audience_setting). mutateResources
+    // bypasses client-side typed validation — same approach as DG ad groups.
+    const isDemandGen = plan.campaign.advertising_channel_type === 14; // DEMAND_GEN
+    let campaignResult: any;
+    if (isDemandGen) {
+      const mutateResp = await withResilience(
+        () => customer.mutateResources([
+          { entity: "campaign", operation: "create", resource: campaignPayload as any } as any,
+        ]),
+        "createCampaign"
+      );
+      campaignResult = {
+        results: (mutateResp.mutate_operation_responses || [])
+          .map((r: any) => r.campaign_result)
+          .filter(Boolean),
+      };
+    } else {
+      campaignResult = await withResilience(
+        () => customer.campaigns.create([campaignPayload as any]),
+        "createCampaign"
+      );
+    }
 
     const campaignRNs = ((campaignResult as any).results || []).map((r: any) => r.resource_name).filter(Boolean);
 
@@ -1201,6 +1217,48 @@ class GoogleAdsManager {
     }));
 
     const result = await withResilience(() => customer.campaignCriteria.create(criteria), "addCampaignNegativeKeywords");
+    return result;
+  }
+
+  // Add location (geo) targeting criteria at the AD GROUP level.
+  // Required for Demand Gen campaigns — DG sets location at ad group, not campaign.
+  // Uses string type "LOCATION" (integer 77) — not in v23 enum map, same pattern
+  // as DEMAND_GEN_MULTI_ASSET_AD_GROUP and EuPoliticalAdvertising fixes.
+  async setAdGroupLocationTargeting(customerId: string, adGroupId: string, geoTargetIds: string[]) {
+    const customer = this.getCustomer(customerId);
+    const cleanId = customerId.replace(/-/g, "");
+    const adGroupRN = `customers/${cleanId}/adGroups/${adGroupId}`;
+    const criteria = geoTargetIds.map(id => ({
+      ad_group: adGroupRN,
+      type: "LOCATION",
+      location: { geo_target_constant: `geoTargetConstants/${id}` },
+    }));
+    const result = await withResilience(
+      () => customer.adGroupCriteria.create(criteria as any),
+      "setAdGroupLocationTargeting"
+    );
+    return result;
+  }
+
+  // Add location (geo) targeting criteria to an existing campaign.
+  // Uses mutateResources (not campaignCriteria.create) because the v23 typed
+  // path doesn't recognize the `location` criterion field — same pattern as
+  // DEMAND_GEN campaign/ad-group creation.
+  async setCampaignLocationTargeting(customerId: string, campaignId: string, geoTargetIds: string[]) {
+    const customer = this.getCustomer(customerId);
+    const cleanId = customerId.replace(/-/g, "");
+    const campaignRN = `customers/${cleanId}/campaigns/${campaignId}`;
+    // Pass type as string "LOCATION" (integer 77) — not in v23 enum map, same
+    // issue as DEMAND_GEN_MULTI_ASSET_AD_GROUP (21) and EuPoliticalAdvertising (3).
+    const criteria = geoTargetIds.map(id => ({
+      campaign: campaignRN,
+      type: "LOCATION",
+      location: { geo_target_constant: `geoTargetConstants/${id}` },
+    }));
+    const result = await withResilience(
+      () => customer.campaignCriteria.create(criteria as any),
+      "setCampaignLocationTargeting"
+    );
     return result;
   }
 
@@ -3403,6 +3461,44 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             text: JSON.stringify({
               success: true,
               message: `Removed ${resourceNames.length} negative keywords from shared list`,
+              results: result,
+            }, null, 2),
+          }],
+        };
+      }
+
+      case "google_ads_set_ad_group_location_targeting": {
+        const customerId = args?.customer_id as string || "";
+        const result = await adsManager.setAdGroupLocationTargeting(
+          customerId,
+          args?.ad_group_id as string,
+          args?.geo_target_ids as string[],
+        );
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              success: true,
+              message: `Location targeting set: ${(args?.geo_target_ids as string[]).length} geo targets added to ad group ${args?.ad_group_id}`,
+              results: result,
+            }, null, 2),
+          }],
+        };
+      }
+
+      case "google_ads_set_campaign_location_targeting": {
+        const customerId = args?.customer_id as string || "";
+        const result = await adsManager.setCampaignLocationTargeting(
+          customerId,
+          args?.campaign_id as string,
+          args?.geo_target_ids as string[],
+        );
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              success: true,
+              message: `Location targeting set: ${(args?.geo_target_ids as string[]).length} geo targets added to campaign ${args?.campaign_id}`,
               results: result,
             }, null, 2),
           }],

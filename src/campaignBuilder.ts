@@ -69,21 +69,27 @@ export function buildCampaignCreatePayload(input: CampaignCreateInput): Campaign
     name: input.name,
     status: enums.CampaignStatus.PAUSED,
     advertising_channel_type: channelEnum,
+    // EuPoliticalAdvertisingStatus enum: 3 = DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING.
+    // Required for all new campaigns in API v23+. Must be a non-zero enum value
+    // (proto3 strips default/zero values, so `false`/0 gets omitted and the API
+    // rejects with "required field not present").
+    contains_eu_political_advertising:
+      enums.EuPoliticalAdvertisingStatus?.DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING ?? 3,
   };
 
-  // DEMAND_GEN campaigns serve on YouTube, Discover, and Gmail. Google Ads
-  // API treats those surfaces as part of the content network, so
-  // target_content_network must be true — all-false rejects with
-  // "Must target at least one network." Search-side flags stay false since
-  // DG never runs on Search or Partner Search. SEARCH path retains the
-  // historical behavior of omitting network_settings (server defaults).
+  // DEMAND_GEN campaigns use target_google_search: true to signal Demand Gen
+  // surfaces (YouTube, Discover, Gmail). target_content_network must be false —
+  // the API rejects DEMAND_GEN with content_network=true as of Apr 2026.
+  // audience_setting.use_audience_grouped=true is required for all DG campaigns.
+  // SEARCH path retains the historical behavior of omitting these settings.
   if (channelType === "DEMAND_GEN") {
     campaign.network_settings = {
-      target_google_search: false,
+      target_google_search: true,
       target_search_network: false,
-      target_content_network: true,
+      target_content_network: false,
       target_partner_search_network: false,
     };
+    campaign.audience_setting = { use_audience_grouped: true };
   }
 
   if (input.start_date) campaign.start_date = input.start_date;

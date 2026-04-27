@@ -17,7 +17,11 @@ describe("buildAdGroupCreatePayload", () => {
     expect(payload.cpc_bid_micros).toBe(1_000_000);
   });
 
-  it("type=DEMAND_GEN_MULTI_ASSET_AD_GROUP emits proto value 21 (not in v23 client enum)", () => {
+  it("type=DEMAND_GEN_MULTI_ASSET_AD_GROUP emits string name (not integer) to avoid unknown-enum serialization", () => {
+    // v23 enum map lacks value 21; integer 21 gets JSON-serialized as
+    // "UNKNOWN_ENUM_VALUE_AdGroupType_21" which the API rejects. Use the
+    // string name "DEMAND_GEN_MULTI_ASSET_AD_GROUP" which passes through
+    // JSON/REST serialization correctly.
     const payload = buildAdGroupCreatePayload({
       customer_id_clean: "1234567890",
       name: "DG AG",
@@ -25,6 +29,6 @@ describe("buildAdGroupCreatePayload", () => {
       type: "DEMAND_GEN_MULTI_ASSET_AD_GROUP",
     });
 
-    expect(payload.type).toBe(21);
+    expect(payload.type).toBe("DEMAND_GEN_MULTI_ASSET_AD_GROUP");
   });
 });

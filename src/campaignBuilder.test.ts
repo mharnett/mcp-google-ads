@@ -23,6 +23,9 @@ describe("buildCampaignCreatePayload — back-compat gate", () => {
     expect(plan.campaign.status).toBe(enums.CampaignStatus.PAUSED);
     expect(plan.campaign.advertising_channel_type).toBe(enums.AdvertisingChannelType.SEARCH);
     expect(plan.campaign.manual_cpc).toEqual({});
+    // EuPoliticalAdvertisingStatus.DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING = 3
+    // Required for new campaigns; must be non-zero (proto3 strips default/0 values)
+    expect(plan.campaign.contains_eu_political_advertising).toBe(3);
     // No extra bidding strategy fields
     expect((plan.campaign as any).maximize_conversions).toBeUndefined();
     expect((plan.campaign as any).target_cpa).toBeUndefined();
@@ -132,12 +135,10 @@ describe("buildCampaignCreatePayload — DEMAND_GEN channel", () => {
     expect(plan.campaign.manual_cpc).toBeUndefined();
   });
 
-  it("DEMAND_GEN sets network_settings: content_network=true, others=false", () => {
-    // Google Ads API requires at least one network flag to be true, rejecting
-    // DG campaign create with "Must target at least one network." if all are
-    // false. YouTube / Discover / Gmail inventory is served via the content
-    // network for DG, so target_content_network must be true. Search-side
-    // flags stay false (DG never runs on Search).
+  it("DEMAND_GEN sets correct network_settings and audience_setting", () => {
+    // target_google_search=true signals DG surfaces (YouTube, Discover, Gmail).
+    // target_content_network=false required — API rejects true as of Apr 2026.
+    // audience_setting.use_audience_grouped=true is required for all DG campaigns.
     const plan = buildCampaignCreatePayload({
       name: "DG Campaign",
       budget_amount_micros: 20_000_000,
@@ -145,11 +146,12 @@ describe("buildCampaignCreatePayload — DEMAND_GEN channel", () => {
     });
 
     expect(plan.campaign.network_settings).toEqual({
-      target_google_search: false,
+      target_google_search: true,
       target_search_network: false,
-      target_content_network: true,
+      target_content_network: false,
       target_partner_search_network: false,
     });
+    expect(plan.campaign.audience_setting).toEqual({ use_audience_grouped: true });
   });
 
   it("SEARCH does NOT set network_settings (back-compat — unchanged behavior)", () => {
