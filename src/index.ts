@@ -1074,6 +1074,7 @@ class GoogleAdsManager {
       .filter(Boolean)[0];
     const resourceName: string | undefined = adGroupAdResult?.resource_name;
 
+    let assetAutomationOptOut: string | null = null;
     if (resourceName) {
       await this.autoLabelCreated(customerId, [resourceName], "ad");
       // Extra caller-supplied labels (on top of the auto Claude-MM-DD-YY label)
@@ -1085,11 +1086,31 @@ class GoogleAdsManager {
           console.error(`[WARN] extra label '${lbl}' failed: ${e.message}`);
         }
       }
+
+      // Auto opt-out of Google's auto-enhancement features. Demand Gen
+      // multi-asset ads default to OPTED_IN for "auto-generate video"
+      // (GENERATE_VIDEOS_FROM_OTHER_ASSETS) and "adaptive layouts"
+      // (GENERATE_DESIGN_VERSIONS_FOR_IMAGES). Advertisers consistently want
+      // tight creative control, so opt out by default. Best-effort: warn but
+      // don't fail the create if opt-out errors.
+      try {
+        await this.updateAdAssetAutomation(
+          customerId,
+          [resourceName],
+          ["GENERATE_VIDEOS_FROM_OTHER_ASSETS", "GENERATE_DESIGN_VERSIONS_FOR_IMAGES"],
+          "OPTED_OUT",
+        );
+        assetAutomationOptOut = "OPTED_OUT";
+      } catch (e: any) {
+        assetAutomationOptOut = `failed: ${e.message}`;
+        console.error(`[WARN] auto-asset-automation opt-out failed for ${resourceName}: ${e.message}`);
+      }
     }
 
     return {
       resource_name: resourceName,
       ad_id: resourceName ? resourceName.split("~").pop() : undefined,
+      asset_automation_opt_out: assetAutomationOptOut,
     };
   }
 
