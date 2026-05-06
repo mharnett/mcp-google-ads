@@ -759,6 +759,89 @@ export const tools: Tool[] = [
     },
   },
   {
+    name: "google_ads_update_ad_asset_automation",
+    description: "Set asset_automation_settings (auto-generated video, image enhancements, etc.) on one or more AdGroupAds. Use this to opt Demand Gen multi-asset ads OUT of Google's auto-generation features so creative output stays under advertiser control. Likely Demand Gen UI mappings (verify in UI on first use): 'Auto-generate video' → GENERATE_VIDEOS_FROM_OTHER_ASSETS; 'Adaptive layouts' → GENERATE_DESIGN_VERSIONS_FOR_IMAGES. Auto-applies today's Claude-MM-DD-YY label.",
+    inputSchema: {
+      additionalProperties: false,
+      type: "object",
+      properties: {
+        customer_id: { type: "string" },
+        ad_ids: {
+          type: "array",
+          items: { type: "string" },
+          description: "Numeric ad IDs OR full ad_group_ad resource names. Resource names are preferred when an ad ID exists in multiple ad groups.",
+        },
+        automation_types: {
+          type: "array",
+          items: {
+            type: "string",
+            enum: [
+              "TEXT_ASSET_AUTOMATION",
+              "GENERATE_VERTICAL_YOUTUBE_VIDEOS",
+              "GENERATE_SHORTER_YOUTUBE_VIDEOS",
+              "GENERATE_LANDING_PAGE_PREVIEW",
+              "GENERATE_ENHANCED_YOUTUBE_VIDEOS",
+              "GENERATE_IMAGE_ENHANCEMENT",
+              "GENERATE_IMAGE_EXTRACTION",
+              "GENERATE_DESIGN_VERSIONS_FOR_IMAGES",
+              "FINAL_URL_EXPANSION_TEXT_ASSET_AUTOMATION",
+              "GENERATE_VIDEOS_FROM_OTHER_ASSETS",
+            ],
+          },
+          description: "AssetAutomationType enum names to set. For Demand Gen 'auto-generate video' + 'adaptive layouts' opt-out, default candidates are GENERATE_VIDEOS_FROM_OTHER_ASSETS and GENERATE_DESIGN_VERSIONS_FOR_IMAGES.",
+        },
+        status: {
+          type: "string",
+          enum: ["OPTED_IN", "OPTED_OUT"],
+          description: "Default OPTED_OUT.",
+        },
+        labels: {
+          type: "array",
+          items: { type: "string" },
+          description: "Optional custom labels (added alongside auto-applied Claude-MM-DD-YY label).",
+        },
+      },
+      required: ["ad_ids", "automation_types"],
+    },
+  },
+  {
+    name: "google_ads_get_campaign_diagnostics",
+    description: "Diagnose why a campaign is not spending or serving. Returns primary_status, primary_status_reasons, serving_status, budget, bidding strategy, and last-7-days metrics in a single call. Use this as the first step when a campaign has unexpectedly low spend or impressions.",
+    inputSchema: {
+      additionalProperties: false,
+      type: "object",
+      properties: {
+        customer_id: { type: "string" },
+        campaign_ids: {
+          type: "array",
+          items: { type: "string" },
+          description: "One or more numeric campaign IDs to diagnose. If omitted, returns diagnostics for all enabled campaigns.",
+        },
+      },
+    },
+  },
+  {
+    name: "google_ads_get_ad_strength",
+    description: "Get the ad strength rating (POOR, AVERAGE, GOOD, EXCELLENT) for RSAs in a campaign or ad group, along with headline/description counts. Ad strength below GOOD suppresses delivery. Use this to identify ads that need more creative assets.",
+    inputSchema: {
+      additionalProperties: false,
+      type: "object",
+      properties: {
+        customer_id: { type: "string" },
+        campaign_ids: {
+          type: "array",
+          items: { type: "string" },
+          description: "Filter by numeric campaign IDs.",
+        },
+        ad_group_ids: {
+          type: "array",
+          items: { type: "string" },
+          description: "Filter by ad group IDs.",
+        },
+      },
+    },
+  },
+  {
     name: "google_ads_gaql_query",
     description: "Execute a raw GAQL (Google Ads Query Language) query. Use this for custom reports or accessing any Google Ads API resource not covered by other tools. See https://developers.google.com/google-ads/api/docs/query/overview for GAQL syntax.",
     inputSchema: {

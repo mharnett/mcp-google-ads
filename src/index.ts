@@ -1445,6 +1445,69 @@ class GoogleAdsManager {
     return result;
   }
 
+  // Set asset_automation_settings on AdGroupAds (Demand Gen video / image
+  // generation opt-outs). Field is not in the v23 typed-client schema for
+  // adGroupAds.update, so we go through mutateResources and let the lib's
+  // patched getFieldMask derive the update_mask from the resource keys.
+  // Caller passes enum NAME strings (e.g. "GENERATE_VIDEOS_FROM_OTHER_ASSETS");
+  // we map to the numeric enum value at the boundary.
+  async updateAdAssetAutomation(
+    customerId: string,
+    adIds: string[],
+    automationTypes: string[],
+    status: "OPTED_IN" | "OPTED_OUT" = "OPTED_OUT",
+    labels?: string[]
+  ) {
+    const customer = this.getCustomer(customerId);
+    const resourceNames = adIds.some(id => id.startsWith("customers/"))
+      ? adIds
+      : await this.resolveAdGroupAdResourceNames(customerId, adIds);
+
+    const typeEnum = (enums as any).AssetAutomationType;
+    const statusEnum = (enums as any).AssetAutomationStatus;
+    const statusValue = statusEnum[status];
+    const validNames = Object.keys(typeEnum).filter(k => isNaN(Number(k)));
+    const unknown = automationTypes.filter(n => typeEnum[n] === undefined);
+    if (unknown.length > 0) {
+      throw new Error("Unknown AssetAutomationType value(s); valid set: " + validNames.join(", "));
+    }
+    const settings = automationTypes.map(name => ({
+      asset_automation_type: typeEnum[name],
+      asset_automation_status: statusValue,
+    }));
+
+    const operations = resourceNames.map(rn => ({
+      entity: "ad_group_ad",
+      operation: "update",
+      resource: {
+        resource_name: rn,
+        // Proto field on AdGroupAd is `ad_group_ad_asset_automation_settings`,
+        // NOT `asset_automation_settings` (verified against v23 fields.js).
+        ad_group_ad_asset_automation_settings: settings,
+      },
+    } as any));
+
+    const mutateResp = await withResilience(
+      () => customer.mutateResources(operations),
+      "updateAdAssetAutomation"
+    );
+
+    const responses = (mutateResp as any).mutate_operation_responses || [];
+    const partialFailure = (mutateResp as any).partial_failure_error || null;
+    const successCount = responses.filter((r: any) => r.ad_group_ad_result).length;
+
+    await this.autoLabelCreated(customerId, resourceNames, "ad");
+    await this.applyCustomLabels(customerId, resourceNames, "ad", labels);
+
+    return {
+      requested_count: resourceNames.length,
+      success_count: successCount,
+      partial_failure_error: partialFailure,
+      results: responses.map((r: any) => r.ad_group_ad_result?.resource_name).filter(Boolean),
+      applied_settings: automationTypes.map(name => ({ type: name, status })),
+    };
+  }
+
   // Pause ad groups (auto-labels with today's Claude-MM-DD-YY + any custom labels)
   async pauseAdGroups(customerId: string, adGroupIds: string[], labels?: string[]) {
     const customer = this.getCustomer(customerId);
@@ -4034,6 +4097,76 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           field_type: fieldType,
         });
         return { content: [{ type: "text", text: JSON.stringify({ success: true, ...linkResult }, null, 2) }] };
+      }
+
+      case "google_ads_get_campaign_diagnostics": {
+        const customerId = args?.customer_id as string || "";
+        const campaignIds = args?.campaign_ids as string[] | undefined;
+        const customer = adsManager.getCustomer(customerId);
+
+        let diagQuery = `
+          SELECT
+            campaign.id,
+            campaign.name,
+            campaign.status,
+            campaign.serving_status,
+            campaign.primary_status,
+            campaign.primary_status_reasons,
+            campaign.bidding_strategy_type,
+            campaign_budget.amount_micros,
+            campaign_budget.status,
+            campaign_budget.delivery_method,
+            metrics.cost_micros,
+            metrics.impressions,
+            metrics.clicks,
+            metrics.conversions
+          FROM campaign
+          WHERE campaign.status = 'ENABLED'
+            AND segments.date DURING LAST_7_DAYS
+        `;
+        if (campaignIds && campaignIds.length > 0) {
+          diagQuery += ` AND campaign.id IN (${campaignIds.map(sanitizeNumericId).join(",")})`;
+        }
+        diagQuery += ` ORDER BY metrics.cost_micros ASC`;
+
+        const diagResult = await withResilience(() => customer.query(diagQuery), "getCampaignDiagnostics");
+        return { content: [{ type: "text", text: JSON.stringify(safeResponse(diagResult, "getCampaignDiagnostics"), null, 2) }] };
+      }
+
+      case "google_ads_get_ad_strength": {
+        const customerId = args?.customer_id as string || "";
+        const campaignIds = args?.campaign_ids as string[] | undefined;
+        const adGroupIds = args?.ad_group_ids as string[] | undefined;
+        const customer = adsManager.getCustomer(customerId);
+
+        let adStrengthQuery = `
+          SELECT
+            campaign.id,
+            campaign.name,
+            ad_group.id,
+            ad_group.name,
+            ad_group_ad.ad.id,
+            ad_group_ad.ad.type,
+            ad_group_ad.ad.final_urls,
+            ad_group_ad.ad.responsive_search_ad.headlines,
+            ad_group_ad.ad.responsive_search_ad.descriptions,
+            ad_group_ad.ad_strength,
+            ad_group_ad.status,
+            ad_group_ad.policy_summary.approval_status,
+            ad_group_ad.policy_summary.review_status
+          FROM ad_group_ad
+          WHERE ad_group_ad.status != 'REMOVED'
+        `;
+        if (campaignIds && campaignIds.length > 0) {
+          adStrengthQuery += ` AND campaign.id IN (${campaignIds.map(sanitizeNumericId).join(",")})`;
+        }
+        if (adGroupIds && adGroupIds.length > 0) {
+          adStrengthQuery += ` AND ad_group.id IN (${adGroupIds.map(sanitizeNumericId).join(",")})`;
+        }
+        adStrengthQuery += ` ORDER BY campaign.name, ad_group.name`;
+
+        const adStrengthResult = await withResilience(() => customer.query(adStrengthQuery), "getAdStrength");
+        return { content: [{ type: "text", text: JSON.stringify(safeResponse(adStrengthResult, "getAdStrength"), null, 2) }] };
       }
 
       case "google_ads_gaql_query": {

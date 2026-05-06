@@ -29,6 +29,8 @@ const READ_TOOLS = [
   "google_ads_keyword_volume",
   "google_ads_list_experiments",
   "google_ads_get_experiment",
+  "google_ads_get_campaign_diagnostics",
+  "google_ads_get_ad_strength",
 ];
 
 describe("writeGate", () => {
