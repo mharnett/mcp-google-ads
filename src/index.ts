@@ -654,11 +654,11 @@ class GoogleAdsManager {
     const customer = this.getCustomer(customerId);
     const cleanId = customerId.replace(/-/g, "");
 
-    // Get current campaign and budget info
+    // Get current campaign and budget info, including portfolio strategy detection
     const [currentCampaign] = await withResilience(
       () =>
         customer.query(`
-      SELECT campaign.name, campaign.id, campaign_budget.id, campaign_budget.amount_micros, campaign_budget.name
+      SELECT campaign.name, campaign.id, campaign_budget.id, campaign_budget.amount_micros, campaign_budget.name, campaign.bidding_strategy, campaign.bidding_strategy_type
       FROM campaign
       WHERE campaign.id = ${campaignId}
     `),
@@ -675,28 +675,51 @@ class GoogleAdsManager {
     const newAmountMicros = Math.round(dailyBudgetDollars * 1_000_000);
 
     if (createNewBudget) {
-      // Create a new budget and reassign the campaign to it
-      const budgetResult = await withResilience(
-        () =>
-          customer.campaignBudgets.create([{
-            name: `${campaignName} Budget`,
-            amount_micros: newAmountMicros,
-            delivery_method: enums.BudgetDeliveryMethod.STANDARD,
-          }]),
-        "updateCampaignBudget.createBudget"
+      const portfolioStrategyResource = currentCampaign.campaign?.bidding_strategy;
+
+      // Google requires an aligned portfolio strategy + shared budget to be broken
+      // atomically — neither can change independently. We use mutateResources to send
+      // both operations in one batch call. The library's getFieldMask is patched to
+      // also exclude snake_case "resource_name" from the update_mask (matching the
+      // existing camelCase "resourceName" exclusion). target_cpa_micros: 0 gets into
+      // the field mask via the raw JS object path (not stripped by proto defaults:false)
+      // and setting a maximize_conversions sub-field triggers proto3 oneof to clear
+      // the bidding_strategy (portfolio) reference atomically.
+      const tempBudgetResourceName = `customers/${cleanId}/campaignBudgets/-1`;
+
+      const campaignResource: Record<string, any> = {
+        resource_name: `customers/${cleanId}/campaigns/${campaignId}`,
+        campaign_budget: tempBudgetResourceName,
+      };
+      if (portfolioStrategyResource) {
+        campaignResource.maximize_conversions = { target_cpa_micros: 0 };
+      }
+
+      const mutateResult = await withResilience(
+        () => customer.mutateResources([
+          {
+            entity: "campaign_budget",
+            operation: "create",
+            resource: {
+              resource_name: tempBudgetResourceName,
+              name: `${campaignName} Budget ${Date.now()}`,
+              amount_micros: newAmountMicros,
+              delivery_method: enums.BudgetDeliveryMethod.STANDARD,
+              explicitly_shared: false,
+            },
+          },
+          {
+            entity: "campaign",
+            operation: "update",
+            resource: campaignResource,
+          },
+        ]),
+        "updateCampaignBudget.atomicMutate"
       );
 
-      const newBudgetResourceName = budgetResult.results[0].resource_name;
-
-      // Update the campaign to use the new budget
-      await withResilience(
-        () =>
-          customer.campaigns.update([{
-            resource_name: `customers/${cleanId}/campaigns/${campaignId}`,
-            campaign_budget: newBudgetResourceName,
-          }]),
-        "updateCampaignBudget.reassignCampaign"
-      );
+      const newBudgetResourceName = (mutateResult as any)
+        ?.mutate_operation_responses?.[0]?.campaign_budget_result?.resource_name
+        ?? tempBudgetResourceName;
 
       return {
         campaign_id: campaignId,
@@ -706,6 +729,9 @@ class GoogleAdsManager {
         old_daily_budget: Number(oldAmountMicros) / 1_000_000,
         new_budget_resource: newBudgetResourceName,
         new_daily_budget: dailyBudgetDollars,
+        ...(portfolioStrategyResource && {
+          bidding_note: "Detached from portfolio strategy → campaign-level Maximize Conversions. Re-apply tCPA/tROAS targets if needed.",
+        }),
       };
     } else {
       // Update existing budget amount in place
@@ -3862,6 +3888,26 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             text: JSON.stringify({ success: true, ...result }, null, 2),
           }],
         };
+      }
+
+      case "google_ads_update_ad_asset_automation": {
+        const customerId = (args?.customer_id as string) || "";
+        const adIds = (args?.ad_ids as string[]) || [];
+        const automationTypes = (args?.automation_types as string[]) || [];
+        const status = ((args?.status as string) || "OPTED_OUT") as "OPTED_IN" | "OPTED_OUT";
+        const labels = args?.labels as string[] | undefined;
+
+        if (adIds.length === 0 || automationTypes.length === 0) {
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({ error: "ad_ids and automation_types are both required and non-empty" }, null, 2),
+            }],
+          };
+        }
+
+        const result = await adsManager.updateAdAssetAutomation(customerId, adIds, automationTypes, status, labels);
+        return { content: [{ type: "text", text: JSON.stringify({ success: true, ...result }, null, 2) }] };
       }
 
       case "google_ads_update_asset_urls": {
