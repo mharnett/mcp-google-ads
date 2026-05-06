@@ -1,0 +1,17 @@
+{
+  "name": "mcp-google-ads-install",
+  "version": "1.0.0",
+  "description": "Writes the Claude Desktop config entry for mcp-google-ads so you never hand-edit claude_desktop_config.json. Thin delegating wrapper so `npx mcp-google-ads-install` resolves as a package name.",
+  "bin": {
+    "mcp-google-ads-install": "index.js"
+  },
+  "dependencies": {
+    "mcp-google-ads": "^1.3.0"
+  },
+  "files": ["index.js"],
+  "keywords": ["mcp", "google-ads", "claude-desktop", "install"],
+  "author": "drak-marketing",
+  "license": "MIT",
+  "repository": { "type": "git", "url": "https://github.com/mharnett/mcp-google-ads.git" },
+  "homepage": "https://github.com/mharnett/mcp-google-ads#readme"
+}

@@ -1,0 +1,17 @@
+{
+  "name": "mcp-google-ads-doctor",
+  "version": "1.0.0",
+  "description": "Diagnose a broken Claude Desktop + mcp-google-ads setup in one command. Prints a checklist with pass/fail/warn and actionable next steps. Thin delegating wrapper.",
+  "bin": {
+    "mcp-google-ads-doctor": "index.js"
+  },
+  "dependencies": {
+    "mcp-google-ads": "^1.3.0"
+  },
+  "files": ["index.js"],
+  "keywords": ["mcp", "google-ads", "claude-desktop", "doctor", "diagnostic"],
+  "author": "drak-marketing",
+  "license": "MIT",
+  "repository": { "type": "git", "url": "https://github.com/mharnett/mcp-google-ads.git" },
+  "homepage": "https://github.com/mharnett/mcp-google-ads#readme"
+}

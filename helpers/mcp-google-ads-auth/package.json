@@ -1,0 +1,28 @@
+{
+  "name": "mcp-google-ads-auth",
+  "version": "1.0.0",
+  "description": "OAuth setup helper for mcp-google-ads -- sign in to Google, pick your Google Ads account, write credentials. Thin delegating wrapper so `npx mcp-google-ads-auth` resolves as a package name.",
+  "bin": {
+    "mcp-google-ads-auth": "index.js"
+  },
+  "dependencies": {
+    "mcp-google-ads": "^1.2.5"
+  },
+  "files": [
+    "index.js",
+    "README.md"
+  ],
+  "keywords": [
+    "mcp",
+    "google-ads",
+    "oauth",
+    "setup"
+  ],
+  "author": "drak-marketing",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mharnett/mcp-google-ads.git"
+  },
+  "homepage": "https://github.com/mharnett/mcp-google-ads#readme"
+}
