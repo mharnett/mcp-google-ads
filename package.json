@@ -47,7 +47,8 @@
     "dev:auth": "tsx src/auth-cli.ts",
     "test": "vitest run",
     "test:portability": "vitest run src/portability.test.ts",
-    "prepublishOnly": "node scripts/check-embedded.mjs && npm run build && npm test"
+    "prepublishOnly": "node scripts/check-embedded.mjs && npm run build && npm test",
+    "smoke": "scripts/healthcheck.sh"
   },
   "keywords": [
     "mcp",
