@@ -64,6 +64,8 @@ describe("Tool Schema Contract", () => {
     "google_ads_update_campaign_ad_urls",
     "google_ads_rename_ad_group",
     "google_ads_link_asset_to_campaign",
+    "google_ads_attach_user_list_audience",
+    "google_ads_create_and_attach_audience_bundle",
   ];
 
   it("exports the expected number of tools", () => {
@@ -228,6 +230,36 @@ describe("Tool Schema Contract", () => {
       expect(props).toHaveProperty("campaign_ids");
       expect(props).toHaveProperty("ad_group_ids");
       expect(props).toHaveProperty("ad_ids");
+    });
+
+    it("attach_user_list_audience requires ad_group_ids and user_list_id, defaults to OBSERVATION, dry-run by default", () => {
+      const tool = tools.find(t => t.name === "google_ads_attach_user_list_audience");
+      expect(tool).toBeDefined();
+      const schema = tool!.inputSchema as any;
+      expect(schema.required).toContain("ad_group_ids");
+      expect(schema.required).toContain("user_list_id");
+      expect(schema.properties.mode?.enum).toEqual(["OBSERVATION", "TARGETING"]);
+      expect(schema.properties.confirm?.type).toBe("boolean");
+      expect(tool!.description!.toLowerCase()).toContain("observation");
+      expect(tool!.description!.toLowerCase()).toContain("dry-run");
+    });
+
+    it("create_and_attach_audience_bundle requires ad_group_ids, supports both create and existing-audience flows, dry-run by default", () => {
+      const tool = tools.find(t => t.name === "google_ads_create_and_attach_audience_bundle");
+      expect(tool).toBeDefined();
+      const schema = tool!.inputSchema as any;
+      expect(schema.required).toContain("ad_group_ids");
+      // name and user_list_ids are conditionally required (only when creating);
+      // not in the JSON-schema required list because existing_audience_id can substitute.
+      expect(schema.required).not.toContain("name");
+      expect(schema.required).not.toContain("user_list_ids");
+      expect(schema.properties.user_list_ids?.type).toBe("array");
+      expect(schema.properties.ad_group_ids?.type).toBe("array");
+      expect(schema.properties.existing_audience_id?.type).toBe("string");
+      expect(schema.properties.confirm?.type).toBe("boolean");
+      expect(tool!.description!.toLowerCase()).toContain("demand gen");
+      expect(tool!.description!.toLowerCase()).toContain("dry-run");
+      expect(tool!.description!.toLowerCase()).toContain("existing");
     });
   });
 });

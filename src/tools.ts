@@ -1304,4 +1304,63 @@ export const tools: Tool[] = [
       required: ["asset_id", "campaign_ids", "field_type"],
     },
   },
+  {
+    name: "google_ads_attach_user_list_audience",
+    description: "Attach a Customer Match / user-list audience to one or more ad groups. Defaults to OBSERVATION mode (reporting-only, does not restrict delivery) — pass mode='TARGETING' to restrict delivery to list members. Use for measuring on-list reach/CPM/conversions of existing campaigns without changing targeting. Get user_list_id from a GAQL query on user_list. DRY-RUN BY DEFAULT: omit `confirm` or pass `confirm: false` to preview.",
+    inputSchema: {
+      additionalProperties: false,
+      type: "object",
+      properties: {
+        customer_id: { type: "string" },
+        ad_group_ids: {
+          type: "array",
+          items: { type: "string" },
+          description: "Numeric IDs of ad groups to attach the user list to.",
+        },
+        user_list_id: { type: "string", description: "Numeric ID of the user_list (Customer Match list, similar audience, etc)." },
+        mode: {
+          type: "string",
+          enum: ["OBSERVATION", "TARGETING"],
+          description: "OBSERVATION (default) reports on list members without restricting delivery. TARGETING restricts the ad group to list members only.",
+        },
+        confirm: {
+          type: "boolean",
+          description: "Must be true to apply. Omit or false for dry-run preview.",
+        },
+      },
+      required: ["ad_group_ids", "user_list_id"],
+    },
+  },
+  {
+    name: "google_ads_create_and_attach_audience_bundle",
+    description: "Create an Audience resource that bundles one or more user_lists (Customer Match lists, lookalikes, etc.) and attach it to ad groups. OR pass `existing_audience_id` to skip creation and attach an existing Audience to additional ad groups (useful for replicating one bundle across many campaigns/theaters). Required for Demand Gen ad groups whose use_audience_grouped flag is set (where direct user_list criterion attachment is rejected with CANNOT_ADD_AUDIENCE_SEGMENT_CRITERION_WHEN_AUDIENCE_GROUPED_IS_SET). Also handles Lookalike audiences which can never be attached as direct user_list criteria. Note: each ad group can only have one Audience criterion (ONE_AUDIENCE_ALLOWED_PER_AD_GROUP) — the call will fail for ad groups that already have one. The bundled audience is attached as a signal — for Demand Gen this informs optimization without restricting delivery (observation-equivalent) and surfaces in ad_group_audience_view reports. DRY-RUN BY DEFAULT: omit `confirm` or pass `confirm: false` to preview.",
+    inputSchema: {
+      additionalProperties: false,
+      type: "object",
+      properties: {
+        customer_id: { type: "string" },
+        name: { type: "string", description: "Name for the new Audience resource (required when creating; ignored when existing_audience_id is set)." },
+        description: { type: "string", description: "Optional human-readable description of the audience." },
+        user_list_ids: {
+          type: "array",
+          items: { type: "string" },
+          description: "Numeric IDs of user_lists to bundle into the audience. Required when creating; ignored when existing_audience_id is set.",
+        },
+        existing_audience_id: {
+          type: "string",
+          description: "Optional: numeric ID of an existing Audience resource to attach instead of creating a new one. When set, name and user_list_ids are ignored.",
+        },
+        ad_group_ids: {
+          type: "array",
+          items: { type: "string" },
+          description: "Numeric IDs of ad groups to attach the bundled audience to.",
+        },
+        confirm: {
+          type: "boolean",
+          description: "Must be true to apply. Omit or false for dry-run preview.",
+        },
+      },
+      required: ["ad_group_ids"],
+    },
+  },
 ];

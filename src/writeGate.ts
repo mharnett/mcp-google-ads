@@ -47,6 +47,8 @@ export const WRITE_TOOLS: ReadonlySet<string> = new Set([
   "google_ads_link_asset_to_campaign",
   "google_ads_set_ad_group_location_targeting",
   "google_ads_set_campaign_location_targeting",
+  "google_ads_attach_user_list_audience",
+  "google_ads_create_and_attach_audience_bundle",
 ]);
 
 export function isWriteTool(name: string): boolean {

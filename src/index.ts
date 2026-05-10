@@ -1323,6 +1323,141 @@ class GoogleAdsManager {
     return result;
   }
 
+  // Attach a user_list (Customer Match list, similar audience, etc.) to one or
+  // more ad groups. Default mode = OBSERVATION (does not restrict delivery —
+  // only enables reporting on list members). Mode = TARGETING restricts the
+  // ad group to deliver only to list members.
+  //
+  // Observation vs targeting in Google Ads is governed by ad_group.targeting_setting
+  // for the AUDIENCE dimension (target_all=true → observation, false → targeting).
+  // The default for new audience criteria on Search/Display/Demand-Gen ad groups
+  // is observation (target_all stays true), so attaching the criterion alone is
+  // safe for measurement use cases. TARGETING mode flips target_all=false on
+  // the AUDIENCE dimension for each affected ad group.
+  async attachUserListAudience(
+    customerId: string,
+    adGroupIds: string[],
+    userListId: string,
+    mode: "OBSERVATION" | "TARGETING" = "OBSERVATION",
+  ) {
+    const customer = this.getCustomer(customerId);
+    const cleanId = customerId.replace(/-/g, "");
+    const userListRN = `customers/${cleanId}/userLists/${userListId}`;
+
+    const criteria = adGroupIds.map(adGroupId => ({
+      ad_group: `customers/${cleanId}/adGroups/${adGroupId}`,
+      user_list: { user_list: userListRN },
+    }));
+
+    const createResult = await withResilience(
+      () => customer.adGroupCriteria.create(criteria as any),
+      "attachUserListAudience",
+    );
+
+    if (mode === "TARGETING") {
+      // Flip AUDIENCE dimension to target_all=false for each ad group so the
+      // newly-attached list actually restricts delivery rather than observing.
+      const updates = adGroupIds.map(adGroupId => ({
+        resource_name: `customers/${cleanId}/adGroups/${adGroupId}`,
+        targeting_setting: {
+          target_restrictions: [
+            { targeting_dimension: "AUDIENCE", target_all: false },
+          ],
+        },
+      }));
+      await withResilience(
+        () => customer.adGroups.update(updates as any),
+        "attachUserListAudience.targetingSetting",
+      );
+    }
+
+    return createResult;
+  }
+
+  // Create an Audience resource bundling one or more user_lists and attach it
+  // to ad groups. This is required for Demand Gen ad groups whose
+  // use_audience_grouped flag is set (where direct user_list criterion attach
+  // returns CANNOT_ADD_AUDIENCE_SEGMENT_CRITERION_WHEN_AUDIENCE_GROUPED_IS_SET)
+  // and for Lookalike audiences which can never be attached as direct
+  // user_list criteria.
+  //
+  // Two-step API flow:
+  //   1. customer.audiences.create({...})  → creates the Audience resource
+  //   2. customer.adGroupCriteria.create({audience: {audience: <RN>}, ad_group: ...})
+  //      → attaches the audience to each ad group as a criterion
+  //
+  // For Demand Gen, the attached audience functions as a signal: it informs
+  // optimization without restricting delivery (observation-equivalent), and
+  // it surfaces in ad_group_audience_view reports for per-segment metrics.
+  async createAndAttachAudienceBundle(
+    customerId: string,
+    name: string,
+    description: string,
+    userListIds: string[],
+    adGroupIds: string[],
+    existingAudienceId?: string,
+  ) {
+    const customer = this.getCustomer(customerId);
+    const cleanId = customerId.replace(/-/g, "");
+
+    let audienceRN: string;
+
+    if (existingAudienceId) {
+      // Skip creation: use the supplied existing Audience resource.
+      audienceRN = `customers/${cleanId}/audiences/${existingAudienceId}`;
+    } else {
+      // Step 1: create the Audience resource bundling the user_lists.
+      if (!name) throw new Error("name is required when creating a new Audience");
+      if (!userListIds || userListIds.length === 0) {
+        throw new Error("user_list_ids is required when creating a new Audience");
+      }
+
+      const audiencePayload = [{
+        name,
+        description: description || "",
+        dimensions: [{
+          audience_segments: {
+            segments: userListIds.map(id => ({
+              user_list: { user_list: `customers/${cleanId}/userLists/${id}` },
+            })),
+          },
+        }],
+      }];
+
+      const audienceResult: any = await withResilience(
+        () => customer.audiences.create(audiencePayload as any),
+        "createAndAttachAudienceBundle.createAudience",
+      );
+
+      audienceRN =
+        audienceResult?.results?.[0]?.resource_name ??
+        audienceResult?.[0]?.resource_name ??
+        "";
+
+      if (!audienceRN) {
+        throw new Error(
+          `Audience created but resource_name not returned: ${JSON.stringify(audienceResult)}`,
+        );
+      }
+    }
+
+    // Step 2: attach the audience to each ad group via ad_group_criterion.
+    const criteria = adGroupIds.map(adGroupId => ({
+      ad_group: `customers/${cleanId}/adGroups/${adGroupId}`,
+      audience: { audience: audienceRN },
+    }));
+
+    const criteriaResult = await withResilience(
+      () => customer.adGroupCriteria.create(criteria as any),
+      "createAndAttachAudienceBundle.attachToAdGroups",
+    );
+
+    return {
+      audience_resource_name: audienceRN,
+      ad_group_criteria: criteriaResult,
+    };
+  }
+
   // Resolve plain ad IDs to the composite ad_group_ad resource name
   // (`customers/{cid}/adGroupAds/{adGroupId}~{adId}`) required by every
   // adGroupAd mutation and label endpoint. Passing just `{adId}` is a
@@ -3662,6 +3797,98 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             text: JSON.stringify({
               success: true,
               message: `Removed ${resourceNames.length} campaign-level negative keywords`,
+              results: result,
+            }, null, 2),
+          }],
+        };
+      }
+
+      case "google_ads_attach_user_list_audience": {
+        const customerId = args?.customer_id as string || "";
+        const adGroupIds = args?.ad_group_ids as string[];
+        const userListId = args?.user_list_id as string;
+        const mode = (args?.mode as "OBSERVATION" | "TARGETING") || "OBSERVATION";
+        const confirm = args?.confirm === true;
+
+        if (!confirm) {
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({
+                dry_run: true,
+                message: `Would attach user_list ${userListId} to ${adGroupIds.length} ad group(s) in ${mode} mode. Pass confirm=true to apply.`,
+                ad_group_ids: adGroupIds,
+                user_list_id: userListId,
+                mode,
+              }, null, 2),
+            }],
+          };
+        }
+
+        const result = await adsManager.attachUserListAudience(
+          customerId,
+          adGroupIds,
+          userListId,
+          mode,
+        );
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              success: true,
+              message: `Attached user_list ${userListId} to ${adGroupIds.length} ad group(s) in ${mode} mode`,
+              results: result,
+            }, null, 2),
+          }],
+        };
+      }
+
+      case "google_ads_create_and_attach_audience_bundle": {
+        const customerId = args?.customer_id as string || "";
+        const name = args?.name as string;
+        const description = (args?.description as string) || "";
+        const userListIds = (args?.user_list_ids as string[]) || [];
+        const adGroupIds = args?.ad_group_ids as string[];
+        const existingAudienceId = args?.existing_audience_id as string | undefined;
+        const confirm = args?.confirm === true;
+
+        if (!confirm) {
+          const action = existingAudienceId
+            ? `Would attach existing Audience ${existingAudienceId} to ${adGroupIds.length} ad group(s)`
+            : `Would create Audience '${name}' bundling ${userListIds.length} user_list(s) and attach to ${adGroupIds.length} ad group(s)`;
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({
+                dry_run: true,
+                message: `${action}. Pass confirm=true to apply.`,
+                name,
+                description,
+                user_list_ids: userListIds,
+                existing_audience_id: existingAudienceId,
+                ad_group_ids: adGroupIds,
+              }, null, 2),
+            }],
+          };
+        }
+
+        const result = await adsManager.createAndAttachAudienceBundle(
+          customerId,
+          name,
+          description,
+          userListIds,
+          adGroupIds,
+          existingAudienceId,
+        );
+        const successMsg = existingAudienceId
+          ? `Existing Audience ${existingAudienceId} attached to ${adGroupIds.length} ad group(s)`
+          : `Audience '${name}' created and attached to ${adGroupIds.length} ad group(s)`;
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              success: true,
+              message: successMsg,
               results: result,
             }, null, 2),
           }],
