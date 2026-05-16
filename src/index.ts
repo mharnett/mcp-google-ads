@@ -1323,6 +1323,26 @@ class GoogleAdsManager {
     return result;
   }
 
+  // Add ad-group-level negative keywords. Mirrors addCampaignNegativeKeywords
+  // but scopes negation to a single ad group instead of the whole campaign —
+  // use when other ad groups in the same campaign legitimately need the term.
+  async addAdGroupNegativeKeywords(customerId: string, adGroupId: string, keywords: Array<{ text: string; match_type: "BROAD" | "PHRASE" | "EXACT" }>) {
+    const customer = this.getCustomer(customerId);
+    const cleanId = customerId.replace(/-/g, "");
+
+    const criteria = keywords.map(kw => ({
+      ad_group: `customers/${cleanId}/adGroups/${adGroupId}`,
+      negative: true,
+      keyword: {
+        text: kw.text,
+        match_type: enums.KeywordMatchType[kw.match_type],
+      },
+    }));
+
+    const result = await withResilience(() => customer.adGroupCriteria.create(criteria), "addAdGroupNegativeKeywords");
+    return result;
+  }
+
   // Attach a user_list (Customer Match list, similar audience, etc.) to one or
   // more ad groups. Default mode = OBSERVATION (does not restrict delivery —
   // only enables reporting on list members). Mode = TARGETING restricts the
@@ -2639,6 +2659,109 @@ class GoogleAdsManager {
     };
   }
 
+  async updateAdFinalUrls(
+    customerId: string,
+    adGroupId: string,
+    adIds: string[],
+    newFinalUrl: string,
+    confirm = false,
+  ) {
+    const customer = this.getCustomer(customerId);
+    const cleanId = customerId.replace(/-/g, "");
+
+    if (!/^https?:\/\//i.test(newFinalUrl)) {
+      throw new Error(`new_final_url must start with http:// or https://, got: ${newFinalUrl}`);
+    }
+    if (!adIds || adIds.length === 0) {
+      throw new Error("ad_ids must contain at least one ad ID.");
+    }
+
+    const cleanAgId = sanitizeNumericId(adGroupId);
+    const cleanAdIds = adIds.map(sanitizeNumericId);
+
+    const rows = await withResilience(
+      () => customer.query(`
+        SELECT
+          ad_group_ad.resource_name,
+          ad_group_ad.ad.id,
+          ad_group_ad.ad.final_urls,
+          ad_group_ad.status,
+          ad_group.id,
+          ad_group.name,
+          campaign.name
+        FROM ad_group_ad
+        WHERE ad_group.id = ${cleanAgId}
+          AND ad_group_ad.ad.id IN (${cleanAdIds.join(",")})
+          AND ad_group_ad.status != 'REMOVED'
+      `),
+      "updateAdFinalUrls.query"
+    );
+
+    const found = (rows as any[]).map(r => ({
+      resource_name: r.ad_group_ad?.resource_name,
+      ad_id: String(r.ad_group_ad?.ad?.id ?? ""),
+      current_final_urls: r.ad_group_ad?.ad?.final_urls ?? [],
+      ad_group_name: r.ad_group?.name ?? "",
+      status: r.ad_group_ad?.status ?? "",
+    }));
+
+    const foundIds = new Set(found.map(a => a.ad_id));
+    const missing = cleanAdIds.filter(id => !foundIds.has(id));
+
+    const preview = found.map(a => ({
+      ad_id: a.ad_id,
+      ad_group: a.ad_group_name,
+      status: a.status,
+      from: a.current_final_urls,
+      to: [newFinalUrl],
+    }));
+
+    if (!confirm) {
+      return {
+        customer_id: cleanId,
+        ad_group_id: adGroupId,
+        dry_run: true,
+        ads_to_update: found.length,
+        missing_ad_ids: missing,
+        preview,
+        note: "Set confirm=true to apply these changes.",
+      };
+    }
+
+    if (missing.length > 0) {
+      throw new Error(
+        `Refusing to apply: ${missing.length} ad ID(s) not found in ad group ${adGroupId}: ${missing.join(", ")}`
+      );
+    }
+
+    const updates = found.map(a => ({
+      resource_name: a.resource_name,
+      ad: { final_urls: [newFinalUrl] },
+    }));
+
+    if (updates.length > 0) {
+      await withResilience(
+        () => customer.adGroupAds.update(updates as any),
+        "updateAdFinalUrls.update"
+      );
+    }
+
+    await this.autoLabelCreated(
+      customerId,
+      found.map(a => a.resource_name).filter(Boolean),
+      "ad" as any,
+    );
+
+    return {
+      customer_id: cleanId,
+      ad_group_id: adGroupId,
+      dry_run: false,
+      ads_updated: updates.length,
+      new_final_url: newFinalUrl,
+      preview,
+    };
+  }
+
   // ============================================
   // REPORTING METHODS
   // ============================================
@@ -3895,6 +4018,25 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
       }
 
+      case "google_ads_add_adgroup_negatives": {
+        const customerId = args?.customer_id as string || "";
+        const result = await adsManager.addAdGroupNegativeKeywords(
+          customerId,
+          args?.ad_group_id as string,
+          args?.keywords as Array<{ text: string; match_type: "BROAD" | "PHRASE" | "EXACT" }>,
+        );
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              success: true,
+              message: "Ad-group-level negative keywords added",
+              results: result,
+            }, null, 2),
+          }],
+        };
+      }
+
       case "google_ads_remove_adgroup_negatives": {
         const customerId = args?.customer_id as string || "";
         const resourceNames = args?.resource_names as string[];
@@ -4706,6 +4848,24 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             args?.campaign_id as string,
             args?.new_final_url as string,
             execute,
+          );
+          return { content: [{ type: "text", text: JSON.stringify({ success: true, ...result }, null, 2) }] };
+        } catch (e: any) {
+          return { content: [{ type: "text", text: JSON.stringify({ success: false, error: e.message }, null, 2) }] };
+        }
+      }
+
+      case "google_ads_update_ad_final_urls": {
+        const customerId = args?.customer_id as string || "";
+        const confirm = args?.confirm === true;
+        if (confirm) assertWriteAllowed(name);
+        try {
+          const result = await adsManager.updateAdFinalUrls(
+            customerId,
+            args?.ad_group_id as string,
+            (args?.ad_ids as string[]) ?? [],
+            args?.new_final_url as string,
+            confirm,
           );
           return { content: [{ type: "text", text: JSON.stringify({ success: true, ...result }, null, 2) }] };
         } catch (e: any) {

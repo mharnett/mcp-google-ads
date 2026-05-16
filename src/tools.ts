@@ -500,6 +500,30 @@ export const tools: Tool[] = [
     },
   },
   {
+    name: "google_ads_add_adgroup_negatives",
+    description: "Add negative keywords at the ad-group level. Use when only one ad group in a campaign should exclude the term — other ad groups in the same campaign can still match it. For campaign-wide exclusion use google_ads_add_campaign_negatives instead.",
+    inputSchema: {
+      additionalProperties: false,
+      type: "object",
+      properties: {
+        customer_id: { type: "string" },
+        ad_group_id: { type: "string" },
+        keywords: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              text: { type: "string" },
+              match_type: { type: "string", enum: ["BROAD", "PHRASE", "EXACT"] },
+            },
+            required: ["text", "match_type"],
+          },
+        },
+      },
+      required: ["ad_group_id", "keywords"],
+    },
+  },
+  {
     name: "google_ads_remove_adgroup_negatives",
     description: "Remove ad-group-level negative keywords by their resource names. Get resource names from a GAQL query on ad_group_criterion.",
     inputSchema: {
@@ -1257,6 +1281,35 @@ export const tools: Tool[] = [
         },
       },
       required: ["campaign_id", "new_final_url"],
+    },
+  },
+  {
+    name: "google_ads_update_ad_final_urls",
+    description: "Update final_urls on specific ads by ID, leaving other ads in the same campaign/ad group untouched. Use this when you need to retarget a subset of ads (e.g. one ad group's ads, or specific experiment-arm-labeled ads) without affecting siblings in the same campaign. Dry-run by default — pass confirm=true to apply.",
+    inputSchema: {
+      additionalProperties: false,
+      type: "object",
+      properties: {
+        customer_id: { type: "string" },
+        ad_group_id: {
+          type: "string",
+          description: "Numeric ad group ID. Required: each ad belongs to exactly one ad group, and the AdService resource name is ad_group_ad/{ad_group_id}~{ad_id}.",
+        },
+        ad_ids: {
+          type: "array",
+          items: { type: "string" },
+          description: "Numeric ad IDs to update. All ads must live in the specified ad_group_id.",
+        },
+        new_final_url: {
+          type: "string",
+          description: "New final URL (must start with http:// or https://). Replaces existing final_urls with [new_final_url].",
+        },
+        confirm: {
+          type: "boolean",
+          description: "Must be true to apply. Omit or false for dry-run preview.",
+        },
+      },
+      required: ["ad_group_id", "ad_ids", "new_final_url"],
     },
   },
   {
