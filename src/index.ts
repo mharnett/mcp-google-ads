@@ -2858,6 +2858,19 @@ class GoogleAdsManager {
           }
         }
 
+        // Order matters: pause old BEFORE enabling new. Google Ads caps
+        // enabled RSAs at 3 per ad group; if we enable the clone first
+        // while the original is still enabled, the cap trips and the
+        // enable fails with RESOURCE_LIMIT. Pause-first keeps headroom.
+        // Old ads are paused, not removed — preserves historical reporting.
+        await withResilience(
+          () => customer.adGroupAds.update([{
+            resource_name: a.resource_name,
+            status: enums.AdGroupAdStatus.PAUSED,
+          } as any]),
+          "updateAdFinalUrls.pauseOld"
+        );
+
         // Match original enabled/paused status. AdGroupAdStatus enum: 2=ENABLED, 3=PAUSED.
         const wasEnabled = a.status === 2;
         if (wasEnabled && newResourceName) {
@@ -2869,15 +2882,6 @@ class GoogleAdsManager {
             "updateAdFinalUrls.enableNew"
           );
         }
-
-        // Pause the old ad (don't remove — preserves historical reporting).
-        await withResilience(
-          () => customer.adGroupAds.update([{
-            resource_name: a.resource_name,
-            status: enums.AdGroupAdStatus.PAUSED,
-          } as any]),
-          "updateAdFinalUrls.pauseOld"
-        );
 
         swaps.push({
           old_ad_id: a.ad_id,
