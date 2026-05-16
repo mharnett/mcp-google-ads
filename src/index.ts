@@ -2666,6 +2666,13 @@ class GoogleAdsManager {
     newFinalUrl: string,
     confirm = false,
   ) {
+    // IMPLEMENTATION NOTE: Google Ads API treats RSA final_urls as IMMUTABLE
+    // (errors with IMMUTABLE_FIELD on UPDATE). The only way to change an
+    // RSA's destination is clone-and-swap: read the existing RSA, create a
+    // new RSA in the same ad group with the same content + new URL, copy
+    // labels, match enabled/paused status, then pause the old ad. The
+    // Google Ads UI does the same thing under the hood. Ad-level history
+    // and ad strength reset; keyword-level Quality Score is preserved.
     const customer = this.getCustomer(customerId);
     const cleanId = customerId.replace(/-/g, "");
 
@@ -2684,7 +2691,12 @@ class GoogleAdsManager {
         SELECT
           ad_group_ad.resource_name,
           ad_group_ad.ad.id,
+          ad_group_ad.ad.type,
           ad_group_ad.ad.final_urls,
+          ad_group_ad.ad.responsive_search_ad.headlines,
+          ad_group_ad.ad.responsive_search_ad.descriptions,
+          ad_group_ad.ad.responsive_search_ad.path1,
+          ad_group_ad.ad.responsive_search_ad.path2,
           ad_group_ad.status,
           ad_group.id,
           ad_group.name,
@@ -2697,13 +2709,53 @@ class GoogleAdsManager {
       "updateAdFinalUrls.query"
     );
 
-    const found = (rows as any[]).map(r => ({
-      resource_name: r.ad_group_ad?.resource_name,
-      ad_id: String(r.ad_group_ad?.ad?.id ?? ""),
-      current_final_urls: r.ad_group_ad?.ad?.final_urls ?? [],
-      ad_group_name: r.ad_group?.name ?? "",
-      status: r.ad_group_ad?.status ?? "",
-    }));
+    // Reverse-map ServedAssetFieldType enum → pinned_position (mirrors createResponsiveSearchAd).
+    const HEADLINE_PIN_REV: Record<number, number> = { 2: 1, 3: 2, 4: 3 };
+    const DESCRIPTION_PIN_REV: Record<number, number> = { 5: 1, 6: 2 };
+
+    type Found = {
+      resource_name: string;
+      ad_id: string;
+      ad_type: number;
+      current_final_urls: string[];
+      headlines: Array<{ text: string; pinned_position?: number }>;
+      descriptions: Array<{ text: string; pinned_position?: number }>;
+      path1: string;
+      path2: string;
+      ad_group_name: string;
+      status: number;
+    };
+
+    const found: Found[] = (rows as any[]).map(r => {
+      const rsa = r.ad_group_ad?.ad?.responsive_search_ad ?? {};
+      return {
+        resource_name: r.ad_group_ad?.resource_name,
+        ad_id: String(r.ad_group_ad?.ad?.id ?? ""),
+        ad_type: r.ad_group_ad?.ad?.type ?? 0,
+        current_final_urls: r.ad_group_ad?.ad?.final_urls ?? [],
+        headlines: (rsa.headlines ?? []).map((h: any) => ({
+          text: h.text,
+          ...(h.pinned_field && HEADLINE_PIN_REV[h.pinned_field]
+            ? { pinned_position: HEADLINE_PIN_REV[h.pinned_field] }
+            : {}),
+        })),
+        descriptions: (rsa.descriptions ?? []).map((d: any) => ({
+          text: d.text,
+          ...(d.pinned_field && DESCRIPTION_PIN_REV[d.pinned_field]
+            ? { pinned_position: DESCRIPTION_PIN_REV[d.pinned_field] }
+            : {}),
+        })),
+        path1: rsa.path1 ?? "",
+        path2: rsa.path2 ?? "",
+        ad_group_name: r.ad_group?.name ?? "",
+        status: r.ad_group_ad?.status ?? 0,
+      };
+    });
+
+    // RSA type enum = 15 (RESPONSIVE_SEARCH_AD). Clone-and-swap only works
+    // for RSAs — refuse anything else loudly so the caller doesn't get a
+    // half-finished migration.
+    const nonRsa = found.filter(a => a.ad_type !== 15);
 
     const foundIds = new Set(found.map(a => a.ad_id));
     const missing = cleanAdIds.filter(id => !foundIds.has(id));
@@ -2712,8 +2764,10 @@ class GoogleAdsManager {
       ad_id: a.ad_id,
       ad_group: a.ad_group_name,
       status: a.status,
+      ad_type: a.ad_type,
       from: a.current_final_urls,
       to: [newFinalUrl],
+      will_clone_and_swap: a.ad_type === 15,
     }));
 
     if (!confirm) {
@@ -2721,10 +2775,12 @@ class GoogleAdsManager {
         customer_id: cleanId,
         ad_group_id: adGroupId,
         dry_run: true,
+        mechanism: "clone-and-swap (RSA final_urls is API-immutable)",
         ads_to_update: found.length,
         missing_ad_ids: missing,
+        non_rsa_ad_ids: nonRsa.map(a => a.ad_id),
         preview,
-        note: "Set confirm=true to apply these changes.",
+        note: "Set confirm=true to apply. New ads will be created PAUSED then enabled to match original status; old ads will be PAUSED, not removed.",
       };
     }
 
@@ -2733,32 +2789,129 @@ class GoogleAdsManager {
         `Refusing to apply: ${missing.length} ad ID(s) not found in ad group ${adGroupId}: ${missing.join(", ")}`
       );
     }
-
-    const updates = found.map(a => ({
-      resource_name: a.resource_name,
-      ad: { final_urls: [newFinalUrl] },
-    }));
-
-    if (updates.length > 0) {
-      await withResilience(
-        () => customer.adGroupAds.update(updates as any),
-        "updateAdFinalUrls.update"
+    if (nonRsa.length > 0) {
+      throw new Error(
+        `Refusing to apply: ${nonRsa.length} ad(s) are not RESPONSIVE_SEARCH_AD; clone-and-swap not implemented for other ad types. Ad IDs: ${nonRsa.map(a => a.ad_id).join(", ")}`
       );
     }
 
-    await this.autoLabelCreated(
-      customerId,
-      found.map(a => a.resource_name).filter(Boolean),
-      "ad" as any,
+    // Pull labels per ad so we can reapply to the clones.
+    const labelRows = await withResilience(
+      () => customer.query(`
+        SELECT
+          ad_group_ad.ad.id,
+          ad_group_ad_label.label,
+          label.name
+        FROM ad_group_ad_label
+        WHERE ad_group.id = ${cleanAgId}
+          AND ad_group_ad.ad.id IN (${cleanAdIds.join(",")})
+      `),
+      "updateAdFinalUrls.labels"
     );
+    const labelsByAdId = new Map<string, string[]>();
+    for (const row of labelRows as any[]) {
+      const adId = String(row.ad_group_ad?.ad?.id ?? "");
+      const name = row.label?.name;
+      if (!adId || !name) continue;
+      if (!labelsByAdId.has(adId)) labelsByAdId.set(adId, []);
+      labelsByAdId.get(adId)!.push(name);
+    }
+
+    const swaps: Array<{
+      old_ad_id: string;
+      new_ad_id: string | null;
+      new_resource_name: string | null;
+      labels_copied: string[];
+      enabled_to_match_original: boolean;
+      old_paused: boolean;
+      error?: string;
+    }> = [];
+
+    for (const a of found) {
+      try {
+        const createResult: any = await this.createResponsiveSearchAd(customerId, {
+          ad_group_id: adGroupId,
+          final_urls: [newFinalUrl],
+          headlines: a.headlines,
+          descriptions: a.descriptions,
+          path1: a.path1,
+          path2: a.path2,
+          // Auto-label (claude-MM-DD-YY) is applied by createResponsiveSearchAd.
+          // Original non-auto labels are reapplied below.
+        });
+
+        const newResourceName: string | null =
+          createResult?.results?.[0]?.resource_name ?? null;
+        // resource_name format: customers/{cid}/adGroupAds/{ad_group_id}~{ad_id}
+        const newAdId = newResourceName
+          ? newResourceName.split("~").pop() ?? null
+          : null;
+
+        // Reapply original labels (skip ones that look like auto date labels —
+        // createResponsiveSearchAd already stamped today's claude-MM-DD-YY).
+        const originalLabels = (labelsByAdId.get(a.ad_id) ?? []).filter(
+          n => !/^claude-\d{2}-\d{2}-\d{2}$/i.test(n)
+        );
+        if (newAdId && originalLabels.length > 0) {
+          for (const labelName of originalLabels) {
+            await this.applyLabel(customerId, labelName, { adIds: [newAdId] });
+          }
+        }
+
+        // Match original enabled/paused status. AdGroupAdStatus enum: 2=ENABLED, 3=PAUSED.
+        const wasEnabled = a.status === 2;
+        if (wasEnabled && newResourceName) {
+          await withResilience(
+            () => customer.adGroupAds.update([{
+              resource_name: newResourceName,
+              status: enums.AdGroupAdStatus.ENABLED,
+            } as any]),
+            "updateAdFinalUrls.enableNew"
+          );
+        }
+
+        // Pause the old ad (don't remove — preserves historical reporting).
+        await withResilience(
+          () => customer.adGroupAds.update([{
+            resource_name: a.resource_name,
+            status: enums.AdGroupAdStatus.PAUSED,
+          } as any]),
+          "updateAdFinalUrls.pauseOld"
+        );
+
+        swaps.push({
+          old_ad_id: a.ad_id,
+          new_ad_id: newAdId,
+          new_resource_name: newResourceName,
+          labels_copied: originalLabels,
+          enabled_to_match_original: wasEnabled,
+          old_paused: true,
+        });
+      } catch (e: any) {
+        swaps.push({
+          old_ad_id: a.ad_id,
+          new_ad_id: null,
+          new_resource_name: null,
+          labels_copied: [],
+          enabled_to_match_original: false,
+          old_paused: false,
+          error: e?.message ?? String(e),
+        });
+      }
+    }
+
+    const succeeded = swaps.filter(s => s.new_ad_id && !s.error).length;
+    const failed = swaps.filter(s => s.error).length;
 
     return {
       customer_id: cleanId,
       ad_group_id: adGroupId,
       dry_run: false,
-      ads_updated: updates.length,
+      mechanism: "clone-and-swap",
+      ads_swapped: succeeded,
+      ads_failed: failed,
       new_final_url: newFinalUrl,
-      preview,
+      swaps,
     };
   }
 
