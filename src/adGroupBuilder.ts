@@ -28,19 +28,29 @@ export interface AdGroupCreatePayload {
   status: number;
   cpc_bid_micros: number;
   type: number | string;
+  optimized_targeting_enabled?: boolean;
 }
 
 export function buildAdGroupCreatePayload(input: AdGroupCreateInput): AdGroupCreatePayload {
-  const typeEnum: number | string =
-    input.type === "DEMAND_GEN_MULTI_ASSET_AD_GROUP"
-      ? "DEMAND_GEN_MULTI_ASSET_AD_GROUP"  // string name avoids the unknown-enum serialization
-      : enums.AdGroupType.SEARCH_STANDARD;
+  const isDemandGen = input.type === "DEMAND_GEN_MULTI_ASSET_AD_GROUP";
+  const typeEnum: number | string = isDemandGen
+    ? "DEMAND_GEN_MULTI_ASSET_AD_GROUP"  // string name avoids the unknown-enum serialization
+    : enums.AdGroupType.SEARCH_STANDARD;
 
-  return {
+  const payload: AdGroupCreatePayload = {
     name: input.name,
     campaign: `customers/${input.customer_id_clean}/campaigns/${input.campaign_id}`,
     status: enums.AdGroupStatus.PAUSED,
     cpc_bid_micros: input.cpc_bid_micros ?? 1_000_000,
     type: typeEnum,
   };
+
+  // DG safety gate: Optimized Targeting OFF on every DG ad group at creation.
+  // Google's default is ON and routinely expands beyond the audiences we attach.
+  // Mirror of Forcepoint script-side rule in create_insider_risk_demand_gen.py.
+  if (isDemandGen) {
+    payload.optimized_targeting_enabled = false;
+  }
+
+  return payload;
 }

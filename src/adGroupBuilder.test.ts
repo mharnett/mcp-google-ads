@@ -31,4 +31,27 @@ describe("buildAdGroupCreatePayload", () => {
 
     expect(payload.type).toBe("DEMAND_GEN_MULTI_ASSET_AD_GROUP");
   });
+
+  it("DG ad group has Optimized Targeting explicitly disabled at creation", () => {
+    // Google's default is optimized_targeting_enabled = true, which expands
+    // beyond attached audiences. Forcepoint policy is OFF on every DG ad group.
+    const payload = buildAdGroupCreatePayload({
+      customer_id_clean: "1234567890",
+      name: "DG AG",
+      campaign_id: "777",
+      type: "DEMAND_GEN_MULTI_ASSET_AD_GROUP",
+    });
+
+    expect(payload.optimized_targeting_enabled).toBe(false);
+  });
+
+  it("Search ad group does not set optimized_targeting_enabled (field is DG/Display-only)", () => {
+    const payload = buildAdGroupCreatePayload({
+      customer_id_clean: "1234567890",
+      name: "AG1",
+      campaign_id: "555",
+    });
+
+    expect(payload.optimized_targeting_enabled).toBeUndefined();
+  });
 });
