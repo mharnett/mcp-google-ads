@@ -54,6 +54,7 @@ describe("Tool Schema Contract", () => {
     "google_ads_create_demand_gen_multi_asset_ad",
     "google_ads_create_page_feed",
     "google_ads_create_image_asset",
+    "google_ads_create_lead_form_asset",
     "google_ads_create_experiment",
     "google_ads_list_experiments",
     "google_ads_get_experiment",
@@ -163,6 +164,37 @@ describe("Tool Schema Contract", () => {
       expect(schema.properties.logo_image_asset_ids?.type).toBe("array");
       expect(schema.properties.long_headlines?.type).toBe("array");
       expect(schema.properties.labels?.type).toBe("array");
+    });
+
+    it("link_asset_to_campaign field_type enum includes LEAD_FORM", () => {
+      // LeadFormAsset attaches to campaigns via CampaignAsset with
+      // field_type=LEAD_FORM. Regression test for the v1.4.6 enum widening.
+      const tool = tools.find(t => t.name === "google_ads_link_asset_to_campaign");
+      expect(tool).toBeDefined();
+      const props = (tool!.inputSchema as any).properties;
+      expect(props.field_type?.enum).toContain("LEAD_FORM");
+    });
+
+    it("create_lead_form_asset requires the core lead form fields", () => {
+      const tool = tools.find(t => t.name === "google_ads_create_lead_form_asset");
+      expect(tool).toBeDefined();
+      const schema = tool!.inputSchema as any;
+      const required = schema.required as string[];
+      for (const f of [
+        "name",
+        "business_name",
+        "call_to_action",
+        "headline",
+        "description",
+        "privacy_policy_url",
+        "post_submit_call_to_action",
+        "fields",
+      ]) {
+        expect(required).toContain(f);
+      }
+      expect(schema.properties.call_to_action?.enum).toContain("DOWNLOAD");
+      expect(schema.properties.post_submit_call_to_action?.enum).toContain("VISIT_SITE");
+      expect(schema.properties.fields?.items?.enum).toContain("WORK_EMAIL");
     });
 
     it("create_image_asset requires name and accepts file_path or base64_data", () => {

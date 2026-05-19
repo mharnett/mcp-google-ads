@@ -1121,6 +1121,69 @@ export const tools: Tool[] = [
       required: ["name"],
     },
   },
+  {
+    name: "google_ads_create_lead_form_asset",
+    description: "Create a LeadFormAsset (Google Demand Gen / Discovery / Search lead form). Validates required fields, enum membership, and Google's character limits before hitting the API. After creation, use google_ads_link_asset_to_campaign with field_type=LEAD_FORM to attach it to a campaign. v1 supports standard fields only (FULL_NAME, EMAIL, WORK_EMAIL, PHONE_NUMBER, COMPANY_NAME, JOB_TITLE, etc.); custom questions, qualifying questions, and CRM delivery_methods (webhook) are NOT yet supported — leads must be downloaded from Google Ads UI as CSV until delivery_methods ships. Auto-labels the created asset. Returns {asset_id, resource_name, name}.",
+    inputSchema: {
+      additionalProperties: false,
+      type: "object",
+      properties: {
+        customer_id: { type: "string" },
+        name: { type: "string", description: "Human-readable asset name shown in the Google Ads UI." },
+        business_name: { type: "string", description: "Business name shown on the form (≤25 chars)." },
+        call_to_action: {
+          type: "string",
+          enum: ["LEARN_MORE", "GET_QUOTE", "APPLY_NOW", "SIGN_UP", "CONTACT_US", "SUBSCRIBE", "DOWNLOAD", "BOOK_NOW", "GET_OFFER", "REGISTER", "GET_INFO", "REQUEST_DEMO", "JOIN_NOW", "GET_STARTED"],
+          description: "Primary CTA enum on the form (button label).",
+        },
+        call_to_action_description: {
+          type: "string",
+          description: "Secondary CTA description text (≤30 chars). Shown alongside the CTA button.",
+        },
+        headline: { type: "string", description: "Form headline (≤30 chars)." },
+        description: { type: "string", description: "Form description / value proposition (≤200 chars)." },
+        privacy_policy_url: { type: "string", description: "https:// URL to the privacy policy. Required by Google." },
+        privacy_policy_text: { type: "string", description: "Optional custom privacy policy disclosure text." },
+        post_submit_headline: { type: "string", description: "Confirmation screen headline (≤25 chars)." },
+        post_submit_description: { type: "string", description: "Confirmation screen description (≤200 chars)." },
+        post_submit_call_to_action: {
+          type: "string",
+          enum: ["VISIT_SITE", "DOWNLOAD", "LEARN_MORE", "SHOP_NOW"],
+          description: "Post-submit CTA enum.",
+        },
+        desired_intent: {
+          type: "string",
+          enum: ["LOW_INTENT", "HIGH_INTENT"],
+          description: "Optional. LOW_INTENT (more leads, lower quality) vs HIGH_INTENT (review screen before submit; fewer/higher-quality leads). Defaults to Google's default if omitted.",
+        },
+        fields: {
+          type: "array",
+          items: {
+            type: "string",
+            enum: ["FULL_NAME", "EMAIL", "PHONE_NUMBER", "POSTAL_CODE", "STREET_ADDRESS", "CITY", "REGION", "COUNTRY", "WORK_EMAIL", "COMPANY_NAME", "WORK_PHONE", "JOB_TITLE"],
+          },
+          description: "Standard fields collected from the user. Must include EMAIL or WORK_EMAIL.",
+        },
+        background_image_asset_id: {
+          type: "string",
+          description: "Optional. Numeric asset_id of a previously-uploaded image asset to use as the form background. Use google_ads_create_image_asset to create one first.",
+        },
+      },
+      required: [
+        "name",
+        "business_name",
+        "call_to_action",
+        "call_to_action_description",
+        "headline",
+        "description",
+        "privacy_policy_url",
+        "post_submit_headline",
+        "post_submit_description",
+        "post_submit_call_to_action",
+        "fields",
+      ],
+    },
+  },
   // ============================================
   // EXPERIMENT TOOLS
   // ============================================
@@ -1332,7 +1395,7 @@ export const tools: Tool[] = [
   },
   {
     name: "google_ads_link_asset_to_campaign",
-    description: "Link an existing asset to one or more campaigns by field type. Supports SITELINK, CALLOUT, and STRUCTURED_SNIPPET. Create the asset first (e.g. with google_ads_create_sitelink), then use this to attach it to campaigns. DRY-RUN BY DEFAULT: omit `confirm` or pass `confirm: false` to preview.",
+    description: "Link an existing asset to one or more campaigns by field type. Supports SITELINK, CALLOUT, STRUCTURED_SNIPPET, and LEAD_FORM. Create the asset first (e.g. with google_ads_create_sitelink or google_ads_create_lead_form_asset), then use this to attach it to campaigns. DRY-RUN BY DEFAULT: omit `confirm` or pass `confirm: false` to preview.",
     inputSchema: {
       additionalProperties: false,
       type: "object",
@@ -1346,7 +1409,7 @@ export const tools: Tool[] = [
         },
         field_type: {
           type: "string",
-          enum: ["SITELINK", "CALLOUT", "STRUCTURED_SNIPPET"],
+          enum: ["SITELINK", "CALLOUT", "STRUCTURED_SNIPPET", "LEAD_FORM"],
           description: "Asset field type — determines how the asset appears in ads.",
         },
         confirm: {

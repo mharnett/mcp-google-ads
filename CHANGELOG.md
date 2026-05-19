@@ -1,5 +1,22 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- **`google_ads_create_lead_form_asset`**: create a Google LeadFormAsset (the
+  Google equivalent of a Meta Lead Gen Form). v1 supports standard fields
+  only (FULL_NAME, EMAIL, WORK_EMAIL, PHONE_NUMBER, COMPANY_NAME, JOB_TITLE,
+  etc.); custom questions, qualifying questions, and CRM `delivery_methods`
+  (webhook for real-time lead sync to Pardot/HubSpot/Salesforce) are NOT yet
+  supported — until they ship in a v2, leads must be downloaded as CSV from
+  the Google Ads UI (Tools > Lead form submissions) or routed via Zapier.
+  Validates required fields, enum membership, and Google's character limits
+  (business_name ≤25, headline ≤30, description ≤200, etc.) before the API
+  call. Auto-labels the created asset.
+- **`google_ads_link_asset_to_campaign`**: extended `field_type` enum to
+  include `LEAD_FORM`, allowing newly-created lead form assets to be linked
+  to Demand Gen / Search campaigns.
+
 ## [1.4.5] - 2026-04-23
 
 ### Added

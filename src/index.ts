@@ -66,6 +66,10 @@ import {
   type ImageInput,
 } from "./imageAsset.js";
 import {
+  validateLeadFormInput,
+  type LeadFormInput,
+} from "./leadFormAsset.js";
+import {
   validateDemandGenAd,
   buildDemandGenAdPayload,
   isDemandGenAdGroup,
@@ -928,6 +932,117 @@ class GoogleAdsManager {
       mime_type: prepared.mime_type!,
       width: prepared.width,
       height: prepared.height,
+    };
+  }
+
+  // Create a LeadFormAsset. v1: standard fields only. No delivery_methods —
+  // leads land in Google Ads UI and must be exported as CSV (or routed via
+  // Zapier) until a v2 ships with webhook support.
+  async createLeadFormAsset(customerId: string, input: LeadFormInput) {
+    const validation = validateLeadFormInput(input);
+    if (!validation.valid) {
+      throw new Error("LeadForm validation failed:\n" + validation.errors.join("\n"));
+    }
+
+    const customer = this.getCustomer(customerId);
+    const cleanId = customerId.replace(/-/g, "");
+
+    const ctaMap: Record<string, any> = {
+      LEARN_MORE: enums.LeadFormCallToActionType.LEARN_MORE,
+      GET_QUOTE: enums.LeadFormCallToActionType.GET_QUOTE,
+      APPLY_NOW: enums.LeadFormCallToActionType.APPLY_NOW,
+      SIGN_UP: enums.LeadFormCallToActionType.SIGN_UP,
+      CONTACT_US: enums.LeadFormCallToActionType.CONTACT_US,
+      SUBSCRIBE: enums.LeadFormCallToActionType.SUBSCRIBE,
+      DOWNLOAD: enums.LeadFormCallToActionType.DOWNLOAD,
+      BOOK_NOW: enums.LeadFormCallToActionType.BOOK_NOW,
+      GET_OFFER: enums.LeadFormCallToActionType.GET_OFFER,
+      REGISTER: enums.LeadFormCallToActionType.REGISTER,
+      GET_INFO: enums.LeadFormCallToActionType.GET_INFO,
+      REQUEST_DEMO: enums.LeadFormCallToActionType.REQUEST_DEMO,
+      JOIN_NOW: enums.LeadFormCallToActionType.JOIN_NOW,
+      GET_STARTED: enums.LeadFormCallToActionType.GET_STARTED,
+    };
+
+    const postCtaMap: Record<string, any> = {
+      VISIT_SITE: enums.LeadFormPostSubmitCallToActionType.VISIT_SITE,
+      DOWNLOAD: enums.LeadFormPostSubmitCallToActionType.DOWNLOAD,
+      LEARN_MORE: enums.LeadFormPostSubmitCallToActionType.LEARN_MORE,
+      SHOP_NOW: enums.LeadFormPostSubmitCallToActionType.SHOP_NOW,
+    };
+
+    const intentMap: Record<string, any> = {
+      LOW_INTENT: enums.LeadFormDesiredIntent.LOW_INTENT,
+      HIGH_INTENT: enums.LeadFormDesiredIntent.HIGH_INTENT,
+    };
+
+    const fieldTypeMap: Record<string, any> = {
+      FULL_NAME: enums.LeadFormFieldUserInputType.FULL_NAME,
+      EMAIL: enums.LeadFormFieldUserInputType.EMAIL,
+      PHONE_NUMBER: enums.LeadFormFieldUserInputType.PHONE_NUMBER,
+      POSTAL_CODE: enums.LeadFormFieldUserInputType.POSTAL_CODE,
+      STREET_ADDRESS: enums.LeadFormFieldUserInputType.STREET_ADDRESS,
+      CITY: enums.LeadFormFieldUserInputType.CITY,
+      REGION: enums.LeadFormFieldUserInputType.REGION,
+      COUNTRY: enums.LeadFormFieldUserInputType.COUNTRY,
+      WORK_EMAIL: enums.LeadFormFieldUserInputType.WORK_EMAIL,
+      COMPANY_NAME: enums.LeadFormFieldUserInputType.COMPANY_NAME,
+      WORK_PHONE: enums.LeadFormFieldUserInputType.WORK_PHONE,
+      JOB_TITLE: enums.LeadFormFieldUserInputType.JOB_TITLE,
+    };
+
+    const leadFormAsset: any = {
+      business_name: input.business_name,
+      call_to_action_type: ctaMap[input.call_to_action],
+      call_to_action_description: input.call_to_action_description,
+      headline: input.headline,
+      description: input.description,
+      privacy_policy_url: input.privacy_policy_url,
+      post_submit_headline: input.post_submit_headline,
+      post_submit_description: input.post_submit_description,
+      post_submit_call_to_action_type: postCtaMap[input.post_submit_call_to_action],
+      fields: input.fields.map((f) => ({ input_type: fieldTypeMap[f] })),
+    };
+
+    if (input.privacy_policy_text) {
+      leadFormAsset.privacy_policy_text = input.privacy_policy_text;
+    }
+    if (input.desired_intent) {
+      leadFormAsset.desired_intent = intentMap[input.desired_intent];
+    }
+    if (input.background_image_asset_id) {
+      leadFormAsset.background_image_asset =
+        `customers/${cleanId}/assets/${input.background_image_asset_id}`;
+    }
+
+    const result = await withResilience(
+      () =>
+        customer.assets.create([
+          {
+            name: input.name,
+            type: enums.AssetType.LEAD_FORM,
+            lead_form_asset: leadFormAsset,
+          } as any,
+        ]),
+      "createLeadFormAsset"
+    );
+
+    const results = (result as any).results || [];
+    const resourceName: string | undefined = results[0]?.resource_name;
+    const assetId = resourceName ? resourceName.split("/").pop() : undefined;
+
+    if (resourceName) {
+      await this.autoLabelCreated(customerId, [resourceName], "asset");
+    }
+
+    return {
+      asset_id: assetId,
+      resource_name: resourceName,
+      name: input.name,
+      business_name: input.business_name,
+      fields: input.fields,
+      delivery_methods_warning:
+        "v1 of this tool does NOT configure delivery_methods. Leads will be visible in the Google Ads UI (Tools > Lead form submissions) and downloadable as CSV; they will NOT auto-sync to your CRM until a webhook/delivery_method is configured in the Google Ads UI or via a future MCP update.",
     };
   }
 
@@ -2296,12 +2411,13 @@ class GoogleAdsManager {
       SITELINK: enums.AssetFieldType.SITELINK,
       CALLOUT: enums.AssetFieldType.CALLOUT,
       STRUCTURED_SNIPPET: enums.AssetFieldType.STRUCTURED_SNIPPET,
+      LEAD_FORM: enums.AssetFieldType.LEAD_FORM,
     };
 
     const fieldType = fieldTypeMap[args.field_type.toUpperCase()];
     if (fieldType === undefined) {
       throw new Error(
-        `Unknown field_type: "${args.field_type}". Supported values: SITELINK, CALLOUT, STRUCTURED_SNIPPET`
+        `Unknown field_type: "${args.field_type}". Supported values: SITELINK, CALLOUT, STRUCTURED_SNIPPET, LEAD_FORM`
       );
     }
 
@@ -4891,6 +5007,42 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             name: args?.name as string,
             file_path: args?.file_path as string | undefined,
             base64_data: args?.base64_data as string | undefined,
+          });
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({ success: true, ...result }, null, 2),
+            }],
+          };
+        } catch (e: any) {
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({ success: false, error: e.message }, null, 2),
+            }],
+          };
+        }
+      }
+
+      case "google_ads_create_lead_form_asset": {
+        assertWriteAllowed(name);
+        const customerId = args?.customer_id as string || "";
+        try {
+          const result = await adsManager.createLeadFormAsset(customerId, {
+            name: args?.name as string,
+            business_name: args?.business_name as string,
+            call_to_action: args?.call_to_action as any,
+            call_to_action_description: args?.call_to_action_description as string,
+            headline: args?.headline as string,
+            description: args?.description as string,
+            privacy_policy_url: args?.privacy_policy_url as string,
+            privacy_policy_text: args?.privacy_policy_text as string | undefined,
+            post_submit_headline: args?.post_submit_headline as string,
+            post_submit_description: args?.post_submit_description as string,
+            post_submit_call_to_action: args?.post_submit_call_to_action as any,
+            desired_intent: args?.desired_intent as any,
+            fields: args?.fields as any,
+            background_image_asset_id: args?.background_image_asset_id as string | undefined,
           });
           return {
             content: [{

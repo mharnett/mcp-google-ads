@@ -142,6 +142,12 @@ describe("writeGate", () => {
       expect(isWriteTool("google_ads_list_campaigns")).toBe(false);
       expect(isWriteTool("google_ads_gaql_query")).toBe(false);
     });
+
+    it("classifies google_ads_create_lead_form_asset as a write tool", () => {
+      // LeadFormAsset creation mutates account state and must be gated behind
+      // GOOGLE_ADS_MCP_WRITE=true. Regression test for the v1.4.6 addition.
+      expect(isWriteTool("google_ads_create_lead_form_asset")).toBe(true);
+    });
   });
 
   it("WRITE_DISABLED_MESSAGE mentions the env var", () => {
