@@ -1021,6 +1021,7 @@ class GoogleAdsManager {
           {
             name: input.name,
             type: enums.AssetType.LEAD_FORM,
+            final_urls: input.final_urls,
             lead_form_asset: leadFormAsset,
           } as any,
         ]),
@@ -5037,6 +5038,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             description: args?.description as string,
             privacy_policy_url: args?.privacy_policy_url as string,
             privacy_policy_text: args?.privacy_policy_text as string | undefined,
+            final_urls: args?.final_urls as string[],
             post_submit_headline: args?.post_submit_headline as string,
             post_submit_description: args?.post_submit_description as string,
             post_submit_call_to_action: args?.post_submit_call_to_action as any,

@@ -13,6 +13,7 @@ function baseInput(overrides: Partial<LeadFormInput> = {}): LeadFormInput {
     headline: "Recurring Donor Report 2026",
     description: "Free benchmarks across 100k+ nonprofits.",
     privacy_policy_url: "https://neonone.com/privacy/",
+    final_urls: ["https://neonone.com/recurring-donor-report-2026/"],
     post_submit_headline: "Thanks — check email",
     post_submit_description: "Your copy of the report is on its way.",
     post_submit_call_to_action: "VISIT_SITE",
@@ -135,6 +136,30 @@ describe("validateLeadFormInput", () => {
     );
     expect(r.valid).toBe(false);
     expect(r.errors.some((e) => /post_submit_headline exceeds/.test(e))).toBe(true);
+  });
+
+  it("requires non-empty final_urls", () => {
+    // Google Ads API rejects the create with REQUIRED_NONEMPTY_LIST on
+    // operations.create.final_urls when an Asset of type LEAD_FORM is created
+    // without it. Regression for the 2026-05-19 live-API failure.
+    const { final_urls, ...rest } = baseInput();
+    const r = validateLeadFormInput(rest as LeadFormInput);
+    expect(r.valid).toBe(false);
+    expect(r.errors.some((e) => /final_urls is required/.test(e))).toBe(true);
+  });
+
+  it("rejects empty final_urls array", () => {
+    const r = validateLeadFormInput(baseInput({ final_urls: [] }));
+    expect(r.valid).toBe(false);
+    expect(r.errors.some((e) => /final_urls/.test(e))).toBe(true);
+  });
+
+  it("rejects non-https final_urls", () => {
+    const r = validateLeadFormInput(
+      baseInput({ final_urls: ["http://neonone.com/report"] })
+    );
+    expect(r.valid).toBe(false);
+    expect(r.errors.some((e) => /final_urls.*https/i.test(e))).toBe(true);
   });
 
   it("rejects description > 200 chars", () => {

@@ -1144,6 +1144,11 @@ export const tools: Tool[] = [
         description: { type: "string", description: "Form description / value proposition (≤200 chars)." },
         privacy_policy_url: { type: "string", description: "https:// URL to the privacy policy. Required by Google." },
         privacy_policy_text: { type: "string", description: "Optional custom privacy policy disclosure text." },
+        final_urls: {
+          type: "array",
+          items: { type: "string" },
+          description: "Required by Google. At least one https:// landing URL — e.g. the landing page for the offer. Distinct from privacy_policy_url. Without this the API returns REQUIRED_NONEMPTY_LIST on operations.create.final_urls.",
+        },
         post_submit_headline: { type: "string", description: "Confirmation screen headline (≤25 chars)." },
         post_submit_description: { type: "string", description: "Confirmation screen description (≤200 chars)." },
         post_submit_call_to_action: {
@@ -1177,6 +1182,7 @@ export const tools: Tool[] = [
         "headline",
         "description",
         "privacy_policy_url",
+        "final_urls",
         "post_submit_headline",
         "post_submit_description",
         "post_submit_call_to_action",

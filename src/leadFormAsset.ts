@@ -64,6 +64,7 @@ export interface LeadFormInput {
   description: string;
   privacy_policy_url: string;
   privacy_policy_text?: string;
+  final_urls: string[];
   post_submit_headline: string;
   post_submit_description: string;
   post_submit_call_to_action: LeadFormPostSubmitCallToActionType;
@@ -134,6 +135,16 @@ export function validateLeadFormInput(input: LeadFormInput): LeadFormValidationR
     errors.push("privacy_policy_url is required");
   } else if (!isHttpsUrl(input.privacy_policy_url)) {
     errors.push("privacy_policy_url must be a valid https:// URL");
+  }
+
+  if (!input.final_urls || input.final_urls.length === 0) {
+    errors.push("final_urls is required (non-empty array of https:// URLs)");
+  } else {
+    for (const u of input.final_urls) {
+      if (!isHttpsUrl(u)) {
+        errors.push(`final_urls entry must be a valid https:// URL: ${u}`);
+      }
+    }
   }
 
   if (!input.post_submit_headline?.trim()) {
