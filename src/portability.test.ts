@@ -172,15 +172,11 @@ describe("portability: filesystem path assumptions", () => {
     expect(violations, formatViolations("no ~/ in string literals", violations)).toEqual([]);
   });
 
-  it("no forward-slash path concatenation with '+' operator", () => {
-    // Matches: `"foo" + "/" + bar` or similar naive path concatenation.
-    // This is a weak rule (plenty of false positives with URLs) so we limit
-    // to obvious path-ish variable names.
-    // NOTE: intentionally NOT enforced as a hard rule in v1 — too many
-    // legitimate URL constructions trigger false positives. Kept here
-    // commented for future tightening.
-    expect(true).toBe(true);
-  });
+  // Intentionally disabled in v1 — too many legitimate URL constructions
+  // trigger false positives. Convert to it.todo() so the placeholder is
+  // visible in the test report instead of masquerading as a passing
+  // assertion. Re-enable with a URL-aware regex when tightened.
+  it.todo("no forward-slash path concatenation with '+' operator");
 });
 
 describe("portability: stdin/stdout + console", () => {

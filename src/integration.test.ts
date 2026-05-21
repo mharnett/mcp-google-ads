@@ -46,7 +46,11 @@ describe.skipIf(!LIVE)("mcp-google-ads integration", () => {
     });
     const data = parseToolResult(result);
     expect(data).toBeDefined();
-    expect(data.customer_id || data.error).toBeDefined();
+    // Happy path must surface customer_id; an MCP server that always errors
+    // would have failed the loose `customer_id || error` form previously here.
+    expect(data.error).toBeUndefined();
+    expect(typeof data.customer_id).toBe("string");
+    expect(data.customer_id).toMatch(/^\d{10}$|^\d{3}-\d{3}-\d{4}$/);
   }, 15_000);
 
   it("google_ads_list_campaigns returns campaigns array", async () => {
@@ -56,7 +60,13 @@ describe.skipIf(!LIVE)("mcp-google-ads integration", () => {
     });
     const data = parseToolResult(result);
     expect(data).toBeDefined();
-    expect(Array.isArray(data) || data.error).toBeTruthy();
+    expect(data.error).toBeUndefined();
+    // Expected shape: array of campaign rows OR { campaigns: [...] }
+    const campaigns = Array.isArray(data) ? data : data.campaigns;
+    expect(Array.isArray(campaigns)).toBe(true);
+    if (campaigns.length > 0) {
+      expect(campaigns[0]).toHaveProperty("id");
+    }
   }, 15_000);
 
   it("google_ads_keyword_performance with a date range", async () => {
@@ -70,8 +80,10 @@ describe.skipIf(!LIVE)("mcp-google-ads integration", () => {
     });
     const data = parseToolResult(result);
     expect(data).toBeDefined();
-    // Should return array of keyword rows or be wrapped in a response object
-    expect(Array.isArray(data) || typeof data === "object").toBeTruthy();
+    expect(data.error).toBeUndefined();
+    // Expect either an array of keyword rows or { rows | results: [...] }.
+    const rows = Array.isArray(data) ? data : (data.rows ?? data.results);
+    expect(Array.isArray(rows)).toBe(true);
   }, 30_000);
 
   it("error: missing customer_id returns error", async () => {
@@ -83,8 +95,11 @@ describe.skipIf(!LIVE)("mcp-google-ads integration", () => {
       },
     });
     const data = parseToolResult(result);
-    // Should either be an error response or the default customer_id is used
     expect(data).toBeDefined();
+    // Must be an error response; pin the error message to surface a real
+    // missing-customer-id signal (not e.g. an auth error from a default CID).
+    expect(typeof data.error).toBe("string");
+    expect(data.error.toLowerCase()).toMatch(/customer_id|customer id|required|missing/);
   }, 15_000);
 
   it("google_ads_list_conversion_actions returns actions", async () => {
@@ -94,7 +109,9 @@ describe.skipIf(!LIVE)("mcp-google-ads integration", () => {
     });
     const data = parseToolResult(result);
     expect(data).toBeDefined();
-    expect(Array.isArray(data) || typeof data === "object").toBeTruthy();
+    expect(data.error).toBeUndefined();
+    const actions = Array.isArray(data) ? data : (data.conversion_actions ?? data.actions ?? data.results);
+    expect(Array.isArray(actions)).toBe(true);
   }, 15_000);
 
   it("google_ads_gaql_query executes custom query", async () => {
@@ -107,7 +124,9 @@ describe.skipIf(!LIVE)("mcp-google-ads integration", () => {
     });
     const data = parseToolResult(result);
     expect(data).toBeDefined();
-    expect(Array.isArray(data) || typeof data === "object").toBeTruthy();
+    expect(data.error).toBeUndefined();
+    const rows = Array.isArray(data) ? data : (data.rows ?? data.results);
+    expect(Array.isArray(rows)).toBe(true);
   }, 15_000);
 
   it("error: invalid customer_id returns error response", async () => {
@@ -117,6 +136,9 @@ describe.skipIf(!LIVE)("mcp-google-ads integration", () => {
     });
     const data = parseToolResult(result);
     expect(data).toBeDefined();
-    expect(data.error || data.error_type).toBeDefined();
+    // Must surface a structured error — not "defined".
+    const errVal = data.error ?? data.error_type;
+    expect(typeof errVal).toBe("string");
+    expect(errVal.length).toBeGreaterThan(0);
   }, 15_000);
 });

@@ -150,7 +150,10 @@ describe("writeGate", () => {
     });
   });
 
-  it("WRITE_DISABLED_MESSAGE mentions the env var", () => {
+  it("WRITE_DISABLED_MESSAGE mentions the env var and remediation", () => {
+    // The env-var substring is load-bearing (regression guard for renames).
     expect(WRITE_DISABLED_MESSAGE).toContain("GOOGLE_ADS_MCP_WRITE=true");
+    // Message must also indicate remediation, not just name the var.
+    expect(WRITE_DISABLED_MESSAGE.toLowerCase()).toMatch(/set|enable|export/);
   });
 });

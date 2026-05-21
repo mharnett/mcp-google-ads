@@ -98,16 +98,26 @@ describe("Tool Schema Contract", () => {
     }
   });
 
-  it("all required fields exist in properties", () => {
+  it("all required fields exist in properties with a declared type", () => {
+    // Previously used expect.anything() which accepted `{}` (a property with
+    // no type/description). Tighten to require the property to be a non-null
+    // object with a JSON-schema `type` (or `oneOf`/`anyOf`/`enum`/`$ref`).
     for (const tool of tools) {
       const schema = tool.inputSchema as any;
-      if (schema.required) {
-        for (const field of schema.required) {
-          expect(schema.properties).toHaveProperty(
-            field,
-            expect.anything()
-          );
-        }
+      if (!schema.required) continue;
+      for (const field of schema.required) {
+        const prop = schema.properties?.[field];
+        expect(prop, `${tool.name}.${field} missing from properties`).toBeDefined();
+        expect(typeof prop, `${tool.name}.${field} property entry must be an object`).toBe("object");
+        expect(prop).not.toBeNull();
+        const hasShape =
+          typeof prop.type === "string" ||
+          Array.isArray(prop.type) ||
+          Array.isArray(prop.oneOf) ||
+          Array.isArray(prop.anyOf) ||
+          Array.isArray(prop.enum) ||
+          typeof prop.$ref === "string";
+        expect(hasShape, `${tool.name}.${field} property entry must declare a type/enum/$ref, got ${JSON.stringify(prop)}`).toBe(true);
       }
     }
   });

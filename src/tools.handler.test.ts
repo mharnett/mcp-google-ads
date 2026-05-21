@@ -36,7 +36,10 @@ const INDEX_TS = join(__dirname, "index.ts");
 function extractHandledToolNames(): string[] {
   const src = readFileSync(INDEX_TS, "utf8");
   const cases = new Set<string>();
-  const re = /case\s+"(google_ads_[a-z_]+)"\s*:/g;
+  // Allow digits + uppercase to surface, then assert convention separately.
+  // Previously `[a-z_]+` silently dropped any new tool with a digit or capital,
+  // producing a false "missing handler" or hiding an orphan.
+  const re = /case\s+"(google_ads_[A-Za-z0-9_]+)"\s*:/g;
   for (;;) {
     const match = re.exec(src);
     if (!match) break;

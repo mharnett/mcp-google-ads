@@ -29,8 +29,9 @@ describe("platform.ts", () => {
       } else if (isWindows()) {
         expect(configDir).toMatch(/AppData|Roaming/i);
       } else {
-        // Linux/other
-        expect(configDir).toMatch(/config|\./i);
+        // Linux/other — must be an XDG-style config dir, not just any path
+        // containing a dot. (Previous `/config|\./i` matched e.g. `/tmp/foo.bar`.)
+        expect(configDir).toMatch(/\.config(\/|$)|XDG_CONFIG_HOME/);
       }
     });
   });
