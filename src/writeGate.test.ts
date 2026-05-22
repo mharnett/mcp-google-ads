@@ -148,6 +148,21 @@ describe("writeGate", () => {
       // GOOGLE_ADS_MCP_WRITE=true. Regression test for the v1.4.6 addition.
       expect(isWriteTool("google_ads_create_lead_form_asset")).toBe(true);
     });
+
+    it("update_ad_final_urls is blocked when write disabled (HIGH-1 regression)", () => {
+      // Regression guard for the v2 audit HIGH-1 finding: update_ad_final_urls
+      // and add_adgroup_negatives were dispatched in index.ts but missing from
+      // WRITE_TOOLS, so assertWriteAllowed early-returned and a confirm=true
+      // call mutated live state even with GOOGLE_ADS_MCP_WRITE unset.
+      expect(isWriteTool("google_ads_update_ad_final_urls")).toBe(true);
+      expect(isWriteTool("google_ads_add_adgroup_negatives")).toBe(true);
+      expect(() =>
+        assertWriteAllowed("google_ads_update_ad_final_urls", {}),
+      ).toThrow(/write operation/i);
+      expect(() =>
+        assertWriteAllowed("google_ads_add_adgroup_negatives", {}),
+      ).toThrow(/write operation/i);
+    });
   });
 
   it("WRITE_DISABLED_MESSAGE mentions the env var and remediation", () => {
