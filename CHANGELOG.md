@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.6.0](https://github.com/mharnett/mcp-google-ads/compare/v1.4.4...v1.6.0) (2026-05-27)
+
+
+### Features
+
+* add experiment lifecycle tools + fix arm batching and schedule/end/promote API calls ([cc6cf6c](https://github.com/mharnett/mcp-google-ads/commit/cc6cf6c85c8c16eea569ce2946320ada8697bb98))
+* add rename_ad_group and link_asset_to_campaign tools ([02297de](https://github.com/mharnett/mcp-google-ads/commit/02297de3c1196c8f6b6493212e5f23f769c9fa95))
+* add update_ad_asset_automation tool for Demand Gen opt-outs ([bbd09b4](https://github.com/mharnett/mcp-google-ads/commit/bbd09b41967d4d015c7d5134f9abd4f539d34f22))
+* auto opt-out new Demand Gen ads from auto-video and adaptive layouts ([7ebfbc3](https://github.com/mharnett/mcp-google-ads/commit/7ebfbc31c5ac23ab1647a5325d1d7e1cba258fa3))
+
+
+### Bug Fixes
+
+* add list_experiments and get_experiment to READ_TOOLS fixture; add experiment builder ([cf96a97](https://github.com/mharnett/mcp-google-ads/commit/cf96a97c4264a8802b46a0874ef49220d8a60d77))
+* atomic portfolio-strategy detach when breaking shared budgets ([874cd47](https://github.com/mharnett/mcp-google-ads/commit/874cd47766952d09eed60b8cbac915be1c5fd32a))
+
+
+### Miscellaneous Chores
+
+* bootstrap release-please at 1.6.0 ([c452f99](https://github.com/mharnett/mcp-google-ads/commit/c452f99b235ba2200052c29fe39726595fab58a3))
+
 ## [Unreleased]
 
 ### Added
