@@ -47,6 +47,7 @@ export const WRITE_TOOLS: ReadonlySet<string> = new Set([
   "google_ads_update_campaign_ad_urls",
   "google_ads_update_ad_final_urls",
   "google_ads_rename_ad_group",
+  "google_ads_rename_campaign",
   "google_ads_link_asset_to_campaign",
   "google_ads_set_ad_group_location_targeting",
   "google_ads_set_campaign_location_targeting",

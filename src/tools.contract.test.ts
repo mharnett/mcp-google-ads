@@ -66,6 +66,7 @@ describe("Tool Schema Contract", () => {
     "google_ads_update_campaign_ad_urls",
     "google_ads_update_ad_final_urls",
     "google_ads_rename_ad_group",
+    "google_ads_rename_campaign",
     "google_ads_link_asset_to_campaign",
     "google_ads_attach_user_list_audience",
     "google_ads_create_and_attach_audience_bundle",

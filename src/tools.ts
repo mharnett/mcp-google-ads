@@ -1400,6 +1400,24 @@ export const tools: Tool[] = [
     },
   },
   {
+    name: "google_ads_rename_campaign",
+    description: "Rename a campaign. DRY-RUN BY DEFAULT: omit `confirm` or pass `confirm: false` to preview the change. Note: renaming a campaign does NOT update its url_custom_parameters (utmcampaign value carries the literal old name). Pair with google_ads_update_campaign_tracking to sync.",
+    inputSchema: {
+      additionalProperties: false,
+      type: "object",
+      properties: {
+        customer_id: { type: "string" },
+        campaign_id: { type: "string", description: "Numeric ID of the campaign to rename." },
+        new_name: { type: "string", description: "New campaign name." },
+        confirm: {
+          type: "boolean",
+          description: "Must be true to apply the rename. Omit or false for dry-run preview.",
+        },
+      },
+      required: ["campaign_id", "new_name"],
+    },
+  },
+  {
     name: "google_ads_link_asset_to_campaign",
     description: "Link an existing asset to one or more campaigns by field type. Supports SITELINK, CALLOUT, STRUCTURED_SNIPPET, and LEAD_FORM. Create the asset first (e.g. with google_ads_create_sitelink or google_ads_create_lead_form_asset), then use this to attach it to campaigns. DRY-RUN BY DEFAULT: omit `confirm` or pass `confirm: false` to preview.",
     inputSchema: {

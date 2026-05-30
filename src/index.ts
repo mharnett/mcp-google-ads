@@ -2397,6 +2397,28 @@ class GoogleAdsManager {
   }
 
   // ============================================
+  // CAMPAIGN RENAME
+  // ============================================
+
+  async renameCampaign(customerId: string, campaignId: string, newName: string) {
+    const customer = this.getCustomer(customerId);
+    const cleanId = customerId.replace(/-/g, "");
+    const resourceName = `customers/${cleanId}/campaigns/${campaignId}`;
+
+    await withResilience(
+      () => customer.campaigns.update([{ resource_name: resourceName, name: newName } as any]),
+      "renameCampaign"
+    );
+
+    return {
+      customer_id: cleanId,
+      campaign_id: campaignId,
+      resource_name: resourceName,
+      new_name: newName,
+    };
+  }
+
+  // ============================================
   // LINK ASSET TO CAMPAIGN
   // ============================================
 
@@ -4725,6 +4747,34 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
 
         const renameResult = await adsManager.renameAdGroup(customerId, adGroupId, newName);
+        return { content: [{ type: "text", text: JSON.stringify({ success: true, ...renameResult }, null, 2) }] };
+      }
+
+      case "google_ads_rename_campaign": {
+        const customerId = args?.customer_id as string || "";
+        const campaignId = args?.campaign_id as string;
+        const newName = args?.new_name as string;
+
+        if (!campaignId || !newName) {
+          return { content: [{ type: "text", text: JSON.stringify({ error: "campaign_id and new_name are required." }, null, 2) }] };
+        }
+
+        if (!args?.confirm) {
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({
+                dry_run: true,
+                action: "rename_campaign",
+                campaign_id: campaignId,
+                new_name: newName,
+                message: "Pass confirm: true to apply the rename. Remember to sync url_custom_parameters.utmcampaign separately if it references the old name.",
+              }, null, 2),
+            }],
+          };
+        }
+
+        const renameResult = await adsManager.renameCampaign(customerId, campaignId, newName);
         return { content: [{ type: "text", text: JSON.stringify({ success: true, ...renameResult }, null, 2) }] };
       }
 
