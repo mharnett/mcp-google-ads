@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 
-import { effectiveTextLength, validateRsa } from "./validateRsa.js";
+import { effectiveTextLength, hasUncountableToken, validateRsa } from "./validateRsa.js";
 
 const BASE_VALID_AD = {
   headlines: ["Headline 1", "Headline 2", "Headline 3"],
@@ -318,6 +318,81 @@ describe("validateRsa", () => {
       });
       expect(result.valid).toBe(false);
       expect(result.errors.some((e) => /path1 too long/i.test(e))).toBe(true);
+    });
+  });
+
+  describe("hasUncountableToken", () => {
+    it("detects countdown and IF-function tokens (case/whitespace tolerant)", () => {
+      const positives = [
+        '{COUNTDOWN("2026-12-31 23:59:59","America/New_York",5)}',
+        "{GLOBAL_COUNTDOWN(\"2026-12-31 23:59:59\")}",
+        "{ countdown ( \"2026-12-31\" )}",
+        "Sale ends in {COUNTDOWN(\"2026-12-31\")}!",
+        '{=IF(device=mobile, "Tap to call"):Call us}',
+        "{ =IF(audience IN(123), \"VIP\")}",
+      ];
+      for (const s of positives) expect(hasUncountableToken(s)).toBe(true);
+    });
+
+    it("returns false for plain text and countable insertions", () => {
+      const negatives = [
+        "Forcepoint DSPM",
+        "{KeyWord:default}",
+        "{CUSTOMIZER.Name:default}",
+        "{LOCATION(City):See Your Data}",
+        "10% off all plans", // bare '=' / digits must not trigger
+      ];
+      for (const s of negatives) expect(hasUncountableToken(s)).toBe(false);
+    });
+  });
+
+  describe("uncountable tokens skip the length check (defer to API)", () => {
+    it("accepts a headline with a countdown even though its literal exceeds 30", () => {
+      const result = validateRsa({
+        ...BASE_VALID_AD,
+        headlines: [
+          'Only {COUNTDOWN("2026-12-31 23:59:59","America/New_York",5)} left',
+          "Headline 2",
+          "Headline 3",
+        ],
+      });
+      expect(result.valid).toBe(true);
+      expect(result.errors).toEqual([]);
+    });
+
+    it("accepts a description with an IF function even though its literal exceeds 90", () => {
+      const result = validateRsa({
+        ...BASE_VALID_AD,
+        descriptions: [
+          '{=IF(device=mobile, "Tap to start your DSPM trial today and secure your data"):Start your DSPM trial}',
+          "Description 2",
+        ],
+      });
+      expect(result.valid).toBe(true);
+      expect(result.errors).toEqual([]);
+    });
+
+    it("still enforces the headline COUNT limit even when fields carry countdowns", () => {
+      // Length is skipped, but min/max cardinality must still apply.
+      const result = validateRsa({
+        ...BASE_VALID_AD,
+        headlines: Array.from(
+          { length: 16 },
+          (_, i) => `H${i} {COUNTDOWN("2026-12-31")}`
+        ),
+      });
+      expect(result.valid).toBe(false);
+      expect(result.errors.some((e) => /Maximum 15 headlines/.test(e))).toBe(true);
+    });
+
+    it("does NOT skip length for a too-long field without uncountable tokens", () => {
+      // Guard against an over-broad skip: a plain over-limit headline still fails.
+      const result = validateRsa({
+        ...BASE_VALID_AD,
+        headlines: ["This headline is exactly 31 chars long!!", "Headline 2", "Headline 3"],
+      });
+      expect(result.valid).toBe(false);
+      expect(result.errors.some((e) => /Headline 1 too long/.test(e))).toBe(true);
     });
   });
 

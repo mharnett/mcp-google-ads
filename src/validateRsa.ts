@@ -49,6 +49,16 @@ const LOCATION_WITH_DEFAULT = /\{LOCATION\s*\([^(){}]*\)\s*:([^}]*)\}/gi;
 const LOCATION_NO_DEFAULT = /\{LOCATION\s*\([^(){}]*\)\}/gi;
 const LOCATION_RENDER_LEN = 20;
 
+// Some insertions render to text whose length we can't reliably predict from
+// the literal form: countdown timers ({COUNTDOWN(...)} / {GLOBAL_COUNTDOWN(...)})
+// render to "3 days"-style strings, and IF functions ({=IF(cond, text):default})
+// pick the longer of two branches. Rather than guess a reserve length and risk a
+// false reject (or worse, a false accept), we skip the length check entirely for
+// any field containing one of these — Google's API remains the source of truth at
+// create time. Detection is presence-only; we don't try to parse their arguments.
+const COUNTDOWN_PATTERN = /\{\s*(?:GLOBAL_)?COUNTDOWN\s*\(/i;
+const IF_FUNCTION_PATTERN = /\{\s*=/;
+
 export function validateRsa(ad: RsaInput): RsaValidationResult {
   const errors: string[] = [];
 
@@ -60,6 +70,7 @@ export function validateRsa(ad: RsaInput): RsaValidationResult {
     errors.push(`Maximum ${MAX_HEADLINES} headlines, got ${ad.headlines.length}`);
   }
   (ad.headlines ?? []).forEach((h, i) => {
+    if (hasUncountableToken(h)) return;
     const effectiveLen = effectiveTextLength(h);
     if (effectiveLen > MAX_HEADLINE_LENGTH) {
       errors.push(`Headline ${i + 1} too long (${effectiveLen}/${MAX_HEADLINE_LENGTH}): "${h}"`);
@@ -76,6 +87,7 @@ export function validateRsa(ad: RsaInput): RsaValidationResult {
     errors.push(`Maximum ${MAX_DESCRIPTIONS} descriptions, got ${ad.descriptions.length}`);
   }
   (ad.descriptions ?? []).forEach((d, i) => {
+    if (hasUncountableToken(d)) return;
     const effectiveLen = effectiveTextLength(d);
     if (effectiveLen > MAX_DESCRIPTION_LENGTH) {
       errors.push(
@@ -94,7 +106,7 @@ export function validateRsa(ad: RsaInput): RsaValidationResult {
     errors.push("path1 is required (display URL path segment)");
   } else {
     const effectiveLen = effectiveTextLength(ad.path1!);
-    if (effectiveLen > MAX_PATH_LENGTH) {
+    if (!hasUncountableToken(ad.path1!) && effectiveLen > MAX_PATH_LENGTH) {
       errors.push(`path1 too long (${effectiveLen}/${MAX_PATH_LENGTH}): "${ad.path1}"`);
     }
   }
@@ -104,7 +116,7 @@ export function validateRsa(ad: RsaInput): RsaValidationResult {
     errors.push("path2 is required (display URL path segment)");
   } else {
     const effectiveLen = effectiveTextLength(ad.path2!);
-    if (effectiveLen > MAX_PATH_LENGTH) {
+    if (!hasUncountableToken(ad.path2!) && effectiveLen > MAX_PATH_LENGTH) {
       errors.push(`path2 too long (${effectiveLen}/${MAX_PATH_LENGTH}): "${ad.path2}"`);
     }
   }
@@ -123,6 +135,15 @@ export function validateRsa(ad: RsaInput): RsaValidationResult {
 
 function isNonEmpty(s: string | undefined | null): boolean {
   return typeof s === "string" && s.trim().length > 0;
+}
+
+/**
+ * True if the text contains an insertion whose rendered length can't be reliably
+ * predicted from the literal form — countdown timers or IF functions. Callers
+ * skip the character-length check for such fields and defer to the Google Ads API.
+ */
+export function hasUncountableToken(text: string): boolean {
+  return COUNTDOWN_PATTERN.test(text) || IF_FUNCTION_PATTERN.test(text);
 }
 
 /**
