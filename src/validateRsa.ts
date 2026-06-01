@@ -41,6 +41,13 @@ const KEYWORD_INSERT_PATTERN = /\{(?:KeyWord|Keyword|keyword|KEYWORD):([^}]*)\}/
 const CUSTOMIZER_WITH_DEFAULT = /\{CUSTOMIZER\.[^:}]+:([^}]*)\}/g;
 const CUSTOMIZER_NO_DEFAULT = /\{CUSTOMIZER\.[^:}]+\}/g;
 const CUSTOMIZER_RENDER_LEN = 16;
+// Location insertion, e.g. {LOCATION(City):See Your Data} or {LOCATION(City, State):...}.
+// Google counts the default (fallback) text, identical to customizers. A bare
+// {LOCATION(City)} with no default renders as a real place name, so estimate
+// conservatively (city/state strings run longer than the 16-char customizer guess).
+const LOCATION_WITH_DEFAULT = /\{LOCATION\s*\([^(){}]*\)\s*:([^}]*)\}/gi;
+const LOCATION_NO_DEFAULT = /\{LOCATION\s*\([^(){}]*\)\}/gi;
+const LOCATION_RENDER_LEN = 20;
 
 export function validateRsa(ad: RsaInput): RsaValidationResult {
   const errors: string[] = [];
@@ -125,6 +132,8 @@ function isNonEmpty(s: string | undefined | null): boolean {
  *     → rendered as the default text
  *   - {CUSTOMIZER.Name:default} → rendered as the default text
  *   - {CUSTOMIZER.Name}        → rendered as a conservative estimate
+ *   - {LOCATION(City):default} → rendered as the default text
+ *   - {LOCATION(City)}         → rendered as a conservative estimate
  *
  * Applies to headlines, descriptions, and display paths alike.
  */
@@ -132,5 +141,7 @@ export function effectiveTextLength(text: string): number {
   let rendered = text.replace(KEYWORD_INSERT_PATTERN, "$1");
   rendered = rendered.replace(CUSTOMIZER_WITH_DEFAULT, "$1");
   rendered = rendered.replace(CUSTOMIZER_NO_DEFAULT, " ".repeat(CUSTOMIZER_RENDER_LEN));
+  rendered = rendered.replace(LOCATION_WITH_DEFAULT, "$1");
+  rendered = rendered.replace(LOCATION_NO_DEFAULT, " ".repeat(LOCATION_RENDER_LEN));
   return rendered.length;
 }

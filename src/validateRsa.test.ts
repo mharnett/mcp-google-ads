@@ -192,6 +192,76 @@ describe("validateRsa", () => {
     it("returns plain length when no tokens present", () => {
       expect(effectiveTextLength("Hello world")).toBe(11);
     });
+
+    it("treats {LOCATION(City):default} as the default text length", () => {
+      // Literal 30, default "See Your Data" = 13
+      expect(effectiveTextLength("{LOCATION(City):See Your Data}")).toBe(13);
+      // Multi-part location target, optional whitespace
+      expect(effectiveTextLength("{LOCATION (City, State):in Your State}")).toBe(13);
+    });
+
+    it("treats bare {LOCATION(City)} as a conservative estimate", () => {
+      // "near " + LOCATION_RENDER_LEN (20)
+      expect(effectiveTextLength("near {LOCATION(City)}")).toBe(5 + 20);
+    });
+
+    it("renders mixed location + customizer fields as combined default text", () => {
+      // Exact production string that the live Varonis ad serves and that the
+      // old (literal-counting) validator wrongly rejected at 102/90.
+      const prod =
+        "{LOCATION(City):See Your Data}, {LOCATION(State):in Your State}" +
+        " - Forcepoint® Official Site - {CUSTOMIZER.Intent_a30:Varoni s}";
+      // Rendered: "See Your Data, in Your State - Forcepoint® Official Site - Varoni s"
+      expect(effectiveTextLength(prod)).toBe(67);
+      expect(effectiveTextLength(prod)).toBeLessThan(prod.length); // never the literal length
+    });
+
+    // ── Shape: every with-default insertion family renders to its default,
+    // strictly shorter than the literal {TAG:default} form (proves the tag was
+    // recognized, not counted as literal text). Bare-tag estimates use a fixed
+    // length that may coincide with the literal, so they're asserted separately.
+    it("counts every with-default insertion family by rendered, not literal, length", () => {
+      const cases: Array<[string, number]> = [
+        ["{KeyWord:FDA Compliant Fulfillment}", 25],
+        ["{CUSTOMIZER.CurrentDate:Today}", 5],
+        ["{LOCATION(City):See Your Data}", 13],
+        ["{LOCATION(City, State):in Your State}", 13],
+      ];
+      for (const [s, expected] of cases) {
+        expect(effectiveTextLength(s)).toBe(expected);
+        expect(effectiveTextLength(s)).toBeLessThan(s.length);
+      }
+    });
+  });
+
+  describe("location insertion in ad fields", () => {
+    it("accepts a description whose literal exceeds 90 but rendered defaults fit", () => {
+      // The production Varonis description: literal 102, rendered 67 ≤ 90.
+      const result = validateRsa({
+        ...BASE_VALID_AD,
+        descriptions: [
+          "{LOCATION(City):See Your Data}, {LOCATION(State):in Your State}" +
+            " - Forcepoint® Official Site - {CUSTOMIZER.Intent_a30:Varoni s}",
+          "Description 2",
+        ],
+      });
+      expect(result.valid).toBe(true);
+      expect(result.errors).toEqual([]);
+    });
+
+    it("still rejects a location field whose default text genuinely exceeds the limit", () => {
+      // Default text alone = 33 chars > 30 headline limit.
+      const result = validateRsa({
+        ...BASE_VALID_AD,
+        headlines: [
+          "{LOCATION(City):This default text is thirty-one!!}",
+          "Headline 2",
+          "Headline 3",
+        ],
+      });
+      expect(result.valid).toBe(false);
+      expect(result.errors.some((e) => /Headline 1 too long/.test(e))).toBe(true);
+    });
   });
 
   describe("keyword insertion in ad fields", () => {
