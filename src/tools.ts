@@ -1086,6 +1086,57 @@ export const tools: Tool[] = [
     },
   },
   {
+    name: "google_ads_update_demand_gen_multi_asset_ad",
+    description: "Update headlines, long_headlines, or descriptions on an existing Demand Gen Multi-Asset ad (PAUSED or ENABLED). Validates character/count limits before the API call. Provide the ad's resource name (customers/XXX/adGroupAds/YYY~ZZZ) or numeric ad ID. Omit fields you don't want to change. Auto-labels with Claude-MM-DD-YY. Use this to fix copy, test variants, or adjust messaging without recreating ads.",
+    inputSchema: {
+      additionalProperties: false,
+      type: "object",
+      properties: {
+        customer_id: { type: "string" },
+        ad_resource_name: {
+          type: "string",
+          description: "Full resource name (e.g. customers/7158566222/adGroupAds/200360442360~814405338431) or numeric ad ID (814405338431). If numeric ID, the tool resolves it to the full name.",
+        },
+        headlines: {
+          type: "array",
+          description: "Optional: max 5 headlines, each ≤40 characters. Omit to keep current value.",
+          items: {
+            oneOf: [
+              { type: "string" },
+              {
+                type: "object",
+                properties: {
+                  text: { type: "string" },
+                  pinned_position: { type: "number" },
+                },
+                required: ["text"],
+              },
+            ],
+          },
+        },
+        long_headlines: {
+          type: "array",
+          description: "Optional: max 5 long headlines, each ≤90 characters. Omit to keep current value.",
+          items: { type: "string" },
+        },
+        descriptions: {
+          type: "array",
+          description: "Optional: max 5 descriptions, each ≤90 characters. Omit to keep current value.",
+          items: { type: "string" },
+        },
+        labels: {
+          type: "array",
+          items: { type: "string" },
+          description: "Optional additional labels (auto-applied Claude-MM-DD-YY label is added regardless).",
+        },
+      },
+      required: [
+        "customer_id",
+        "ad_resource_name",
+      ],
+    },
+  },
+  {
     name: "google_ads_create_page_feed",
     description: "Create an AI Max / DSA page feed (AssetSet of type PAGE_FEED) and attach it to a campaign. Each URL becomes a PageFeedAsset tagged with the given label. Use this to constrain AI Max final-URL expansion to a specific list of landing pages. Returns the AssetSet resource name and the number of URLs added.",
     inputSchema: {

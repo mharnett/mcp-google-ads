@@ -1230,6 +1230,128 @@ class GoogleAdsManager {
     };
   }
 
+  async updateDemandGenMultiAssetAd(
+    customerId: string,
+    input: {
+      ad_resource_name: string;
+      headlines?: Array<string | { text: string; pinned_position?: number }>;
+      long_headlines?: string[];
+      descriptions?: string[];
+      labels?: string[];
+    }
+  ) {
+    const customer = this.getCustomer(customerId);
+    const cleanId = customerId.replace(/-/g, "");
+
+    // Resolve resource name if numeric ID provided
+    let resourceName = input.ad_resource_name;
+    if (!resourceName.startsWith("customers/")) {
+      // It's a numeric ad ID; need to resolve it
+      const adId = resourceName;
+      const adRows = await withResilience(
+        () =>
+          customer.query(
+            `SELECT ad_group_ad.resource_name FROM ad_group_ad WHERE ad_group_ad.id = ${sanitizeNumericId(
+              adId
+            )}`
+          ),
+        "updateDemandGenMultiAssetAd.resolveResourceName"
+      );
+      if (!adRows || adRows.length === 0) {
+        throw new Error(`Ad ${adId} not found`);
+      }
+      resourceName = (adRows[0] as any)?.ad_group_ad?.resource_name;
+      if (!resourceName) {
+        throw new Error(`Could not resolve resource name for ad ${adId}`);
+      }
+    }
+
+    // Validate input (only validate fields that are being updated)
+    if (input.headlines || input.descriptions) {
+      const validationInput = {
+        final_urls: ["https://example.com"], // dummy, not validated for updates
+        business_name: "dummy",
+        call_to_action: "LEARN_MORE",
+        headlines: input.headlines || [],
+        descriptions: input.descriptions || [],
+        long_headlines: input.long_headlines,
+      };
+      const validation = validateDemandGenAd(validationInput as any);
+      if (!validation.valid) {
+        throw new Error("Demand Gen ad validation failed:\n" + validation.errors.join("\n"));
+      }
+    }
+
+    // Build update payload
+    const updateResource: any = {
+      resource_name: resourceName,
+    };
+
+    if (input.headlines) {
+      updateResource.ad = {
+        demand_gen_multi_asset_ad: {
+          headlines: input.headlines.map((h) => ({
+            text: typeof h === "string" ? h : h.text,
+            ...(typeof h === "object" && h.pinned_position !== undefined
+              ? { pinned_position: h.pinned_position }
+              : {}),
+          })),
+        },
+      };
+    }
+
+    if (input.descriptions) {
+      if (!updateResource.ad) updateResource.ad = { demand_gen_multi_asset_ad: {} };
+      updateResource.ad.demand_gen_multi_asset_ad.descriptions = input.descriptions.map((t) => ({
+        text: t,
+      }));
+    }
+
+    if (input.long_headlines) {
+      if (!updateResource.ad) updateResource.ad = { demand_gen_multi_asset_ad: {} };
+      updateResource.ad.demand_gen_multi_asset_ad.long_headlines = input.long_headlines.map(
+        (t) => ({ text: t })
+      );
+    }
+
+    const mutateResp: any = await withResilience(
+      () =>
+        customer.mutateResources([
+          {
+            entity: "ad_group_ad",
+            operation: "update",
+            resource: updateResource as any,
+          } as any,
+        ]),
+      "updateDemandGenMultiAssetAd"
+    );
+
+    const adGroupAdResult = (mutateResp.mutate_operation_responses || [])
+      .map((r: any) => r.ad_group_ad_result)
+      .filter(Boolean)[0];
+    const resultResourceName: string | undefined = adGroupAdResult?.resource_name;
+
+    // Apply labels
+    if (resultResourceName) {
+      await this.autoLabelCreated(customerId, [resultResourceName], "ad");
+      for (const lbl of input.labels ?? []) {
+        try {
+          const labelRN = await this.ensureLabelExists(customerId, lbl);
+          await this.labelAdGroupAds(customerId, [resultResourceName], labelRN);
+        } catch (e: any) {
+          console.error(`[WARN] extra label '${lbl}' failed: ${e.message}`);
+        }
+      }
+    }
+
+    return {
+      success: !!resultResourceName,
+      resource_name: resultResourceName,
+      ad_id: resultResourceName ? resultResourceName.split("~").pop() : undefined,
+      updated_fields: Object.keys(input).filter((k) => k !== "labels" && input[k as keyof typeof input]),
+    };
+  }
+
   // Create keywords (paused by default, auto-labeled for discoverability)
   async createKeywords(customerId: string, keywords: {
     ad_group_id: string;
@@ -4959,6 +5081,38 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               text: JSON.stringify({
                 success: true,
                 message: "Demand Gen multi-asset ad created (PAUSED). Review in Google Ads before enabling.",
+                ...result,
+              }, null, 2),
+            }],
+          };
+        } catch (e: any) {
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({ success: false, error: e.message }, null, 2),
+            }],
+          };
+        }
+      }
+
+      case "google_ads_update_demand_gen_multi_asset_ad": {
+        const customerId = args?.customer_id as string || "";
+        try {
+          const result = await adsManager.updateDemandGenMultiAssetAd(customerId, {
+            ad_resource_name: args?.ad_resource_name as string,
+            headlines: args?.headlines as Array<string | { text: string; pinned_position?: number }> | undefined,
+            long_headlines: args?.long_headlines as string[] | undefined,
+            descriptions: args?.descriptions as string[] | undefined,
+            labels: args?.labels as string[] | undefined,
+          });
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({
+                success: result.success,
+                message: result.success
+                  ? `Demand Gen ad updated. Updated fields: ${result.updated_fields.join(", ")}`
+                  : "Update failed",
                 ...result,
               }, null, 2),
             }],
