@@ -1307,12 +1307,8 @@ class GoogleAdsManager {
       }));
     }
 
-    if (input.long_headlines) {
-      if (!updateResource.ad) updateResource.ad = { demand_gen_multi_asset_ad: {} };
-      updateResource.ad.demand_gen_multi_asset_ad.long_headlines = input.long_headlines.map(
-        (t) => ({ text: t })
-      );
-    }
+    // Note: long_headlines is NOT updatable via API (only supported at creation time)
+    // Omit from payload to avoid field mask errors
 
     const mutateResp: any = await withResilience(
       () =>
