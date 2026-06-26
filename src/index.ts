@@ -5109,11 +5109,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             content: [{
               type: "text",
               text: JSON.stringify({
-                success: result.success,
+                ...result,
                 message: result.success
                   ? `Demand Gen ad updated. Updated fields: ${result.updated_fields.join(", ")}`
                   : "Update failed",
-                ...result,
               }, null, 2),
             }],
           };
