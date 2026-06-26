@@ -5,7 +5,7 @@
  *   - headlines:       max 5, each ≤ 40 chars
  *   - long_headlines:  max 5, each ≤ 90 chars
  *   - descriptions:    max 5, each ≤ 90 chars
- *   - marketing_image_asset_ids: required, ≥ 1 (1.91:1 landscape images)
+ *   - marketing_image_asset_ids: optional, ≥ 1 when provided (1.91:1 landscape images); video-only ads supported
  *   - business_name:   required, non-empty
  *   - call_to_action:  required, non-empty (string CTA enum value)
  *   - final_urls:      required, ≥ 1
@@ -15,7 +15,7 @@ export interface DemandGenAdInput {
   final_urls: string[];
   business_name: string;
   call_to_action: string;
-  marketing_image_asset_ids: string[];
+  marketing_image_asset_ids?: string[];
   square_marketing_image_asset_ids?: string[];
   portrait_marketing_image_asset_ids?: string[];
   logo_image_asset_ids?: string[];
@@ -71,10 +71,14 @@ export function buildDemandGenAdPayload(args: {
   const dgAd: Record<string, any> = {
     business_name: input.business_name,
     call_to_action_text: normalizeCallToAction(input.call_to_action),
-    marketing_images: input.marketing_image_asset_ids.map(assetRef),
     headlines: input.headlines.map((h) => ({ text: headlineText(h) })),
     descriptions: input.descriptions.map((t) => ({ text: t })),
   };
+
+  // marketing_images is optional for video-only ads
+  if (input.marketing_image_asset_ids?.length) {
+    dgAd.marketing_images = input.marketing_image_asset_ids.map(assetRef);
+  }
 
   if (input.square_marketing_image_asset_ids?.length) {
     dgAd.square_marketing_images = input.square_marketing_image_asset_ids.map(assetRef);
@@ -113,9 +117,7 @@ export function validateDemandGenAd(ad: DemandGenAdInput): DemandGenAdValidation
   if (!ad.call_to_action || !ad.call_to_action.trim()) {
     errors.push("call_to_action is required (e.g. 'LEARN_MORE')");
   }
-  if (!ad.marketing_image_asset_ids || ad.marketing_image_asset_ids.length === 0) {
-    errors.push("At least one marketing_image_asset_id is required");
-  }
+  // marketing_image_asset_ids is now optional for video-only ads
 
   // Headlines
   if (!ad.headlines || ad.headlines.length === 0) {

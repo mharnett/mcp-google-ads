@@ -1009,7 +1009,7 @@ export const tools: Tool[] = [
   },
   {
     name: "google_ads_create_demand_gen_multi_asset_ad",
-    description: "Create a Demand Gen Multi-Asset ad under a DEMAND_GEN_MULTI_ASSET_AD_GROUP (will be PAUSED until approved). Validates character limits and count caps before the API call: headlines (max 5, ≤40 chars each), long_headlines (max 5, ≤90 chars), descriptions (max 5, ≤90 chars). marketing_image_asset_ids is required (1:1 square images, ≥1); square/portrait/logo assets are optional. call_to_action is a string enum value such as 'LEARN_MORE' or 'SHOP_NOW'. Auto-labels the created ad.",
+    description: "Create a Demand Gen Multi-Asset ad under a DEMAND_GEN_MULTI_ASSET_AD_GROUP (will be PAUSED until approved). Supports both image-based and video-only ads. Validates character limits and count caps before the API call: headlines (max 5, ≤40 chars each), long_headlines (max 5, ≤90 chars), descriptions (max 5, ≤90 chars). For image ads: marketing_image_asset_ids (1.91:1 landscape, ≥1); for video-only ads, omit images. Square/portrait/logo assets are optional. call_to_action is a string enum value such as 'LEARN_MORE' or 'SHOP_NOW'. Auto-labels the created ad.",
     inputSchema: {
       additionalProperties: false,
       type: "object",
@@ -1025,7 +1025,7 @@ export const tools: Tool[] = [
         marketing_image_asset_ids: {
           type: "array",
           items: { type: "string" },
-          description: "1.91:1 landscape marketing image asset IDs (min 1). Get IDs from google_ads_create_image_asset.",
+          description: "1.91:1 landscape marketing image asset IDs (min 1 for image-based ads). Optional for video-only ads. Get IDs from google_ads_create_image_asset.",
         },
         square_marketing_image_asset_ids: {
           type: "array",
@@ -1080,7 +1080,6 @@ export const tools: Tool[] = [
         "final_urls",
         "business_name",
         "call_to_action",
-        "marketing_image_asset_ids",
         "headlines",
         "descriptions",
       ],
