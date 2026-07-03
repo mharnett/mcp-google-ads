@@ -92,10 +92,19 @@ describe("validateDemandGenAd — required fields", () => {
     expect(result.errors.some((e) => /final URL/i.test(e))).toBe(true);
   });
 
-  it("rejects missing marketing_image_asset_ids", () => {
+  it("accepts a video-only ad (no marketing images)", () => {
+    // Images are optional for video-only DG ads. An ad with no image assets
+    // must still validate as long as the copy fields are present/valid.
     const result = validateDemandGenAd({ ...BASE_VALID, marketing_image_asset_ids: [] });
-    expect(result.valid).toBe(false);
-    expect(result.errors.some((e) => /marketing_image_asset_id/i.test(e))).toBe(true);
+    expect(result.valid).toBe(true);
+    expect(result.errors).toEqual([]);
+  });
+
+  it("accepts an ad with the image field entirely absent", () => {
+    const { marketing_image_asset_ids, ...noImages } = BASE_VALID;
+    const result = validateDemandGenAd(noImages);
+    expect(result.valid).toBe(true);
+    expect(result.errors).toEqual([]);
   });
 
   it("rejects missing business_name", () => {

@@ -53,6 +53,7 @@ describe("Tool Schema Contract", () => {
     "google_ads_pause_asset_links",
     "google_ads_keyword_volume",
     "google_ads_create_demand_gen_multi_asset_ad",
+    "google_ads_update_demand_gen_multi_asset_ad",
     "google_ads_create_page_feed",
     "google_ads_create_image_asset",
     "google_ads_create_lead_form_asset",
@@ -162,14 +163,18 @@ describe("Tool Schema Contract", () => {
       const tool = tools.find(t => t.name === "google_ads_create_demand_gen_multi_asset_ad");
       expect(tool).toBeDefined();
       const schema = tool!.inputSchema as any;
-      // Required fields: ad_group_id, final_urls, business_name, call_to_action, marketing_image_asset_ids, headlines, descriptions
+      // Required fields: ad_group_id, final_urls, business_name, call_to_action, headlines, descriptions
       expect(schema.required).toContain("ad_group_id");
       expect(schema.required).toContain("final_urls");
       expect(schema.required).toContain("business_name");
       expect(schema.required).toContain("call_to_action");
-      expect(schema.required).toContain("marketing_image_asset_ids");
       expect(schema.required).toContain("headlines");
       expect(schema.required).toContain("descriptions");
+
+      // marketing_image_asset_ids is a settable array but NOT required —
+      // video-only DG ads omit it (commit "Support video-only Demand Gen ads").
+      expect(schema.properties.marketing_image_asset_ids?.type).toBe("array");
+      expect(schema.required).not.toContain("marketing_image_asset_ids");
 
       // Optional arrays
       expect(schema.properties.square_marketing_image_asset_ids?.type).toBe("array");
@@ -177,6 +182,21 @@ describe("Tool Schema Contract", () => {
       expect(schema.properties.logo_image_asset_ids?.type).toBe("array");
       expect(schema.properties.long_headlines?.type).toBe("array");
       expect(schema.properties.labels?.type).toBe("array");
+    });
+
+    it("update_demand_gen_multi_asset_ad requires the target ad and gates copy fields", () => {
+      const tool = tools.find(t => t.name === "google_ads_update_demand_gen_multi_asset_ad");
+      expect(tool).toBeDefined();
+      const schema = tool!.inputSchema as any;
+      // Must identify which ad to update.
+      expect(schema.required).toContain("customer_id");
+      expect(schema.required).toContain("ad_resource_name");
+      // Editable copy fields are optional (omit to leave unchanged).
+      expect(schema.properties.headlines?.type).toBe("array");
+      expect(schema.properties.long_headlines?.type).toBe("array");
+      expect(schema.properties.descriptions?.type).toBe("array");
+      expect(schema.required).not.toContain("headlines");
+      expect(schema.required).not.toContain("descriptions");
     });
 
     it("link_asset_to_campaign field_type enum includes LEAD_FORM", () => {
