@@ -81,7 +81,7 @@
     "dotenv": "^17.3.1",
     "env-paths": "^4.0.0",
     "google-ads-api": "^23.0.0",
-    "mcp-write-gate": "file:../mcp-write-gate",
+    "mcp-write-gate": "^1.0.0",
     "open": "^11.0.0",
     "pino": "^8.21.0",
     "pino-pretty": "^13.1.3",
