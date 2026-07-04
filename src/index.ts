@@ -77,7 +77,7 @@ import {
 } from "./validateDemandGenAd.js";
 import { GoogleAdsApi, enums, resources, MutateOperation } from "google-ads-api";
 import { buildAdGroupAdResourceName } from "./resourceNames.js";
-import { readFileSync, existsSync } from "fs";
+import { readFileSync, existsSync, realpathSync } from "fs";
 import { z } from "zod";
 import v8 from "v8";
 
@@ -254,7 +254,7 @@ function mimeToAssetMimeEnum(mime: "image/png" | "image/jpeg" | "image/gif"): nu
   }
 }
 
-class GoogleAdsManager {
+export class GoogleAdsManager {
   private api: GoogleAdsApi;
   private config: Config;
   private defaultRefreshToken: string;
@@ -1120,6 +1120,10 @@ class GoogleAdsManager {
     // GLOBAL rule: auto-apply Claude-MM-DD-YY label to the new ad
     const adRNs = ((result as any).results || []).map((r: any) => r.resource_name).filter(Boolean);
     await this.autoLabelCreated(customerId, adRNs, "ad");
+    // Attach any caller-supplied custom labels on top of the auto-date label.
+    // Must run AFTER creation so the ad resource names exist. (Previously
+    // omitted, which silently dropped the `labels` array — see BACKLOG.md.)
+    await this.applyCustomLabels(customerId, adRNs, "ad", ad.labels);
 
     return result;
   }
@@ -3693,8 +3697,26 @@ class GoogleAdsManager {
 // MCP SERVER
 // ============================================
 
-const config = loadConfig();
-const adsManager = new GoogleAdsManager(config);
+// Lazily construct the manager so importing this module (e.g. from unit tests)
+// has no side effects and doesn't require live credentials. The constructor
+// resolves credentials and would throw at import time otherwise. Registering
+// request handlers below is side-effect-free; the manager is only needed when
+// a request actually fires (via getAdsManager()).
+let _config: Config | null = null;
+function getConfig(): Config {
+  if (!_config) {
+    _config = loadConfig();
+  }
+  return _config;
+}
+
+let _adsManager: GoogleAdsManager | null = null;
+function getAdsManager(): GoogleAdsManager {
+  if (!_adsManager) {
+    _adsManager = new GoogleAdsManager(getConfig());
+  }
+  return _adsManager;
+}
 
 const server = new Server(
   {
@@ -3722,7 +3744,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     switch (name) {
       case "google_ads_get_client_context": {
         const cwd = args?.working_directory as string;
-        const client = getClientFromWorkingDir(config, cwd);
+        const client = getClientFromWorkingDir(getConfig(), cwd);
         if (!client) {
           return {
             content: [{
@@ -3730,7 +3752,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               text: JSON.stringify({
                 error: "No client found for working directory",
                 working_directory: cwd,
-                available_clients: Object.entries(config.clients).map(([k, v]) => ({
+                available_clients: Object.entries(getConfig().clients).map(([k, v]) => ({
                   key: k,
                   name: v.name,
                   folder: v.folder,
@@ -3746,7 +3768,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               client_name: client.name,
               customer_id: client.customer_id,
               folder: client.folder,
-              mcc_id: client.mcc_customer_id || config.google_ads.mcc_customer_id,
+              mcc_id: client.mcc_customer_id || getConfig().google_ads.mcc_customer_id,
             }, null, 2),
           }],
         };
@@ -3754,7 +3776,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "google_ads_list_campaigns": {
         const customerId = args?.customer_id as string || "";
-        const campaigns = await adsManager.listCampaigns(customerId);
+        const campaigns = await getAdsManager().listCampaigns(customerId);
         return {
           content: [{
             type: "text",
@@ -3766,7 +3788,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "google_ads_list_ad_groups": {
         const customerId = args?.customer_id as string || "";
         const campaignId = args?.campaign_id as string;
-        const adGroups = await adsManager.listAdGroups(customerId, campaignId);
+        const adGroups = await getAdsManager().listAdGroups(customerId, campaignId);
         return {
           content: [{
             type: "text",
@@ -3778,7 +3800,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "google_ads_get_campaign_tracking": {
         const customerId = args?.customer_id as string || "";
         const campaignId = args?.campaign_id as string;
-        const tracking = await adsManager.getCampaignTracking(customerId, campaignId);
+        const tracking = await getAdsManager().getCampaignTracking(customerId, campaignId);
         return {
           content: [{
             type: "text",
@@ -3789,7 +3811,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "google_ads_list_pending_changes": {
         const customerId = args?.customer_id as string || "";
-        const pending = await adsManager.listPendingChanges(customerId);
+        const pending = await getAdsManager().listPendingChanges(customerId);
         return {
           content: [{
             type: "text",
@@ -3799,7 +3821,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case "google_ads_validate_ad": {
-        const validation = await adsManager.validateAd("", {
+        const validation = await getAdsManager().validateAd("", {
           headlines: args?.headlines as string[],
           descriptions: args?.descriptions as string[],
           final_urls: args?.final_urls as string[],
@@ -3836,7 +3858,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           console.error(`[warning] Stripped HTML from campaign name: "${rawName}" -> "${sanitizedName}"`);
         }
 
-        const result = await adsManager.createCampaign(customerId, {
+        const result = await getAdsManager().createCampaign(customerId, {
           name: sanitizedName,
           budget_amount_micros: Math.round(daily_budget * 1000000),
           channel_type: args?.channel_type as "SEARCH" | "DEMAND_GEN" | undefined,
@@ -3862,7 +3884,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "google_ads_create_ad_group": {
         const customerId = args?.customer_id as string || "";
-        const result = await adsManager.createAdGroup(customerId, {
+        const result = await getAdsManager().createAdGroup(customerId, {
           name: args?.name as string,
           campaign_id: args?.campaign_id as string,
           cpc_bid_micros: args?.cpc_bid ? Math.round((args.cpc_bid as number) * 1000000) : undefined,
@@ -3894,7 +3916,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         // validate here too so the tool returns a clean error rather than
         // throwing). The auto-applied claude-YYYY-MM-DD label satisfies the
         // ≥1 label requirement; any extraLabels are bonus.
-        const validation = await adsManager.validateAd(customerId, {
+        const validation = await getAdsManager().validateAd(customerId, {
           headlines: headlineTexts,
           descriptions: descriptionTexts,
           final_urls: args?.final_urls as string[],
@@ -3916,7 +3938,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           };
         }
 
-        const result = await adsManager.createResponsiveSearchAd(customerId, {
+        const result = await getAdsManager().createResponsiveSearchAd(customerId, {
           ad_group_id: args?.ad_group_id as string,
           final_urls: args?.final_urls as string[],
           headlines: rawHeadlines,
@@ -3940,7 +3962,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "google_ads_create_keywords": {
         const customerId = args?.customer_id as string || "";
-        const result = await adsManager.createKeywords(customerId, {
+        const result = await getAdsManager().createKeywords(customerId, {
           ad_group_id: args?.ad_group_id as string,
           keywords: args?.keywords as Array<{ text: string; match_type: "BROAD" | "PHRASE" | "EXACT" }>,
           label: args?.label as string | undefined,
@@ -3977,13 +3999,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const results: any = {};
 
         if (hasCampaignIds) {
-          results.campaigns = await adsManager.enableCampaigns(customerId, args!.campaign_ids as string[], labels);
+          results.campaigns = await getAdsManager().enableCampaigns(customerId, args!.campaign_ids as string[], labels);
         }
         if (hasAdGroupIds) {
-          results.adGroups = await adsManager.enableAdGroups(customerId, args!.ad_group_ids as string[], labels);
+          results.adGroups = await getAdsManager().enableAdGroups(customerId, args!.ad_group_ids as string[], labels);
         }
         if (hasAdIds) {
-          results.ads = await adsManager.enableAds(customerId, args!.ad_ids as string[], labels);
+          results.ads = await getAdsManager().enableAds(customerId, args!.ad_ids as string[], labels);
         }
 
         return {
@@ -4018,13 +4040,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const results: any = {};
 
         if (hasCampaignIds) {
-          results.campaigns = await adsManager.pauseCampaigns(customerId, args!.campaign_ids as string[], labels);
+          results.campaigns = await getAdsManager().pauseCampaigns(customerId, args!.campaign_ids as string[], labels);
         }
         if (hasAdGroupIds) {
-          results.adGroups = await adsManager.pauseAdGroups(customerId, args!.ad_group_ids as string[], labels);
+          results.adGroups = await getAdsManager().pauseAdGroups(customerId, args!.ad_group_ids as string[], labels);
         }
         if (hasAdIds) {
-          results.ads = await adsManager.pauseAds(customerId, args!.ad_ids as string[], labels);
+          results.ads = await getAdsManager().pauseAds(customerId, args!.ad_ids as string[], labels);
         }
 
         return {
@@ -4056,8 +4078,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
         // Label FIRST (label-first-then-remove) so the audit trail survives the remove.
         // If any label attach fails, abort before removing anything.
-        const autoLabel = (adsManager as any).todayClaudeLabel
-          ? (adsManager as any).todayClaudeLabel()
+        const autoLabel = (getAdsManager() as any).todayClaudeLabel
+          ? (getAdsManager() as any).todayClaudeLabel()
           : undefined;
         const allLabels = [autoLabel, ...(removeArgs.labels ?? [])].filter(
           (l): l is string => typeof l === "string" && !!l
@@ -4065,7 +4087,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const labelResults: any[] = [];
         for (const labelName of allLabels) {
           try {
-            const r = await adsManager.applyLabel(customerId, labelName, {
+            const r = await getAdsManager().applyLabel(customerId, labelName, {
               campaignIds: removeArgs.campaign_ids,
               adGroupIds: removeArgs.ad_group_ids,
               adIds: removeArgs.ad_ids,
@@ -4089,11 +4111,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const removed: any = {};
         for (const step of steps) {
           if (step.type === "ads") {
-            removed.ads = await adsManager.removeAds(customerId, step.ids);
+            removed.ads = await getAdsManager().removeAds(customerId, step.ids);
           } else if (step.type === "ad_groups") {
-            removed.ad_groups = await adsManager.removeAdGroups(customerId, step.ids);
+            removed.ad_groups = await getAdsManager().removeAdGroups(customerId, step.ids);
           } else {
-            removed.campaigns = await adsManager.removeCampaigns(customerId, step.ids);
+            removed.campaigns = await getAdsManager().removeCampaigns(customerId, step.ids);
           }
         }
 
@@ -4116,7 +4138,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (!label) {
           return { content: [{ type: "text", text: JSON.stringify({ error: "label is required" }, null, 2) }] };
         }
-        const result = await adsManager.applyLabel(customerId, label, {
+        const result = await getAdsManager().applyLabel(customerId, label, {
           campaignIds: coerceStringArray(args?.campaign_ids),
           adGroupIds: coerceStringArray(args?.ad_group_ids),
           adIds: coerceStringArray(args?.ad_ids),
@@ -4131,17 +4153,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const campaignId = args?.campaign_id as string;
 
         // Get current values for the response diff
-        const currentTracking = await adsManager.getCampaignTracking(customerId, campaignId);
+        const currentTracking = await getAdsManager().getCampaignTracking(customerId, campaignId);
 
         const updates: any = {};
         if (args?.final_url_suffix !== undefined) updates.final_url_suffix = args.final_url_suffix as string;
         if (args?.tracking_url_template !== undefined) updates.tracking_url_template = args.tracking_url_template as string;
         if (args?.url_custom_parameters !== undefined) updates.url_custom_parameters = args.url_custom_parameters as Array<{ key: string; value: string }>;
 
-        const result = await adsManager.updateCampaignTracking(customerId, campaignId, updates);
+        const result = await getAdsManager().updateCampaignTracking(customerId, campaignId, updates);
 
         // Get updated values
-        const updatedTracking = await adsManager.getCampaignTracking(customerId, campaignId);
+        const updatedTracking = await getAdsManager().getCampaignTracking(customerId, campaignId);
 
         return {
           content: [{
@@ -4167,7 +4189,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "google_ads_create_shared_set": {
         const customerId = args?.customer_id as string || "";
-        const result = await adsManager.createSharedSet(
+        const result = await getAdsManager().createSharedSet(
           customerId,
           args?.name as string,
         );
@@ -4190,7 +4212,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "google_ads_link_shared_set": {
         const customerId = args?.customer_id as string || "";
-        const result = await adsManager.linkSharedSetToCampaigns(
+        const result = await getAdsManager().linkSharedSetToCampaigns(
           customerId,
           args?.shared_set_id as string,
           args?.campaign_ids as string[],
@@ -4209,7 +4231,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "google_ads_unlink_shared_set": {
         const customerId = args?.customer_id as string || "";
-        const result = await adsManager.unlinkSharedSetFromCampaigns(
+        const result = await getAdsManager().unlinkSharedSetFromCampaigns(
           customerId,
           args?.shared_set_id as string,
           args?.campaign_ids as string[],
@@ -4228,7 +4250,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "google_ads_add_shared_negatives": {
         const customerId = args?.customer_id as string || "";
-        const result = await adsManager.addSharedNegativeKeywords(
+        const result = await getAdsManager().addSharedNegativeKeywords(
           customerId,
           args?.shared_set_id as string,
           args?.keywords as Array<{ text: string; match_type: "BROAD" | "PHRASE" | "EXACT" }>,
@@ -4248,7 +4270,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "google_ads_remove_shared_negatives": {
         const customerId = args?.customer_id as string || "";
         const resourceNames = args?.resource_names as string[];
-        const result = await adsManager.removeSharedNegativeKeywords(
+        const result = await getAdsManager().removeSharedNegativeKeywords(
           customerId,
           resourceNames,
         );
@@ -4266,7 +4288,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "google_ads_set_ad_group_location_targeting": {
         const customerId = args?.customer_id as string || "";
-        const result = await adsManager.setAdGroupLocationTargeting(
+        const result = await getAdsManager().setAdGroupLocationTargeting(
           customerId,
           args?.ad_group_id as string,
           args?.geo_target_ids as string[],
@@ -4285,7 +4307,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "google_ads_set_campaign_location_targeting": {
         const customerId = args?.customer_id as string || "";
-        const result = await adsManager.setCampaignLocationTargeting(
+        const result = await getAdsManager().setCampaignLocationTargeting(
           customerId,
           args?.campaign_id as string,
           args?.geo_target_ids as string[],
@@ -4304,7 +4326,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "google_ads_add_campaign_negatives": {
         const customerId = args?.customer_id as string || "";
-        const result = await adsManager.addCampaignNegativeKeywords(
+        const result = await getAdsManager().addCampaignNegativeKeywords(
           customerId,
           args?.campaign_id as string,
           args?.keywords as Array<{ text: string; match_type: "BROAD" | "PHRASE" | "EXACT" }>,
@@ -4324,7 +4346,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "google_ads_remove_campaign_negatives": {
         const customerId = args?.customer_id as string || "";
         const resourceNames = args?.resource_names as string[];
-        const result = await adsManager.removeCampaignNegativeKeywords(
+        const result = await getAdsManager().removeCampaignNegativeKeywords(
           customerId,
           resourceNames,
         );
@@ -4362,7 +4384,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           };
         }
 
-        const result = await adsManager.attachUserListAudience(
+        const result = await getAdsManager().attachUserListAudience(
           customerId,
           adGroupIds,
           userListId,
@@ -4409,7 +4431,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           };
         }
 
-        const result = await adsManager.createAndAttachAudienceBundle(
+        const result = await getAdsManager().createAndAttachAudienceBundle(
           customerId,
           name,
           description,
@@ -4434,7 +4456,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "google_ads_add_adgroup_negatives": {
         const customerId = args?.customer_id as string || "";
-        const result = await adsManager.addAdGroupNegativeKeywords(
+        const result = await getAdsManager().addAdGroupNegativeKeywords(
           customerId,
           args?.ad_group_id as string,
           args?.keywords as Array<{ text: string; match_type: "BROAD" | "PHRASE" | "EXACT" }>,
@@ -4454,7 +4476,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "google_ads_remove_adgroup_negatives": {
         const customerId = args?.customer_id as string || "";
         const resourceNames = args?.resource_names as string[];
-        const result = await adsManager.removeAdGroupNegativeKeywords(
+        const result = await getAdsManager().removeAdGroupNegativeKeywords(
           customerId,
           resourceNames,
         );
@@ -4472,7 +4494,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "google_ads_pause_keywords": {
         const customerId = args?.customer_id as string || "";
-        const result = await adsManager.pauseKeywords(
+        const result = await getAdsManager().pauseKeywords(
           customerId,
           args?.criterion_resource_names as string[],
         );
@@ -4490,7 +4512,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "google_ads_enable_keywords": {
         const customerId = args?.customer_id as string || "";
-        const result = await adsManager.enableKeywords(
+        const result = await getAdsManager().enableKeywords(
           customerId,
           args?.criterion_resource_names as string[],
           args?.labels as string[] | undefined,
@@ -4518,7 +4540,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           return { content: [{ type: "text", text: JSON.stringify({ error: `start_date "${args.start_date}" is in the future. Reports only cover historical data.` }, null, 2) }] };
         }
         const customerId = args?.customer_id as string || "";
-        const result = await adsManager.getKeywordPerformance(customerId, {
+        const result = await getAdsManager().getKeywordPerformance(customerId, {
           startDate: args?.start_date as string,
           endDate: args?.end_date as string,
           keywordTextContains: args?.keyword_text_contains as string,
@@ -4539,7 +4561,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           return { content: [{ type: "text", text: JSON.stringify({ error: `start_date "${args.start_date}" is in the future. Reports only cover historical data.` }, null, 2) }] };
         }
         const customerId = args?.customer_id as string || "";
-        const result = await adsManager.getKeywordPerformanceWithConversions(customerId, {
+        const result = await getAdsManager().getKeywordPerformanceWithConversions(customerId, {
           startDate: args?.start_date as string,
           endDate: args?.end_date as string,
           keywordTextContains: args?.keyword_text_contains as string,
@@ -4560,7 +4582,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           return { content: [{ type: "text", text: JSON.stringify({ error: `start_date "${args.start_date}" is in the future. Reports only cover historical data.` }, null, 2) }] };
         }
         const customerId = args?.customer_id as string || "";
-        const result = await adsManager.getSearchTermReport(customerId, {
+        const result = await getAdsManager().getSearchTermReport(customerId, {
           startDate: args?.start_date as string,
           endDate: args?.end_date as string,
           keywordTextContains: args?.keyword_text_contains as string,
@@ -4582,7 +4604,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           return { content: [{ type: "text", text: JSON.stringify({ error: `start_date "${args.start_date}" is in the future. Reports only cover historical data.` }, null, 2) }] };
         }
         const customerId = args?.customer_id as string || "";
-        const result = await adsManager.getSearchTermReportWithConversions(customerId, {
+        const result = await getAdsManager().getSearchTermReportWithConversions(customerId, {
           startDate: args?.start_date as string,
           endDate: args?.end_date as string,
           keywordTextContains: args?.keyword_text_contains as string,
@@ -4604,7 +4626,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           return { content: [{ type: "text", text: JSON.stringify({ error: `start_date "${args.start_date}" is in the future. Reports only cover historical data.` }, null, 2) }] };
         }
         const customerId = args?.customer_id as string || "";
-        const result = await adsManager.getAdPerformance(customerId, {
+        const result = await getAdsManager().getAdPerformance(customerId, {
           startDate: args?.start_date as string,
           endDate: args?.end_date as string,
           campaignIds: args?.campaign_ids as string[],
@@ -4624,7 +4646,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           return { content: [{ type: "text", text: JSON.stringify({ error: `start_date "${args.start_date}" is in the future. Reports only cover historical data.` }, null, 2) }] };
         }
         const customerId = args?.customer_id as string || "";
-        const result = await adsManager.getAdPerformanceWithConversions(customerId, {
+        const result = await getAdsManager().getAdPerformanceWithConversions(customerId, {
           startDate: args?.start_date as string,
           endDate: args?.end_date as string,
           campaignIds: args?.campaign_ids as string[],
@@ -4640,7 +4662,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "google_ads_list_conversion_actions": {
         const customerId = args?.customer_id as string || "";
-        const result = await adsManager.listConversionActions(customerId);
+        const result = await getAdsManager().listConversionActions(customerId);
         return {
           content: [{
             type: "text",
@@ -4651,7 +4673,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "google_ads_search_term_insights": {
         const customerId = args?.customer_id as string || "";
-        const result = await adsManager.getSearchTermInsights(customerId, {
+        const result = await getAdsManager().getSearchTermInsights(customerId, {
           campaignId: args?.campaign_id as string,
           startDate: args?.start_date as string,
           endDate: args?.end_date as string,
@@ -4668,7 +4690,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "google_ads_search_term_insight_terms": {
         const customerId = args?.customer_id as string || "";
-        const result = await adsManager.getSearchTermInsightTerms(customerId, {
+        const result = await getAdsManager().getSearchTermInsightTerms(customerId, {
           campaignId: args?.campaign_id as string,
           insightId: args?.insight_id as string,
           startDate: args?.start_date as string,
@@ -4698,7 +4720,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           };
         }
 
-        const result = await adsManager.updateCampaignBudget(customerId, campaignId, dailyBudget, createNew);
+        const result = await getAdsManager().updateCampaignBudget(customerId, campaignId, dailyBudget, createNew);
 
         return {
           content: [{
@@ -4743,7 +4765,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           };
         }
 
-        const result = await adsManager.updateCampaignBidding(customerId, campaignId, {
+        const result = await getAdsManager().updateCampaignBidding(customerId, campaignId, {
           strategy,
           target_cpa_dollars: targetCpaDollars,
           target_roas: targetRoas,
@@ -4773,7 +4795,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           };
         }
 
-        const result = await adsManager.updateAdAssetAutomation(customerId, adIds, automationTypes, status, labels);
+        const result = await getAdsManager().updateAdAssetAutomation(customerId, adIds, automationTypes, status, labels);
         return { content: [{ type: "text", text: JSON.stringify({ success: true, ...result }, null, 2) }] };
       }
 
@@ -4786,7 +4808,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           return { content: [{ type: "text", text: JSON.stringify(buildUpdateUrlsDryRun(normalized), null, 2) }] };
         }
         const customerId = normalized.customer_id || "";
-        const result = await adsManager.updateAssetUrls(customerId, normalized.updates);
+        const result = await getAdsManager().updateAssetUrls(customerId, normalized.updates);
         return { content: [{ type: "text", text: JSON.stringify({ success: true, ...result }, null, 2) }] };
       }
 
@@ -4799,7 +4821,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           return { content: [{ type: "text", text: JSON.stringify(buildCreateSitelinkDryRun(normalized), null, 2) }] };
         }
         const customerId = normalized.customer_id || "";
-        const result = await adsManager.createSitelink(customerId, {
+        const result = await getAdsManager().createSitelink(customerId, {
           link_text: normalized.link_text,
           final_urls: normalized.final_urls,
           description1: normalized.description1,
@@ -4817,7 +4839,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           return { content: [{ type: "text", text: JSON.stringify(buildReplaceSitelinkDryRun(normalized), null, 2) }] };
         }
         const customerId = normalized.customer_id || "";
-        const result = await adsManager.replaceSitelinkUrl(customerId, {
+        const result = await getAdsManager().replaceSitelinkUrl(customerId, {
           old_asset_id: normalized.old_asset_id,
           new_final_urls: normalized.new_final_urls,
           new_link_text: normalized.new_link_text,
@@ -4836,7 +4858,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           return { content: [{ type: "text", text: JSON.stringify(buildPauseLinksDryRun(normalized), null, 2) }] };
         }
         const customerId = normalized.customer_id || "";
-        const result = await adsManager.pauseAssetLinks(customerId, normalized.resource_names);
+        const result = await getAdsManager().pauseAssetLinks(customerId, normalized.resource_names);
         return { content: [{ type: "text", text: JSON.stringify({ success: true, ...result }, null, 2) }] };
       }
 
@@ -4864,7 +4886,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           };
         }
 
-        const renameResult = await adsManager.renameAdGroup(customerId, adGroupId, newName);
+        const renameResult = await getAdsManager().renameAdGroup(customerId, adGroupId, newName);
         return { content: [{ type: "text", text: JSON.stringify({ success: true, ...renameResult }, null, 2) }] };
       }
 
@@ -4892,7 +4914,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           };
         }
 
-        const renameResult = await adsManager.renameCampaign(customerId, campaignId, newName);
+        const renameResult = await getAdsManager().renameCampaign(customerId, campaignId, newName);
         return { content: [{ type: "text", text: JSON.stringify({ success: true, ...renameResult }, null, 2) }] };
       }
 
@@ -4923,7 +4945,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           };
         }
 
-        const linkResult = await adsManager.linkAssetToCampaign(customerId, {
+        const linkResult = await getAdsManager().linkAssetToCampaign(customerId, {
           asset_id: assetId,
           campaign_ids: campaignIds,
           field_type: fieldType,
@@ -4934,7 +4956,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "google_ads_get_campaign_diagnostics": {
         const customerId = args?.customer_id as string || "";
         const campaignIds = args?.campaign_ids as string[] | undefined;
-        const customer = adsManager.getCustomer(customerId);
+        const customer = getAdsManager().getCustomer(customerId);
 
         let diagQuery = `
           SELECT
@@ -4969,7 +4991,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const customerId = args?.customer_id as string || "";
         const campaignIds = args?.campaign_ids as string[] | undefined;
         const adGroupIds = args?.ad_group_ids as string[] | undefined;
-        const customer = adsManager.getCustomer(customerId);
+        const customer = getAdsManager().getCustomer(customerId);
 
         let adStrengthQuery = `
           SELECT
@@ -5016,7 +5038,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           };
         }
 
-        const result = await adsManager.executeGaql(customerId, query);
+        const result = await getAdsManager().executeGaql(customerId, query);
         return {
           content: [{
             type: "text",
@@ -5041,7 +5063,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
         const geoTargetConstants = args?.geo_target_constants as string[] | undefined;
         const language = args?.language as string | undefined;
-        const result = await adsManager.keywordVolume(customerId, keywords, geoTargetConstants, language);
+        const result = await getAdsManager().keywordVolume(customerId, keywords, geoTargetConstants, language);
         return {
           content: [{
             type: "text",
@@ -5053,7 +5075,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "google_ads_create_demand_gen_multi_asset_ad": {
         const customerId = args?.customer_id as string || "";
         try {
-          const result = await adsManager.createDemandGenMultiAssetAd(customerId, {
+          const result = await getAdsManager().createDemandGenMultiAssetAd(customerId, {
             ad_group_id: args?.ad_group_id as string,
             final_urls: args?.final_urls as string[],
             business_name: args?.business_name as string,
@@ -5094,7 +5116,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "google_ads_update_demand_gen_multi_asset_ad": {
         const customerId = args?.customer_id as string || "";
         try {
-          const result = await adsManager.updateDemandGenMultiAssetAd(customerId, {
+          const result = await getAdsManager().updateDemandGenMultiAssetAd(customerId, {
             ad_resource_name: args?.ad_resource_name as string,
             headlines: args?.headlines as Array<string | { text: string; pinned_position?: number }> | undefined,
             long_headlines: args?.long_headlines as string[] | undefined,
@@ -5130,7 +5152,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const label = (args?.label as string | undefined) ?? "page-feed";
 
         try {
-          const customer = adsManager.getCustomer(customerId);
+          const customer = getAdsManager().getCustomer(customerId);
 
           // 1. Create one PageFeedAsset per URL
           const assetCreateResult = await withResilience(
@@ -5203,7 +5225,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "google_ads_create_image_asset": {
         const customerId = args?.customer_id as string || "";
         try {
-          const result = await adsManager.createImageAsset(customerId, {
+          const result = await getAdsManager().createImageAsset(customerId, {
             name: args?.name as string,
             file_path: args?.file_path as string | undefined,
             base64_data: args?.base64_data as string | undefined,
@@ -5228,7 +5250,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         assertWriteAllowed(name);
         const customerId = args?.customer_id as string || "";
         try {
-          const result = await adsManager.createLeadFormAsset(customerId, {
+          const result = await getAdsManager().createLeadFormAsset(customerId, {
             name: args?.name as string,
             business_name: args?.business_name as string,
             call_to_action: args?.call_to_action as any,
@@ -5269,7 +5291,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         assertWriteAllowed(name);
         const customerId = args?.customer_id as string || "";
         try {
-          const result = await adsManager.createExperiment(customerId, {
+          const result = await getAdsManager().createExperiment(customerId, {
             base_campaign_id: args?.base_campaign_id as string,
             name: args?.name as string,
             description: args?.description as string | undefined,
@@ -5286,7 +5308,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "google_ads_list_experiments": {
         const customerId = args?.customer_id as string || "";
-        const result = await adsManager.listExperiments(customerId, {
+        const result = await getAdsManager().listExperiments(customerId, {
           campaignId: args?.campaign_id as string | undefined,
           statusFilter: args?.status_filter as string | undefined,
         });
@@ -5296,7 +5318,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "google_ads_get_experiment": {
         const customerId = args?.customer_id as string || "";
         try {
-          const result = await adsManager.getExperiment(customerId, args?.experiment_id as string);
+          const result = await getAdsManager().getExperiment(customerId, args?.experiment_id as string);
           return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
         } catch (e: any) {
           return { content: [{ type: "text", text: JSON.stringify({ success: false, error: e.message }, null, 2) }] };
@@ -5307,7 +5329,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         assertWriteAllowed(name);
         const customerId = args?.customer_id as string || "";
         try {
-          const result = await adsManager.scheduleExperiment(customerId, args?.experiment_id as string);
+          const result = await getAdsManager().scheduleExperiment(customerId, args?.experiment_id as string);
           return { content: [{ type: "text", text: JSON.stringify({ success: true, ...result }, null, 2) }] };
         } catch (e: any) {
           return { content: [{ type: "text", text: JSON.stringify({ success: false, error: e.message }, null, 2) }] };
@@ -5318,7 +5340,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         assertWriteAllowed(name);
         const customerId = args?.customer_id as string || "";
         try {
-          const result = await adsManager.endExperiment(customerId, args?.experiment_id as string);
+          const result = await getAdsManager().endExperiment(customerId, args?.experiment_id as string);
           return { content: [{ type: "text", text: JSON.stringify({ success: true, ...result }, null, 2) }] };
         } catch (e: any) {
           return { content: [{ type: "text", text: JSON.stringify({ success: false, error: e.message }, null, 2) }] };
@@ -5330,7 +5352,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const customerId = args?.customer_id as string || "";
         try {
           const validateOnly = args?.validate_only === true;
-          const result = await adsManager.promoteExperiment(customerId, args?.experiment_id as string, validateOnly);
+          const result = await getAdsManager().promoteExperiment(customerId, args?.experiment_id as string, validateOnly);
           return { content: [{ type: "text", text: JSON.stringify({ success: true, ...result }, null, 2) }] };
         } catch (e: any) {
           return { content: [{ type: "text", text: JSON.stringify({ success: false, error: e.message }, null, 2) }] };
@@ -5341,7 +5363,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         assertWriteAllowed(name);
         const customerId = args?.customer_id as string || "";
         try {
-          const result = await adsManager.removeExperiment(customerId, args?.experiment_id as string);
+          const result = await getAdsManager().removeExperiment(customerId, args?.experiment_id as string);
           return { content: [{ type: "text", text: JSON.stringify({ success: true, ...result }, null, 2) }] };
         } catch (e: any) {
           return { content: [{ type: "text", text: JSON.stringify({ success: false, error: e.message }, null, 2) }] };
@@ -5353,7 +5375,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const execute = args?.execute === true;
         if (execute) assertWriteAllowed(name);
         try {
-          const result = await adsManager.updateCampaignAdUrls(
+          const result = await getAdsManager().updateCampaignAdUrls(
             customerId,
             args?.campaign_id as string,
             args?.new_final_url as string,
@@ -5370,7 +5392,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const confirm = args?.confirm === true;
         if (confirm) assertWriteAllowed(name);
         try {
-          const result = await adsManager.updateAdFinalUrls(
+          const result = await getAdsManager().updateAdFinalUrls(
             customerId,
             args?.ad_group_id as string,
             (args?.ad_ids as string[]) ?? [],
@@ -5427,9 +5449,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 async function main() {
   // Startup health check: verify credentials work with a lightweight API call
   try {
-    const firstClient = Object.values(config.clients)[0];
+    const firstClient = Object.values(getConfig().clients)[0];
     if (firstClient) {
-      const customer = adsManager.getCustomer(firstClient.customer_id);
+      const customer = getAdsManager().getCustomer(firstClient.customer_id);
       await withResilience(() => customer.query(`SELECT customer.id FROM customer LIMIT 1`), "startup.authCheck");
       logger.info({ customerId: firstClient.customer_id, clientName: firstClient.name }, "Auth verified: successfully queried account");
     }
@@ -5474,4 +5496,20 @@ process.on("unhandledRejection", (reason) => {
   console.error("[error] Unhandled promise rejection:", reason);
 });
 
-main().catch((err) => logger.error({ error: err.message, stack: err.stack }, "Fatal startup error"));
+// Only auto-start the server when this module is executed directly (as the
+// CLI entrypoint), not when it's imported (e.g. by unit tests). Comparing the
+// resolved module path to process.argv[1] is the ESM-equivalent of the
+// CommonJS `require.main === module` guard.
+function isMainModule(): boolean {
+  const entry = process.argv[1];
+  if (!entry) return false;
+  try {
+    return fileURLToPath(import.meta.url) === realpathSync(entry);
+  } catch {
+    return false;
+  }
+}
+
+if (isMainModule()) {
+  main().catch((err) => logger.error({ error: err.message, stack: err.stack }, "Fatal startup error"));
+}
