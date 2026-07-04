@@ -37,6 +37,17 @@ const AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
 const DEFAULT_ADWORDS_SCOPE = "https://www.googleapis.com/auth/adwords";
 
+// Canonical loopback redirect form shared by BOTH onboarding paths (this helper
+// and src/auth-cli.ts). Google matches loopback redirect URIs on scheme + host +
+// path and IGNORES the port, so onboarders register ONE pattern:
+//   http://localhost/callback
+// Use host `localhost` (not 127.0.0.1) and path `/callback` everywhere.
+const LOOPBACK_HOST = "localhost";
+const LOOPBACK_PATH = "/callback";
+function buildLoopbackRedirectUri(port) {
+  return `http://${LOOPBACK_HOST}:${port}${LOOPBACK_PATH}`;
+}
+
 // ── PKCE (RFC 7636) ─────────────────────────────────────────────────────────
 
 function base64url(buf) {
@@ -87,13 +98,21 @@ function loadScopeFromConfigFile(filePath) {
 }
 
 /**
- * Resolve the scope from config.json (per-user, gitignored) if present,
- * otherwise config.example.json (committed template), otherwise the default.
+ * Resolve the scope from a directory's config.json, else the committed default.
+ *
+ * This is BYTE-IDENTICAL to the runtime (src/oauthScope.ts loadOAuthScopeFromFile
+ * on <dir>/config.json): config.json present -> its oauth.scope; absent -> the
+ * default. It deliberately does NOT read config.example.json — that committed,
+ * editable file must never influence the scope, or the helper could mint a token
+ * against a scope the runtime never requests.
  */
+function resolveScopeFromDir(dir) {
+  return loadScopeFromConfigFile(join(dir, "config.json"));
+}
+
+/** Resolve the scope for THIS install (helper's own directory). */
 function loadScope() {
-  const local = join(__dirname, "config.json");
-  if (existsSync(local)) return loadScopeFromConfigFile(local);
-  return loadScopeFromConfigFile(join(__dirname, "config.example.json"));
+  return resolveScopeFromDir(__dirname);
 }
 
 // ── Env validation ───────────────────────────────────────────────────────────
@@ -149,7 +168,7 @@ async function run() {
   const { clientId, clientSecret } = requireClientCreds(process.env);
   const scope = loadScope();
   const port = Number(process.env.OAUTH_CALLBACK_PORT || 8123);
-  const redirectUri = `http://localhost:${port}/callback`;
+  const redirectUri = buildLoopbackRedirectUri(port);
 
   const state = crypto.randomBytes(16).toString("hex");
   const codeVerifier = generateCodeVerifier();
@@ -255,10 +274,14 @@ module.exports = {
   normalizeScope,
   resolveScopeFromConfig,
   loadScopeFromConfigFile,
+  resolveScopeFromDir,
   loadScope,
   requireClientCreds,
   buildAuthUrl,
   buildTokenExchangeParams,
+  buildLoopbackRedirectUri,
+  LOOPBACK_HOST,
+  LOOPBACK_PATH,
   AUTH_URL,
   TOKEN_URL,
   DEFAULT_ADWORDS_SCOPE,

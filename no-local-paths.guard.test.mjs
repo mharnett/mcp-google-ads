@@ -6,11 +6,17 @@
 // the standalone onboarding helper: get-refresh-token.cjs, src/** (excluding
 // tests), README.md, config.example.json.
 //
-// Deliberately EXCLUDED: node_modules, .git, dist (build output — verified via
-// src), *.test.* / *.guard.* files, and Mark's PRIVATE launcher scripts
-// (run-mcp.sh, scripts/healthcheck.sh) which are NOT in package.json `files`
-// and therefore never ship. Those carry a /Users/mark path by design; the
-// guard asserts separately that they are not in the publish allowlist.
+// The SHIPPED build output (dist/**/*.js, *.d.ts, and dist/build-info.json — all
+// in package.json `files`) is ALSO scanned: a forbidden string can be injected
+// at build time (e.g. scripts/build.mjs baking a path into build-info.json) and
+// would evade a src-only guard. Compiled test files (dist/**/*.test.js) are
+// excluded from ship by the `!dist/**/*.test.*` files rule, so they're skipped.
+//
+// Deliberately EXCLUDED: node_modules, .git, *.test.* / *.guard.* files, and
+// Mark's PRIVATE launcher scripts (run-mcp.sh, scripts/healthcheck.sh) which are
+// NOT in package.json `files` and therefore never ship. Those carry a
+// /Users/mark path by design; the guard asserts separately that they are not in
+// the publish allowlist.
 
 import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync, statSync, existsSync } from "fs";
@@ -55,6 +61,38 @@ function shippedFiles(dir) {
   return out;
 }
 
+// Walk the SHIPPED build output: dist/**/*.{js,d.ts} + dist/build-info.json,
+// excluding compiled test files (not shipped per `!dist/**/*.test.*`).
+function shippedDistFiles(distDir) {
+  if (!existsSync(distDir)) return [];
+  const out = [];
+  for (const entry of readdirSync(distDir)) {
+    const full = path.join(distDir, entry);
+    if (statSync(full).isDirectory()) {
+      out.push(...shippedDistFiles(full));
+      continue;
+    }
+    if (/\.test\.(m?js|cjs)$/.test(entry) || /\.test\.d\.ts$/.test(entry)) continue;
+    if (entry.endsWith(".js") || entry.endsWith(".d.ts") || entry === "build-info.json") {
+      out.push(full);
+    }
+  }
+  return out;
+}
+
+function scanForForbidden(files) {
+  const hits = [];
+  for (const file of files) {
+    const src = readFileSync(file, "utf-8");
+    src.split("\n").forEach((line, i) => {
+      for (const re of FORBIDDEN) {
+        if (re.test(line)) hits.push(`${path.relative(REPO, file)}:${i + 1}  ${line.trim()}`);
+      }
+    });
+  }
+  return hits;
+}
+
 describe("shipped surface has no local /Users/mark paths or gcp-oauth references", () => {
   const files = shippedFiles(REPO);
 
@@ -65,19 +103,20 @@ describe("shipped surface has no local /Users/mark paths or gcp-oauth references
     expect(files.some((f) => f.endsWith("README.md"))).toBe(true);
   });
 
-  it("contains no forbidden string in any shipped file", () => {
-    const hits = [];
-    for (const file of files) {
-      const src = readFileSync(file, "utf-8");
-      src.split("\n").forEach((line, i) => {
-        for (const re of FORBIDDEN) {
-          if (re.test(line)) {
-            hits.push(`${path.relative(REPO, file)}:${i + 1}  ${line.trim()}`);
-          }
-        }
-      });
-    }
+  it("contains no forbidden string in any shipped source/doc file", () => {
+    const hits = scanForForbidden(files);
     expect(hits, `Forbidden strings in shipped surface:\n${hits.join("\n")}`).toEqual([]);
+  });
+
+  it("contains no forbidden string in the SHIPPED build output (dist/**)", () => {
+    const distFiles = shippedDistFiles(path.join(REPO, "dist"));
+    // dist must be built for this to be meaningful.
+    expect(
+      distFiles.some((f) => f.endsWith("build-info.json")),
+      "dist not built (run `npm run build`) — cannot verify shipped build output",
+    ).toBe(true);
+    const hits = scanForForbidden(distFiles);
+    expect(hits, `Forbidden strings in shipped dist:\n${hits.join("\n")}`).toEqual([]);
   });
 
   it("private launcher scripts carrying /Users/mark are NOT in the npm publish allowlist", () => {
