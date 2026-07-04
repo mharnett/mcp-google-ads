@@ -1,45 +1,55 @@
-# Add VIDEO (YouTube) campaign type to google-ads MCP
+# VIDEO (YouTube) campaign creation — NOT FEASIBLE via API; Scripts-generator workaround
 
-**Status:** Backlog (deferred from v1.2.0 Demand Gen rollout)
-**Target version:** v1.3.0 or later
-**Dependencies:** v1.2.0 campaign-param extension + image asset upload (for video thumbnails if needed)
+**Status:** Closed as infeasible (2026-07-04). Superseded by the script-generator option below.
+**Original ask:** Extend google-ads MCP to create Video campaigns with YouTube video responsive ads.
 
-## Objective
-Extend google-ads MCP to create Video campaigns with YouTube-based video responsive ads.
+## Finding: the Google Ads API cannot create or modify Video campaigns
 
-## Scope
+Verified 2026-07-04 against Google's primary docs:
 
-### Asset
-- New tool `google_ads_create_youtube_video_asset`:
-  - Inputs: `youtube_video_id` (string), `name` (string)
-  - Uploads via `customer.assets.create` with `AssetType.YOUTUBE_VIDEO`
-  - Returns `{ asset_id, resource_name }`
+> "You cannot create new Video campaigns or update existing ones using the Google Ads API."
+> "The Google Ads API only supports fetching and reporting on existing Video campaigns and their criteria."
+> — https://developers.google.com/google-ads/api/docs/video/overview
 
-### Campaign level (likely already done by DG work)
-- `channel_type: "VIDEO"` → `enums.AdvertisingChannelType.VIDEO`
+The `google-ads-api` library (v23) DOES surface `AdvertisingChannelType.VIDEO`, video ad-group
+types, and `VideoResponsiveAdInfo` — but those are for **reading/reporting** and for Demand Gen,
+NOT for mutating a VIDEO-channel campaign. The API server rejects the create. **No MCP code can
+work around this** — the ceiling is Google's, not ours.
 
-### Ad group level
-- `create_ad_group` accepts `type: "VIDEO_TRUE_VIEW_IN_STREAM"` | `"VIDEO_RESPONSIVE"`
+⚠️ The previous version of this backlog item (spec'd `channel_type: "VIDEO"`,
+`create_youtube_video_asset`, `create_video_responsive_ad` + TDD cycles) was based on a false
+premise. Do not implement it — the mutate will be rejected by the API. Kept here only as a record.
 
-### New tool
-- `google_ads_create_video_responsive_ad`:
-  - `ad_group_id`, `final_urls[]`
-  - `headlines[]` (max 5, ≤30 chars)
-  - `long_headlines[]` (max 5, ≤90 chars)
-  - `descriptions[]` (max 5, ≤90 chars)
-  - `call_to_action` (enum: LEARN_MORE, SIGN_UP, etc.)
-  - `business_name`
-  - `youtube_video_asset_ids[]` (min 1)
-  - `labels[]` (optional)
+## The only programmatic paths (Google's stated alternatives)
 
-## TDD requirements
-Strict red/green/refactor. TDD_LOG.md maintained. Tests to write:
-1. Contract test for `create_youtube_video_asset` schema.
-2. Contract test for `create_video_responsive_ad` schema.
-3. Validation: rejects missing YouTube video ID.
-4. Validation: rejects ads without at least 1 video asset.
-5. Behavior: happy-path creates a VideoResponsiveAd mutation.
-6. Regression: existing RSA/DG ad creation unchanged.
+1. **Demand Gen** (already supported by the MCP) — serves video on YouTube, but optimizes to
+   conversions, not unique reach at Target CPM. Not equivalent to a true Video Reach campaign.
+2. **Google Ads Scripts** — cannot create the campaign *shell* either, but CAN populate an existing
+   video campaign (ad groups, video ads, geo, language, audiences, exclusions).
+   https://developers.google.com/google-ads/scripts/docs/campaigns/video-campaigns
 
-## Estimated effort
-~300 LOC. ~8–10 TDD cycles.
+## Candidate MCP feature: `google_ads_generate_video_reach_script` (script generator)
+
+A **workaround method** — the MCP cannot execute a Google Ads Script, but it can *generate* one
+deterministically and hand it back to the operator to paste into Google Ads → Scripts.
+
+- **Inputs:** `customer_id`, `campaigns[]` (each: theater/name, `geo_target_ids[]`,
+  `audience_user_list_id`, `excluded_user_list_ids[]`, `youtube_video_ids[]`, ad-group type).
+- **Output:** the ready-to-run `.ads.js` text + paste-and-run instructions. **Does not mutate**;
+  route OUTSIDE the write-gate and label clearly as "returns an artifact, not a success."
+- **Testable in TS** (this is the value vs. a static script): shape tests asserting the emitted
+  script contains the right campaign names, geo IDs, audience IDs, video IDs, DRY_RUN scaffold,
+  and N campaigns. Template versioned so a Scripts-API change is a one-file fix.
+- **Prior art:** a hand-written instance of exactly this script lives in the Forcepoint repo at
+  `google_ads/scripts/youtube_reach_populate.ads.js` (5 Safeguard AI TOFU reach campaigns).
+  Generalize that into the template.
+
+### Open questions before building
+- A few Scripts builder signatures for the VIDEO channel are under-documented (user-list binding on
+  `VideoAudienceBuilder`; the efficient-reach video-ad builder). The generated script must carry
+  `VERIFY` markers + DRY_RUN default until confirmed in a live Preview.
+- Build only if video-campaign spin-up becomes **recurring** (more theaters/products/clients).
+  For one-offs, the static script + a runbook are sufficient — a whole MCP tool is over-engineering.
+
+**Recommendation:** Leave as an opt-in backlog item. Do NOT resurrect the original
+"create Video campaign via API" scope — it is impossible.
