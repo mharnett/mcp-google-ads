@@ -46,6 +46,7 @@
     "auth": "node dist/auth-cli.js",
     "dev": "tsx src/index.ts",
     "dev:auth": "tsx src/auth-cli.ts",
+    "pretest": "npm run build",
     "test": "vitest run",
     "test:portability": "vitest run src/portability.test.ts",
     "prepublishOnly": "node scripts/check-embedded.mjs && npm run build && npm test",

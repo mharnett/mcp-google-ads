@@ -4,7 +4,13 @@
 // Shared by the runtime onboarding path (src/auth-cli.ts). The standalone
 // get-refresh-token.cjs helper carries a byte-identical copy of this logic
 // (it must ship self-contained, dependency-free), and a cross-drift test
-// (src/pkce.parity.test.mjs) asserts the two agree.
+// (pkce-parity.test.mjs, repo root) asserts the two agree.
+//
+// NOTE: only the PKCE crypto + redirect helpers here are shared. The two
+// onboarding paths each have their OWN buildAuthUrl with a DIFFERENT call
+// convention (auth-cli.ts: positional args; get-refresh-token.cjs: named
+// object) — they are not interchangeable. Only the drift-sensitive crypto is
+// parity-tested.
 
 import { createHash, randomBytes } from "crypto";
 
