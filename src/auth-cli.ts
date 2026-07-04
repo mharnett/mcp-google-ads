@@ -37,10 +37,18 @@ import {
 import { classifyError, GoogleAdsAuthError } from "./errors.js";
 import { findFreeLoopbackPort, openBrowser } from "./platform.js";
 import { logger, withResilience } from "./resilience.js";
+import { dirname, join } from "path";
+import { loadOAuthScopeFromFile } from "./oauthScope.js";
 
 const prompts = (promptsImport as unknown as { default?: typeof promptsImport }).default ?? promptsImport;
 
-const OAUTH_SCOPE = "https://www.googleapis.com/auth/adwords";
+// Scope is read from config.json (oauth.scope) — the SAME source the standalone
+// get-refresh-token.cjs helper uses — so the helper and this runtime never drift
+// on what they ask Google to grant. config.json is gitignored/per-user; when
+// absent, loadOAuthScopeFromFile returns the committed minimum adwords default.
+const OAUTH_SCOPE = loadOAuthScopeFromFile(
+  join(dirname(fileURLToPath(import.meta.url)), "..", "config.json"),
+);
 const OAUTH_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const OAUTH_TOKEN_URL = "https://oauth2.googleapis.com/token";
 

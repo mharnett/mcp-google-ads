@@ -1,4 +1,7 @@
 {
+  "oauth": {
+    "scope": "https://www.googleapis.com/auth/adwords"
+  },
   "google_ads": {
     "developer_token": "YOUR_DEVELOPER_TOKEN",
     "client_id": "YOUR_CLIENT_ID.apps.googleusercontent.com",

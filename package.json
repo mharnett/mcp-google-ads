@@ -37,7 +37,8 @@
     "!dist/**/*.test.*",
     "README.md",
     "LICENSE",
-    "config.example.json"
+    "config.example.json",
+    "get-refresh-token.cjs"
   ],
   "scripts": {
     "build": "node scripts/build.mjs",
