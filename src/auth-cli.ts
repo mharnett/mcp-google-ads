@@ -37,10 +37,23 @@ import {
 import { classifyError, GoogleAdsAuthError } from "./errors.js";
 import { findFreeLoopbackPort, openBrowser } from "./platform.js";
 import { logger, withResilience } from "./resilience.js";
+import { dirname, join } from "path";
+import { loadOAuthScopeFromFile } from "./oauthScope.js";
+import {
+  generateCodeVerifier,
+  computeCodeChallenge,
+  buildLoopbackRedirectUri,
+} from "./pkce.js";
 
 const prompts = (promptsImport as unknown as { default?: typeof promptsImport }).default ?? promptsImport;
 
-const OAUTH_SCOPE = "https://www.googleapis.com/auth/adwords";
+// Scope is read from config.json (oauth.scope) — the SAME source the standalone
+// get-refresh-token.cjs helper uses — so the helper and this runtime never drift
+// on what they ask Google to grant. config.json is gitignored/per-user; when
+// absent, loadOAuthScopeFromFile returns the committed minimum adwords default.
+export const OAUTH_SCOPE = loadOAuthScopeFromFile(
+  join(dirname(fileURLToPath(import.meta.url)), "..", "config.json"),
+);
 const OAUTH_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const OAUTH_TOKEN_URL = "https://oauth2.googleapis.com/token";
 
@@ -96,7 +109,12 @@ function printHelp(): void {
 // OAUTH: LOOPBACK REDIRECT FLOW
 // ============================================
 
-function buildAuthUrl(clientId: string, redirectUri: string, state: string): string {
+export function buildAuthUrl(
+  clientId: string,
+  redirectUri: string,
+  state: string,
+  codeChallenge: string,
+): string {
   const params = new URLSearchParams({
     client_id: clientId,
     redirect_uri: redirectUri,
@@ -105,6 +123,8 @@ function buildAuthUrl(clientId: string, redirectUri: string, state: string): str
     access_type: "offline",
     prompt: "consent",
     state,
+    code_challenge: codeChallenge, // PKCE (RFC 7636)
+    code_challenge_method: "S256",
   });
   return `${OAUTH_AUTH_URL}?${params.toString()}`;
 }
@@ -249,27 +269,39 @@ interface TokenResponse {
   token_type: string;
 }
 
+export function buildTokenExchangeBody(opts: {
+  code: string;
+  clientId: string;
+  clientSecret: string;
+  redirectUri: string;
+  codeVerifier: string;
+}): string {
+  return new URLSearchParams({
+    code: opts.code,
+    client_id: opts.clientId,
+    client_secret: opts.clientSecret, // confidential Desktop client — PKCE is additive
+    redirect_uri: opts.redirectUri,
+    grant_type: "authorization_code",
+    code_verifier: opts.codeVerifier, // PKCE proof — sent on exchange
+  }).toString();
+}
+
 async function exchangeCodeForTokens(
   code: string,
   clientId: string,
   clientSecret: string,
   redirectUri: string,
+  codeVerifier: string,
 ): Promise<TokenResponse> {
   // Wrap the POST in withResilience so we tolerate network blips, but the
   // underlying isTransient() rejects invalid_grant / 401 / 403 so bad creds
   // fail fast.
   return withResilience(async () => {
-    const body = new URLSearchParams({
-      code,
-      client_id: clientId,
-      client_secret: clientSecret,
-      redirect_uri: redirectUri,
-      grant_type: "authorization_code",
-    });
+    const body = buildTokenExchangeBody({ code, clientId, clientSecret, redirectUri, codeVerifier });
     const res = await fetch(OAUTH_TOKEN_URL, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: body.toString(),
+      body,
     });
     const json = (await res.json()) as Record<string, unknown>;
     if (!res.ok || json.error) {
@@ -513,16 +545,18 @@ export async function run(argv: string[] = process.argv.slice(2)): Promise<void>
   }
 
   const port = await findFreeLoopbackPort();
-  const redirectUri = `http://127.0.0.1:${port}`;
+  const redirectUri = buildLoopbackRedirectUri(port);
   const state = randomState();
-  const authUrl = buildAuthUrl(clientId, redirectUri, state);
+  const codeVerifier = generateCodeVerifier();
+  const codeChallenge = computeCodeChallenge(codeVerifier);
+  const authUrl = buildAuthUrl(clientId, redirectUri, state, codeChallenge);
 
   process.stderr.write("\n=== mcp-google-ads authentication ===\n");
 
   const { code } = await waitForAuthorizationCode(port, state, authUrl);
   process.stderr.write("Authorization code received. Exchanging for tokens...\n");
 
-  const tokens = await exchangeCodeForTokens(code, clientId, clientSecret, redirectUri);
+  const tokens = await exchangeCodeForTokens(code, clientId, clientSecret, redirectUri, codeVerifier);
   if (!tokens.refresh_token) {
     throw new GoogleAdsAuthError(
       "Google did not return a refresh token. This can happen if you previously granted consent " +

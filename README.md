@@ -32,12 +32,35 @@ You need:
 
 #### Getting a Refresh Token
 
-Use the Google OAuth playground or run:
+Bring your own OAuth client (the `client_id` / `client_secret` from the step
+above) and run the bundled helper. It runs Google's installed-app loopback flow
+**with PKCE (S256)** and prints your refresh token. It reads nothing from your
+home directory and needs no shared OAuth keyfile.
 
 ```bash
-pip install google-ads
-google-ads-auth
+export GOOGLE_ADS_CLIENT_ID="YOUR_CLIENT_ID.apps.googleusercontent.com"
+export GOOGLE_ADS_CLIENT_SECRET="YOUR_CLIENT_SECRET"
+node get-refresh-token.cjs
 ```
+
+Your browser opens for Google sign-in; approve as the Google account that owns
+the Ads data. On success the helper prints one line to stdout:
+
+```
+GOOGLE_ADS_REFRESH_TOKEN=1//0a...
+```
+
+Set that value in your environment (or `config.json`, below). The OAuth scope
+requested is read from `config.json` (`oauth.scope`), falling back to
+`config.example.json`, so the helper and the running server always request the
+same scope. This MCP requests only the minimum scope it needs:
+`https://www.googleapis.com/auth/adwords`.
+
+> Do not run this with stdout redirected to a shared log file — the refresh
+> token is printed to stdout by design.
+
+Note: `GOOGLE_ADS_DEVELOPER_TOKEN` is a separate Google Ads API credential, not
+an OAuth scope — set it independently (see Environment Variables below).
 
 ### 2. Install
 
@@ -66,6 +89,9 @@ Edit `config.json` with your credentials:
 
 ```json
 {
+  "oauth": {
+    "scope": "https://www.googleapis.com/auth/adwords"
+  },
   "google_ads": {
     "developer_token": "YOUR_DEVELOPER_TOKEN",
     "client_id": "YOUR_CLIENT_ID.apps.googleusercontent.com",
