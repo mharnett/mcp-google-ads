@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.7.0](https://github.com/mharnett/mcp-google-ads/compare/v1.6.0...v1.7.0) (2026-07-08)
+
+
+### Features
+
+* **oauth:** publishable PKCE refresh-token flow + scope-from-config (decouple pilot) ([#13](https://github.com/mharnett/mcp-google-ads/issues/13)) ([ae28883](https://github.com/mharnett/mcp-google-ads/commit/ae28883d91ce2b12ac6b635c02a025bc66e83f1e))
+* **rsa:** skip length check for countdown / IF-function fields ([4a635df](https://github.com/mharnett/mcp-google-ads/commit/4a635df64d042f7b43f183b2650e639c3f03fce0))
+
+
+### Bug Fixes
+
+* create_responsive_search_ad now applies caller-supplied labels ([#12](https://github.com/mharnett/mcp-google-ads/issues/12)) ([b992395](https://github.com/mharnett/mcp-google-ads/commit/b9923959193a9aeaf41dea9346dc83dab0b681da))
+* **critical:** use TimeoutStrategy.Aggressive to actually abort hung requests ([d641206](https://github.com/mharnett/mcp-google-ads/commit/d6412062e0dce447e23280ea2da200c7dd6afe21))
+* **dg:** gate update_demand_gen tool as write + sync stale fixtures ([aeaf6f3](https://github.com/mharnett/mcp-google-ads/commit/aeaf6f368788be64171835506e78cf5189d7cbde))
+* Remove long_headlines from update payload (API doesn't support updating) ([4b85a39](https://github.com/mharnett/mcp-google-ads/commit/4b85a3957a08fc72140ce2c77c14a21420773b9f))
+* resolve import and export issues from cascade failure ([0f29924](https://github.com/mharnett/mcp-google-ads/commit/0f29924cb310b1e389d571224db633b10fed4d19))
+* **rsa:** count LOCATION insertion by default text, not literal length ([69e101f](https://github.com/mharnett/mcp-google-ads/commit/69e101fe2fcb2d3a9c345326e6adc8312ad81a98))
+
 ## [1.6.0](https://github.com/mharnett/mcp-google-ads/compare/v1.4.4...v1.6.0) (2026-05-27)
 
 
