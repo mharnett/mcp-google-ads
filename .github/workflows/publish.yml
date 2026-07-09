@@ -94,4 +94,14 @@ jobs:
       # by `id-token: write` above. No NPM_TOKEN required as long as the
       # package has a matching Trusted Publisher registered on npmjs.com
       # (owner: mharnett, repo: mcp-google-ads, workflow: publish.yml).
-      - run: npm publish --provenance --access public
+      #
+      # EMBEDDED_* must be present HERE too: `npm publish` runs the package's
+      # prepublishOnly hook (check-embedded.mjs && npm run build && npm test),
+      # which re-verifies and re-bakes the creds. Without them on this step the
+      # hook aborts with "Refusing to publish without embedded OAuth credentials".
+      - name: Publish to npm (OIDC trusted publishing)
+        run: npm publish --provenance --access public
+        env:
+          EMBEDDED_CLIENT_ID: ${{ secrets.EMBEDDED_CLIENT_ID }}
+          EMBEDDED_CLIENT_SECRET: ${{ secrets.EMBEDDED_CLIENT_SECRET }}
+          EMBEDDED_DEVELOPER_TOKEN: ${{ secrets.EMBEDDED_DEVELOPER_TOKEN }}
