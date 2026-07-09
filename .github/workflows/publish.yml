@@ -47,9 +47,12 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
 
       # Trusted Publishing (OIDC) requires npm >= 11.5. setup-node@v4 ships
-      # whatever ships with node 20 (~npm 10.x), which is too old. Pin here
-      # so the publish step picks up the OIDC token automatically.
-      - run: npm install -g npm@latest
+      # whatever ships with node 20 (~npm 10.x), which is too old. Pin npm@11
+      # (>=11.5, OIDC-capable) rather than npm@latest: npm@12 dropped Node 20
+      # (engine ^22.22.2 || ^24.15.0 || >=26) and would fail EBADENGINE here,
+      # whereas npm@11's engine is ^20.17.0 || >=22.9.0 — compatible with the
+      # pinned Node 20 runner above.
+      - run: npm install -g npm@11
 
       - run: npm ci
 
