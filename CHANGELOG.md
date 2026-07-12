@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.8.0](https://github.com/mharnett/mcp-google-ads/compare/v1.7.0...v1.8.0) (2026-07-12)
+
+
+### Features
+
+* **dg-ad:** support ad.name at creation (create tool) ([12b2087](https://github.com/mharnett/mcp-google-ads/commit/12b20871656793cfe1f444676a4dfaf9f1c791fb))
+
+
+### Bug Fixes
+
+* **ci:** pass EMBEDDED_* to the npm publish step ([8891a16](https://github.com/mharnett/mcp-google-ads/commit/8891a16546d8f08aec6b2ef0954827b9b21dce8d))
+* **ci:** pass EMBEDDED_* to the npm publish step ([638e2ff](https://github.com/mharnett/mcp-google-ads/commit/638e2ff43542e482d6dab7e1c183b75dd33093bc))
+* **ci:** pin npm@11 for OIDC publish (npm@latest=12 dropped Node 20) ([32dd7c7](https://github.com/mharnett/mcp-google-ads/commit/32dd7c7c6c6dc81ec871afcc0353f203698f237d))
+* **ci:** pin npm@11 for OIDC publish (npm@latest=12 dropped Node 20) ([c00fbea](https://github.com/mharnett/mcp-google-ads/commit/c00fbeacd7469fb779b2b64915d7c0a21d485669))
+* **dg-ad:** correct numeric-ID resolver + document multi-asset immutability ([f371496](https://github.com/mharnett/mcp-google-ads/commit/f3714969d5d4276bfc83e67a17759f2b2f2d4d20))
+* **dg-ad:** correct numeric-ID resolver + document multi-asset immutability ([36a7b67](https://github.com/mharnett/mcp-google-ads/commit/36a7b671f6723a22b08abe57d6c7fafb4c211cc7))
+
 ## [1.7.0](https://github.com/mharnett/mcp-google-ads/compare/v1.6.0...v1.7.0) (2026-07-08)
 
 
