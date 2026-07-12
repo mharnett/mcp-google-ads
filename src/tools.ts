@@ -1016,6 +1016,10 @@ export const tools: Tool[] = [
       properties: {
         customer_id: { type: "string" },
         ad_group_id: { type: "string" },
+        name: {
+          type: "string",
+          description: "Optional internal ad name (not user-facing) shown in the UI's Ad column — e.g. 'Gartner CIO AI - NAM Gov'. Set it to avoid the generic auto-name ('Ad 1'). NOTE: immutable after creation on DG multi-asset ads, so set it here.",
+        },
         final_urls: { type: "array", items: { type: "string" } },
         business_name: { type: "string" },
         call_to_action: {

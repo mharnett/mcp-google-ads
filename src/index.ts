@@ -5083,6 +5083,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         try {
           const result = await getAdsManager().createDemandGenMultiAssetAd(customerId, {
             ad_group_id: args?.ad_group_id as string,
+            name: args?.name as string | undefined,
             final_urls: args?.final_urls as string[],
             business_name: args?.business_name as string,
             call_to_action: args?.call_to_action as string,

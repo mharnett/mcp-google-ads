@@ -146,6 +146,22 @@ describe("buildDemandGenAdPayload", () => {
     expect(payload.ad.final_urls).toEqual(["https://example.com/"]);
   });
 
+  it("sets ad.name when provided, and omits it otherwise", () => {
+    const named = buildDemandGenAdPayload({
+      customer_id_clean: "11",
+      ad_group_id: "22",
+      input: { ...BASE_VALID, name: "Gartner CIO AI - NAM Gov" },
+    });
+    expect(named.ad.name).toBe("Gartner CIO AI - NAM Gov");
+
+    const unnamed = buildDemandGenAdPayload({
+      customer_id_clean: "11",
+      ad_group_id: "22",
+      input: BASE_VALID,
+    });
+    expect(unnamed.ad.name).toBeUndefined();
+  });
+
   it("includes square, portrait, and logo images when provided", () => {
     const payload = buildDemandGenAdPayload({
       customer_id_clean: "11",
