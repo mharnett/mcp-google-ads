@@ -15,6 +15,9 @@ export interface DemandGenAdInput {
   final_urls: string[];
   business_name: string;
   call_to_action: string;
+  /** Optional internal ad name (not user-facing). Set once at creation —
+   *  ad.name is immutable on DG multi-asset ads after create. */
+  name?: string;
   marketing_image_asset_ids?: string[];
   square_marketing_image_asset_ids?: string[];
   portrait_marketing_image_asset_ids?: string[];
@@ -55,6 +58,7 @@ export interface DemandGenAdPayload {
   ad_group: string;
   status: number;
   ad: {
+    name?: string;
     final_urls: string[];
     demand_gen_multi_asset_ad: Record<string, any>;
   };
@@ -95,13 +99,18 @@ export function buildDemandGenAdPayload(args: {
 
   // PAUSED status — matches the platform-wide "Claude creates, human reviews" rule.
   // enums.AdGroupAdStatus.PAUSED = 3
+  const ad: DemandGenAdPayload["ad"] = {
+    final_urls: input.final_urls,
+    demand_gen_multi_asset_ad: dgAd,
+  };
+  // ad.name is a create-only, non-user-facing identifier (immutable after create).
+  if (input.name) {
+    ad.name = input.name;
+  }
   return {
     ad_group: `customers/${customer_id_clean}/adGroups/${ad_group_id}`,
     status: 3,
-    ad: {
-      final_urls: input.final_urls,
-      demand_gen_multi_asset_ad: dgAd,
-    },
+    ad,
   };
 }
 

@@ -1016,6 +1016,10 @@ export const tools: Tool[] = [
       properties: {
         customer_id: { type: "string" },
         ad_group_id: { type: "string" },
+        name: {
+          type: "string",
+          description: "Optional internal ad name (not user-facing) shown in the UI's Ad column — e.g. 'Gartner CIO AI - NAM Gov'. Set it to avoid the generic auto-name ('Ad 1'). NOTE: immutable after creation on DG multi-asset ads, so set it here.",
+        },
         final_urls: { type: "array", items: { type: "string" } },
         business_name: { type: "string" },
         call_to_action: {
@@ -1087,7 +1091,7 @@ export const tools: Tool[] = [
   },
   {
     name: "google_ads_update_demand_gen_multi_asset_ad",
-    description: "Update headlines, long_headlines, or descriptions on an existing Demand Gen Multi-Asset ad (PAUSED or ENABLED). Validates character/count limits before the API call. Provide the ad's resource name (customers/XXX/adGroupAds/YYY~ZZZ) or numeric ad ID. Omit fields you don't want to change. Auto-labels with Claude-MM-DD-YY. Use this to fix copy, test variants, or adjust messaging without recreating ads.",
+    description: "Attempt to update copy on a Demand Gen ad. WARNING: on Demand Gen MULTI-ASSET ads the entire creative — headlines, descriptions, AND images — is IMMUTABLE after creation; the Google Ads API rejects any such update with IMMUTABLE_FIELD (verified live 2026-07-12). To change ANY creative on a multi-asset ad you must RECREATE it (create a new ad + pause the old one), not update it. This tool is retained for DG ad formats that may permit copy edits; against a multi-asset ad it will error. Provide the ad's resource name (customers/XXX/adGroupAds/YYY~ZZZ) or numeric ad ID.",
     inputSchema: {
       additionalProperties: false,
       type: "object",
