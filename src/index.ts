@@ -1255,7 +1255,9 @@ export class GoogleAdsManager {
       const adRows = await withResilience(
         () =>
           customer.query(
-            `SELECT ad_group_ad.resource_name FROM ad_group_ad WHERE ad_group_ad.id = ${sanitizeNumericId(
+            // ad_group_ad has no queryable `.id`; the ad's numeric ID lives at
+            // ad_group_ad.ad.id. (Using ad_group_ad.id fails with query_error 32.)
+            `SELECT ad_group_ad.resource_name FROM ad_group_ad WHERE ad_group_ad.ad.id = ${sanitizeNumericId(
               adId
             )}`
           ),
@@ -1286,7 +1288,14 @@ export class GoogleAdsManager {
       }
     }
 
-    // Build update payload
+    // Build update payload. IMPORTANT: on a Demand Gen MULTI-ASSET ad the entire
+    // creative is IMMUTABLE after creation — headlines, descriptions, and every
+    // image field (marketing/square/portrait/logo) are all rejected by the API
+    // with request_error IMMUTABLE_FIELD ("cannot be modified by 'UPDATE'").
+    // Verified live 2026-07-12. To change ANY creative on these ads you must
+    // recreate the ad (create new + pause old). This payload is still built for
+    // other DG ad formats that may permit copy edits; for multi-asset ads the
+    // mutate below will throw and the caller should recreate instead.
     const updateResource: any = {
       resource_name: resourceName,
     };
@@ -1310,9 +1319,6 @@ export class GoogleAdsManager {
         text: t,
       }));
     }
-
-    // Note: long_headlines is NOT updatable via API (only supported at creation time)
-    // Omit from payload to avoid field mask errors
 
     const mutateResp: any = await withResilience(
       () =>
