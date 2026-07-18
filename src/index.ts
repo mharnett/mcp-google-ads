@@ -1486,7 +1486,16 @@ export class GoogleAdsManager {
         success: true,
         unchanged: true,
         ad_id: adId,
-        videos: plan.videos,
+        ad_resource_name: `customers/${cleanId}/ads/${adId}`,
+        mode,
+        videos_before: currentVideos.length,
+        videos_after: plan.videos.length,
+        added_assets: [] as string[],
+        skipped_existing: plan.skipped_existing,
+        created_assets: createdAssets,
+        video_titles: Object.fromEntries(
+          Object.entries(visibility).map(([id, v]) => [id, v.title ?? null])
+        ),
         message: "All requested videos are already on the ad — no mutate sent.",
       };
     }
