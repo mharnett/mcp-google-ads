@@ -1,6 +1,18 @@
 # VIDEO (YouTube) campaign creation — NOT FEASIBLE via API; Scripts-generator workaround
 
-**Status:** Closed as infeasible (2026-07-04). Superseded by the script-generator option below.
+**Status:** Closed as infeasible (2026-07-04) for campaign-level. **2026-07-18 amendment: AD-level
+video management IS feasible and is now shipped** as `google_ads_update_video_ad_videos`
+(src/videoAdVideos.ts) — the "read-only VIDEO channel" rule turned out to be campaign-scoped.
+
+## 2026-07-18 finding: ad-level `video_responsive_ad.videos` updates ARE allowed
+
+Verified live on Forcepoint (customer 494-825-2953): `AdService`-style update via
+GoogleAdsService mutate, entity `ad` (`customers/X/ads/Y`), field mask
+`video_responsive_ad.videos`, succeeded against all 5 Safeguard AI YouTube reach ads —
+in-place edit (same ad IDs), 3 → 5 videos each. YouTube video asset creation via
+`AssetService` also works. Campaign-level mutates (pause, targeting, frequency caps,
+bidding) remain MUTATE_NOT_ALLOWED. Constraint: source videos must be Public or Unlisted;
+private videos are rejected (oEmbed 401/403 is the cheap preflight fingerprint).
 **Original ask:** Extend google-ads MCP to create Video campaigns with YouTube video responsive ads.
 
 ## Finding: the Google Ads API cannot create or modify Video campaigns

@@ -62,6 +62,13 @@ import {
   type AdGroupTypeName,
 } from "./adGroupBuilder.js";
 import {
+  buildVideoAdUpdateResource,
+  checkYoutubeVisibility,
+  planVideoUpdate,
+  validateYoutubeVideoInputs,
+  type VisibilityResult,
+} from "./videoAdVideos.js";
+import {
   prepareImageForUpload,
   type ImageInput,
 } from "./imageAsset.js";
@@ -1349,6 +1356,170 @@ export class GoogleAdsManager {
       resource_name: resultResourceName,
       ad_id: resultResourceName ? resultResourceName.split("~").pop() : undefined,
       updated_fields: Object.keys(input).filter((k) => k !== "labels" && input[k as keyof typeof input]),
+    };
+  }
+
+  /**
+   * Add/replace YouTube videos on an existing video responsive ad (VIDEO
+   * channel). Campaign-level VIDEO mutates are MUTATE_NOT_ALLOWED, but the
+   * ad-level `video_responsive_ad.videos` update via the `ads` resource is
+   * legal and edits in place (same ad ID) — verified live 2026-07-18.
+   */
+  async updateVideoAdVideos(
+    customerId: string,
+    input: {
+      ad_id: string;
+      videos: string[];
+      mode?: "append" | "replace";
+      skip_visibility_check?: boolean;
+    }
+  ) {
+    const customer = this.getCustomer(customerId);
+    const cleanId = customerId.replace(/-/g, "");
+    const mode = input.mode ?? "append";
+
+    const parsed = validateYoutubeVideoInputs(input.videos);
+    if (!parsed.valid) {
+      throw new Error("Video input validation failed:\n" + parsed.errors.join("\n"));
+    }
+
+    // Accept numeric ad ID or customers/X/ads/Y
+    let adId = input.ad_id.trim();
+    const rnMatch = adId.match(/^customers\/\d+\/ads\/(\d+)$/);
+    if (rnMatch) adId = rnMatch[1];
+    if (!/^\d+$/.test(adId)) {
+      throw new Error(
+        `ad_id must be a numeric ad ID or customers/X/ads/Y resource name, got "${input.ad_id}"`
+      );
+    }
+
+    // Current state — also yields the adGroupAds resource name for labeling
+    const adRows = await withResilience(
+      () =>
+        customer.query(
+          `SELECT ad_group_ad.resource_name, ad_group_ad.ad.type, ad_group_ad.ad.name,
+                  ad_group_ad.ad.video_responsive_ad.videos
+           FROM ad_group_ad
+           WHERE ad_group_ad.ad.id = ${sanitizeNumericId(adId)}
+             AND ad_group_ad.status != 'REMOVED'`
+        ),
+      "updateVideoAdVideos.fetchAd"
+    );
+    if (!adRows || adRows.length === 0) {
+      throw new Error(`Ad ${adId} not found (or removed)`);
+    }
+    const adRow: any = adRows[0];
+    const adType = adRow?.ad_group_ad?.ad?.type;
+    if (adType !== enums.AdType.VIDEO_RESPONSIVE_AD && adType !== "VIDEO_RESPONSIVE_AD") {
+      throw new Error(
+        `Ad ${adId} is not a VIDEO_RESPONSIVE_AD (type=${adType}). This tool only manages videos on video responsive ads.`
+      );
+    }
+    const adGroupAdRN: string = adRow.ad_group_ad.resource_name;
+    const currentVideos: string[] = (
+      adRow.ad_group_ad.ad.video_responsive_ad?.videos ?? []
+    ).map((v: any) => v.asset);
+
+    // Preflight: private videos are rejected by Google Ads (and silently stop
+    // serving if flipped private later). oEmbed 200 = Public/Unlisted.
+    const visibility: Record<string, VisibilityResult> = {};
+    if (!input.skip_visibility_check) {
+      for (const videoId of parsed.ids) {
+        const check = await checkYoutubeVisibility(videoId);
+        visibility[videoId] = check;
+        if (check.visible === false) {
+          throw new Error(check.reason ?? `Video ${videoId} is not visible`);
+        }
+      }
+    }
+
+    // Find-or-create YouTube video assets
+    const idList = parsed.ids.map((id) => `'${id}'`).join(", ");
+    const assetRows = await withResilience(
+      () =>
+        customer.query(
+          `SELECT asset.resource_name, asset.youtube_video_asset.youtube_video_id
+           FROM asset
+           WHERE asset.youtube_video_asset.youtube_video_id IN (${idList})`
+        ),
+      "updateVideoAdVideos.findAssets"
+    );
+    const assetByVideoId = new Map<string, string>();
+    for (const row of assetRows as any[]) {
+      const vid = row?.asset?.youtube_video_asset?.youtube_video_id;
+      if (vid && !assetByVideoId.has(vid)) assetByVideoId.set(vid, row.asset.resource_name);
+    }
+    const toCreate = parsed.ids.filter((id) => !assetByVideoId.has(id));
+    const createdAssets: string[] = [];
+    if (toCreate.length > 0) {
+      const createResp = await withResilience(
+        () =>
+          customer.assets.create(
+            toCreate.map((videoId) => {
+              const title = visibility[videoId]?.title ?? `YouTube video ${videoId}`;
+              return {
+                name: title,
+                type: enums.AssetType.YOUTUBE_VIDEO,
+                youtube_video_asset: {
+                  youtube_video_id: videoId,
+                  youtube_video_title: title,
+                },
+              } as any;
+            })
+          ),
+        "updateVideoAdVideos.createAssets"
+      );
+      const createResults = ((createResp as any).results || []) as Array<{ resource_name: string }>;
+      createResults.forEach((r, i) => {
+        assetByVideoId.set(toCreate[i], r.resource_name);
+        createdAssets.push(r.resource_name);
+      });
+    }
+    const requestedRNs = parsed.ids.map((id) => assetByVideoId.get(id)!).filter(Boolean);
+
+    const plan = planVideoUpdate(currentVideos, requestedRNs, mode);
+    if (plan.videos.length === 0) {
+      throw new Error("Refusing to leave the ad with zero videos (mode=replace with empty target).");
+    }
+    if (plan.unchanged) {
+      return {
+        success: true,
+        unchanged: true,
+        ad_id: adId,
+        videos: plan.videos,
+        message: "All requested videos are already on the ad — no mutate sent.",
+      };
+    }
+
+    const resource = buildVideoAdUpdateResource(cleanId, adId, plan.videos);
+    await withResilience(
+      () =>
+        customer.mutateResources([
+          {
+            entity: "ad",
+            operation: "update",
+            resource: resource as any,
+          } as any,
+        ]),
+      "updateVideoAdVideos"
+    );
+
+    await this.autoLabelCreated(customerId, [adGroupAdRN], "ad");
+
+    return {
+      success: true,
+      unchanged: false,
+      ad_id: adId,
+      ad_resource_name: `customers/${cleanId}/ads/${adId}`,
+      mode,
+      videos_before: currentVideos.length,
+      videos_after: plan.videos.length,
+      added_assets: plan.added,
+      skipped_existing: plan.skipped_existing,
+      created_assets: createdAssets,
+      video_titles: Object.fromEntries(
+        Object.entries(visibility).map(([id, v]) => [id, v.title ?? null])
+      ),
     };
   }
 
@@ -5131,6 +5302,35 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 message: result.success
                   ? `Demand Gen ad updated. Updated fields: ${result.updated_fields.join(", ")}`
                   : "Update failed",
+              }, null, 2),
+            }],
+          };
+        } catch (e: any) {
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({ success: false, error: e.message }, null, 2),
+            }],
+          };
+        }
+      }
+
+      case "google_ads_update_video_ad_videos": {
+        const customerId = args?.customer_id as string || "";
+        try {
+          const result = await getAdsManager().updateVideoAdVideos(customerId, {
+            ad_id: args?.ad_id as string,
+            videos: args?.videos as string[],
+            mode: args?.mode as "append" | "replace" | undefined,
+            skip_visibility_check: args?.skip_visibility_check as boolean | undefined,
+          });
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({
+                ...result,
+                message: (result as any).message
+                  ?? `Video ad updated in place: ${result.videos_before} → ${result.videos_after} videos (${result.added_assets.length} added).`,
               }, null, 2),
             }],
           };

@@ -1137,6 +1137,36 @@ export const tools: Tool[] = [
     },
   },
   {
+    name: "google_ads_update_video_ad_videos",
+    description: "Add or replace the YouTube videos on an existing video responsive ad (VIDEO campaigns, e.g. YouTube reach). The VIDEO channel is campaign-level API-locked, but AD-level video_responsive_ad.videos updates ARE allowed and edit the ad in place (same ad ID) — verified live 2026-07-18. Accepts YouTube URLs (watch/shorts/youtu.be/embed) or 11-char video IDs; finds-or-creates the YouTube video assets; preflights each new video via oEmbed (private videos are rejected by Google Ads — must be Public or Unlisted). Default mode 'append' keeps existing videos and adds new ones. Auto-labels the ad claude-MM-DD-YY.",
+    inputSchema: {
+      additionalProperties: false,
+      type: "object",
+      properties: {
+        customer_id: { type: "string" },
+        ad_id: {
+          type: "string",
+          description: "Numeric ad ID (e.g. 815638860130) or full ads resource name (customers/XXX/ads/YYY). Must be a VIDEO_RESPONSIVE_AD.",
+        },
+        videos: {
+          type: "array",
+          items: { type: "string" },
+          description: "YouTube video URLs or 11-char video IDs to add (or, with mode=replace, the complete target list).",
+        },
+        mode: {
+          type: "string",
+          enum: ["append", "replace"],
+          description: "append (default): keep current videos, add new ones. replace: the ad ends up with exactly the given list.",
+        },
+        skip_visibility_check: {
+          type: "boolean",
+          description: "Skip the oEmbed public/unlisted preflight (e.g. offline testing). Default false.",
+        },
+      },
+      required: ["customer_id", "ad_id", "videos"],
+    },
+  },
+  {
     name: "google_ads_create_page_feed",
     description: "Create an AI Max / DSA page feed (AssetSet of type PAGE_FEED) and attach it to a campaign. Each URL becomes a PageFeedAsset tagged with the given label. Use this to constrain AI Max final-URL expansion to a specific list of landing pages. Returns the AssetSet resource name and the number of URLs added.",
     inputSchema: {

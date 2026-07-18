@@ -248,3 +248,17 @@ package.json bumped to 1.2.0 with the new description.
 3. **BiddingStrategyType uses "TARGET_SPEND" (not "MAXIMIZE_CLICKS").**
    The user-facing param is `MAXIMIZE_CLICKS` but internally we set the
    `target_spend` field on the Campaign resource. Documented in campaignBuilder.ts.
+
+---
+
+# TDD Log — v1.8 video ad video management
+
+### Cycle 1 — videoAdVideos pure helpers
+RED: src/videoAdVideos.test.ts (21 tests) — module `./videoAdVideos.js` doesn't exist.
+GREEN: added src/videoAdVideos.ts (parseYoutubeVideoId, validateYoutubeVideoInputs, planVideoUpdate, buildVideoAdUpdateResource, checkYoutubeVisibility with injected fetch).
+REFACTOR: none.
+
+### Cycle 2 — tool registration exhaustiveness
+RED: tools.contract.test.ts + tools.handler.test.ts (3 tests) — `google_ads_update_video_ad_videos` declared in tools.ts with no handler case / not in EXPECTED_TOOLS.
+GREEN: manager method updateVideoAdVideos + handler case in index.ts, WRITE_TOOLS entry, EXPECTED_TOOLS entry. Full suite 484 passed.
+REFACTOR: none.
