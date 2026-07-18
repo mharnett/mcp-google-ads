@@ -54,6 +54,7 @@ describe("Tool Schema Contract", () => {
     "google_ads_keyword_volume",
     "google_ads_create_demand_gen_multi_asset_ad",
     "google_ads_update_demand_gen_multi_asset_ad",
+    "google_ads_update_video_ad_videos",
     "google_ads_create_page_feed",
     "google_ads_create_image_asset",
     "google_ads_create_lead_form_asset",
