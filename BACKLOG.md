@@ -1,5 +1,14 @@
 # Backlog
 
+## Open
+
+### apply_label cannot target keyword criteria
+**Found:** 2026-07-17 (Forcepoint INDIA pause-batch sync)
+**Severity:** Low-medium — breaks the "label every keyword change" audit rule for *existing* keywords.
+**Symptom:** `google_ads_apply_label` accepts `campaign_ids` / `ad_group_ids` / `ad_ids` only. There is no way to label existing ad-group criteria (keywords) through any exposed tool, so status changes made via `google_ads_pause_keywords` / `google_ads_enable_keywords` can't be tagged `claude-MM-DD-YY` afterward. The internal plumbing already exists (`labelAdGroupCriteria`, used by `create_keywords` and `applyCustomLabels(assetType: "keyword")`) — the tool handler just never routes to it.
+**Proposed fix:** Add `criterion_resource_names` (or `keyword_ids` + `ad_group_ids`) to the `apply_label` schema and route to `labelAdGroupCriteria`. Alternatively add an optional `label` param to `pause_keywords` (mirroring `enable_keywords`, which already accepts `labels`).
+**Workaround used:** one-off Node script calling `customer.adGroupCriterionLabels.create` directly with Keychain creds (session scratchpad `label-india-pause-batch.mjs`, 2026-07-17).
+
 ## Done
 
 ### create_responsive_search_ad silently drops `labels` parameter
