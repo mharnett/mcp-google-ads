@@ -27,6 +27,7 @@ import {
   isWriteEnabled,
 } from "./writeGate.js";
 import { sharedSetLinkWarning } from "./gaqlSharedSetGuard.js";
+import { claudeAuditLabel, AUTO_CLAUDE_LABEL_RE } from "./claudeLabel.js";
 import { validateRsa } from "./validateRsa.js";
 import {
   validateRemoveInput,
@@ -588,12 +589,10 @@ export class GoogleAdsManager {
   }
 
   // Today's audit label in Claude-MM-DD-YY format (GLOBAL rule: every Claude-created asset gets this)
-  private todayClaudeLabel(): string {
-    const now = new Date();
-    const mm = String(now.getMonth() + 1).padStart(2, "0");
-    const dd = String(now.getDate()).padStart(2, "0");
-    const yy = String(now.getFullYear()).slice(-2);
-    return `claude-${mm}-${dd}-${yy}`;
+  // Canonical claude-MM-DD-YY[-desc] format lives in claudeLabel.ts so the
+  // generator, validator and recognizer can't drift from each other.
+  private todayClaudeLabel(descriptor?: string): string {
+    return claudeAuditLabel(new Date(), descriptor);
   }
 
   // Apply today's Claude-MM-DD-YY label to newly created assets.
@@ -3298,7 +3297,7 @@ export class GoogleAdsManager {
         // Reapply original labels (skip ones that look like auto date labels —
         // createResponsiveSearchAd already stamped today's claude-MM-DD-YY).
         const originalLabels = (labelsByAdId.get(a.ad_id) ?? []).filter(
-          n => !/^claude-\d{2}-\d{2}-\d{2}$/i.test(n)
+          n => !AUTO_CLAUDE_LABEL_RE.test(n)
         );
         if (newAdId && originalLabels.length > 0) {
           for (const labelName of originalLabels) {
