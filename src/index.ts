@@ -26,6 +26,7 @@ import {
   filterTools,
   isWriteEnabled,
 } from "./writeGate.js";
+import { sharedSetLinkWarning } from "./gaqlSharedSetGuard.js";
 import { validateRsa } from "./validateRsa.js";
 import {
   validateRemoveInput,
@@ -5225,12 +5226,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
 
         const result = await getAdsManager().executeGaql(customerId, query);
-        return {
-          content: [{
-            type: "text",
-            text: JSON.stringify(result, null, 2),
-          }],
-        };
+        // Query-time guard: campaign_shared_set returns REMOVED links too, so an
+        // unfiltered read shows unlinked lists as still-attached (2026-07-23 false
+        // positive). Prepend a warning block; leave the JSON result unchanged.
+        const sharedSetWarning = sharedSetLinkWarning(query);
+        const gaqlContent: Array<{ type: "text"; text: string }> = [];
+        if (sharedSetWarning) {
+          gaqlContent.push({ type: "text", text: sharedSetWarning });
+        }
+        gaqlContent.push({ type: "text", text: JSON.stringify(result, null, 2) });
+        return { content: gaqlContent };
       }
 
       case "google_ads_keyword_volume": {
