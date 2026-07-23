@@ -228,6 +228,10 @@ export const tools: Tool[] = [
           items: { type: "string" },
           description: "Optional additional labels to attach alongside the auto-applied claude-YYYY-MM-DD label. The auto-label alone satisfies the ≥1 label requirement, so this is for extra tagging only.",
         },
+        label_descriptor: {
+          type: "string",
+          description: "Optional short description of WHAT this change is, appended to the auto label as a kebab slug: claude-MM-DD-YY-<label_descriptor> (e.g. \"brand cpa fix\" -> claude-07-23-26-brand-cpa-fix). Makes the audit label self-explanatory for rollback. Slugged automatically; bounded to the 80-char label limit on a word boundary.",
+        },
       },
       required: ["ad_group_id", "final_urls", "headlines", "descriptions", "path1", "path2"],
     },

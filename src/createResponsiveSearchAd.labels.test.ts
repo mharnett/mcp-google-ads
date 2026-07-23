@@ -135,6 +135,24 @@ describe("createResponsiveSearchAd label wiring", () => {
     expect(attachedLabelRns.has(fake.labelRnFor("test-a"))).toBe(true);
   });
 
+  it("appends a slugged label_descriptor to the auto claude label", async () => {
+    await mgr.createResponsiveSearchAd("1234567890", {
+      ...VALID_RSA,
+      label_descriptor: "Brand CPA Fix",
+    });
+
+    const now = new Date();
+    const mm = String(now.getMonth() + 1).padStart(2, "0");
+    const dd = String(now.getDate()).padStart(2, "0");
+    const yy = String(now.getFullYear()).slice(-2);
+    const describedAutoLabel = `claude-${mm}-${dd}-${yy}-brand-cpa-fix`;
+
+    const attachedLabelRns = new Set(fake.appliedLabelOps.map((o) => o.label));
+    expect(attachedLabelRns.has(fake.labelRnFor(describedAutoLabel))).toBe(true);
+    // and the bare (descriptor-less) auto label is NOT what got attached
+    expect(attachedLabelRns.has(fake.labelRnFor(`claude-${mm}-${dd}-${yy}`))).toBe(false);
+  });
+
   it("works (auto label only) when no custom labels are passed", async () => {
     await mgr.createResponsiveSearchAd("1234567890", { ...VALID_RSA });
 

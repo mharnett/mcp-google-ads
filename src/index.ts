@@ -601,10 +601,12 @@ export class GoogleAdsManager {
   private async autoLabelCreated(
     customerId: string,
     resourceNames: string[],
-    assetType: "campaign" | "ad_group" | "ad" | "keyword" | "shared_set" | "asset"
+    assetType: "campaign" | "ad_group" | "ad" | "keyword" | "shared_set" | "asset",
+    descriptor?: string
   ): Promise<string | null> {
     if (!resourceNames?.length) return null;
-    const labelName = this.todayClaudeLabel();
+    // Optional descriptor -> claude-MM-DD-YY-<slug>; bare claude-MM-DD-YY otherwise.
+    const labelName = this.todayClaudeLabel(descriptor);
     try {
       const labelRN = await this.ensureLabelExists(customerId, labelName);
       switch (assetType) {
@@ -1064,6 +1066,9 @@ export class GoogleAdsManager {
     path2: string;
     /** Additional labels to attach beyond the auto-applied claude-YYYY-MM-DD. */
     labels?: string[];
+    /** Optional free-text description appended to the auto label as a kebab
+     *  slug: claude-MM-DD-YY-<label_descriptor>. */
+    label_descriptor?: string;
   }) {
     const customer = this.getCustomer(customerId);
 
@@ -1126,7 +1131,7 @@ export class GoogleAdsManager {
 
     // GLOBAL rule: auto-apply Claude-MM-DD-YY label to the new ad
     const adRNs = ((result as any).results || []).map((r: any) => r.resource_name).filter(Boolean);
-    await this.autoLabelCreated(customerId, adRNs, "ad");
+    await this.autoLabelCreated(customerId, adRNs, "ad", ad.label_descriptor);
     // Attach any caller-supplied custom labels on top of the auto-date label.
     // Must run AFTER creation so the ad resource names exist. (Previously
     // omitted, which silently dropped the `labels` array — see BACKLOG.md.)
@@ -4132,6 +4137,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           path1: args?.path1 as string,
           path2: args?.path2 as string,
           labels: extraLabels,
+          label_descriptor: args?.label_descriptor as string | undefined,
         });
 
         return {
