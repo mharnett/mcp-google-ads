@@ -28,6 +28,7 @@ import {
 } from "./writeGate.js";
 import { sharedSetLinkWarning } from "./gaqlSharedSetGuard.js";
 import { claudeAuditLabel, AUTO_CLAUDE_LABEL_RE } from "./claudeLabel.js";
+import { buildBiddingCampaignUpdate, BIDDING_TYPE_ENUM_TO_NAME } from "./biddingUpdate.js";
 import { validateRsa } from "./validateRsa.js";
 import {
   validateRemoveInput,
@@ -2254,58 +2255,18 @@ export class GoogleAdsManager {
     }
 
     const currentTypeEnum = current.campaign.bidding_strategy_type as number;
-    const typeEnumToName: Record<number, string> = {
-      2: "MANUAL_CPC",
-      6: "MAXIMIZE_CONVERSIONS",
-      8: "TARGET_CPA",
-      9: "TARGET_ROAS",
-      10: "MAXIMIZE_CONVERSIONS",
-      11: "MAXIMIZE_CONVERSION_VALUE",
-      12: "TARGET_SPEND",
-    };
-    const currentStrategy = typeEnumToName[currentTypeEnum] || "UNKNOWN";
+    const currentStrategy = BIDDING_TYPE_ENUM_TO_NAME[currentTypeEnum] || "UNKNOWN";
     const resolvedStrategy = updates.strategy || currentStrategy;
 
     const targetCpaMicros = updates.target_cpa_dollars !== undefined
       ? Math.round(updates.target_cpa_dollars * 1_000_000)
       : undefined;
 
-    const campaignUpdate: any = {
-      resource_name: `customers/${cleanId}/campaigns/${campaignId}`,
-    };
-
-    switch (resolvedStrategy) {
-      case "MAXIMIZE_CONVERSIONS":
-        campaignUpdate.maximize_conversions = targetCpaMicros !== undefined
-          ? { target_cpa_micros: targetCpaMicros }
-          : {};
-        break;
-      case "MAXIMIZE_CONVERSION_VALUE":
-        campaignUpdate.maximize_conversion_value = updates.target_roas !== undefined
-          ? { target_roas: updates.target_roas }
-          : {};
-        break;
-      case "TARGET_CPA":
-        if (targetCpaMicros === undefined) {
-          throw new Error("TARGET_CPA strategy requires target_cpa_dollars");
-        }
-        campaignUpdate.target_cpa = { target_cpa_micros: targetCpaMicros };
-        break;
-      case "TARGET_ROAS":
-        if (updates.target_roas === undefined) {
-          throw new Error("TARGET_ROAS strategy requires target_roas");
-        }
-        campaignUpdate.target_roas = { target_roas: updates.target_roas };
-        break;
-      case "MANUAL_CPC":
-        campaignUpdate.manual_cpc = {};
-        break;
-      case "MAXIMIZE_CLICKS":
-        campaignUpdate.target_spend = {};
-        break;
-      default:
-        throw new Error(`Unsupported strategy: ${resolvedStrategy}`);
-    }
+    const campaignUpdate = buildBiddingCampaignUpdate(resolvedStrategy, {
+      resourceName: `customers/${cleanId}/campaigns/${campaignId}`,
+      targetCpaMicros,
+      targetRoas: updates.target_roas,
+    });
 
     await withResilience(
       () => customer.campaigns.update([campaignUpdate]),
