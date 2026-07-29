@@ -29,6 +29,7 @@ import {
 import { sharedSetLinkWarning } from "./gaqlSharedSetGuard.js";
 import { claudeAuditLabel, AUTO_CLAUDE_LABEL_RE } from "./claudeLabel.js";
 import { buildBiddingCampaignUpdate, BIDDING_TYPE_ENUM_TO_NAME } from "./biddingUpdate.js";
+import { buildAdRotationCampaignUpdate, AD_SERVING_OPTIMIZATION_STATUS, AD_SERVING_OPTIMIZATION_STATUS_ENUM_TO_NAME } from "./adRotationUpdate.js";
 import { validateRsa } from "./validateRsa.js";
 import {
   validateRemoveInput,
@@ -2280,6 +2281,47 @@ export class GoogleAdsManager {
       new_strategy: resolvedStrategy,
       target_cpa_dollars: updates.target_cpa_dollars,
       target_roas: updates.target_roas,
+    };
+  }
+
+  // Update campaign ad rotation (ad_serving_optimization_status). ROTATE
+  // self-reverts to OPTIMIZE after ~90 days (Google-managed); ROTATE_INDEFINITELY
+  // does not. Caller must pass an explicit mode — no default, so ROTATE_INDEFINITELY
+  // can never be applied by omission.
+  async updateCampaignAdRotation(customerId: string, campaignId: string, mode: string) {
+    const customer = this.getCustomer(customerId);
+    const cleanId = customerId.replace(/-/g, "");
+    const resourceName = `customers/${cleanId}/campaigns/${campaignId}`;
+
+    const [current] = await withResilience(
+      () =>
+        customer.query(`
+          SELECT campaign.id, campaign.name, campaign.ad_serving_optimization_status
+          FROM campaign
+          WHERE campaign.id = ${campaignId}
+        `),
+      "updateCampaignAdRotation.query"
+    );
+
+    if (!current?.campaign?.name) {
+      throw new Error(`Campaign ${campaignId} not found`);
+    }
+
+    const previousEnum = current.campaign.ad_serving_optimization_status as number;
+    const previousMode = AD_SERVING_OPTIMIZATION_STATUS_ENUM_TO_NAME[previousEnum] || "UNKNOWN";
+
+    const campaignUpdate = buildAdRotationCampaignUpdate(resourceName, mode);
+
+    await withResilience(
+      () => customer.campaigns.update([campaignUpdate]),
+      "updateCampaignAdRotation.update"
+    );
+
+    return {
+      campaign_id: campaignId,
+      campaign_name: current.campaign.name,
+      previous_mode: previousMode,
+      new_mode: mode,
     };
   }
 
@@ -5069,6 +5111,42 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
         const renameResult = await getAdsManager().renameCampaign(customerId, campaignId, newName);
         return { content: [{ type: "text", text: JSON.stringify({ success: true, ...renameResult }, null, 2) }] };
+      }
+
+      case "google_ads_update_campaign_ad_rotation": {
+        const customerId = args?.customer_id as string || "";
+        const campaignId = args?.campaign_id as string;
+        const mode = args?.mode as string;
+
+        if (!campaignId || !mode) {
+          return { content: [{ type: "text", text: JSON.stringify({ error: "campaign_id and mode are required." }, null, 2) }] };
+        }
+        if (!(mode in AD_SERVING_OPTIMIZATION_STATUS)) {
+          return { content: [{ type: "text", text: JSON.stringify({ error: `mode must be one of ${Object.keys(AD_SERVING_OPTIMIZATION_STATUS).join(", ")}.` }, null, 2) }] };
+        }
+
+        if (!args?.confirm) {
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({
+                dry_run: true,
+                action: "update_campaign_ad_rotation",
+                campaign_id: campaignId,
+                mode,
+                note: mode === "ROTATE_INDEFINITELY"
+                  ? "ROTATE_INDEFINITELY does NOT auto-revert — set a manual reminder to change it back."
+                  : mode === "ROTATE"
+                    ? "ROTATE auto-reverts to OPTIMIZE after ~90 days (Google-managed)."
+                    : undefined,
+                message: "Pass confirm: true to apply. This affects EVERY ad group in the campaign.",
+              }, null, 2),
+            }],
+          };
+        }
+
+        const rotationResult = await getAdsManager().updateCampaignAdRotation(customerId, campaignId, mode);
+        return { content: [{ type: "text", text: JSON.stringify({ success: true, ...rotationResult }, null, 2) }] };
       }
 
       case "google_ads_link_asset_to_campaign": {
