@@ -1591,4 +1591,26 @@ export const tools: Tool[] = [
       required: ["ad_group_ids"],
     },
   },
+  {
+    name: "google_ads_update_campaign_ad_rotation",
+    description: "Set a campaign's ad rotation (ad_serving_optimization_status) — the setting behind the UI's Settings > Ad rotation. Affects EVERY ad group in the campaign, not just one. ROTATE (\"Rotate evenly\") self-reverts to OPTIMIZE (\"Optimize: Prefer best performing ads\") after ~90 days — Google-managed, no follow-up needed. ROTATE_INDEFINITELY does NOT auto-revert and needs a manual revert or reminder. No default mode is applied — you must pass one explicitly, so ROTATE_INDEFINITELY can never be set by omission. DRY-RUN BY DEFAULT: omit `confirm` or pass `confirm: false` to preview.",
+    inputSchema: {
+      additionalProperties: false,
+      type: "object",
+      properties: {
+        customer_id: { type: "string" },
+        campaign_id: { type: "string", description: "Numeric ID of the campaign to update." },
+        mode: {
+          type: "string",
+          enum: ["OPTIMIZE", "CONVERSION_OPTIMIZE", "ROTATE", "ROTATE_INDEFINITELY"],
+          description: "OPTIMIZE = prefer best-performing ads (Google default). CONVERSION_OPTIMIZE = prefer ads likely to convert (requires conversion tracking). ROTATE = rotate evenly, auto-reverts to OPTIMIZE after ~90 days. ROTATE_INDEFINITELY = rotate evenly forever, no auto-revert.",
+        },
+        confirm: {
+          type: "boolean",
+          description: "Must be true to apply. Omit or false for dry-run preview.",
+        },
+      },
+      required: ["campaign_id", "mode"],
+    },
+  },
 ];

@@ -56,6 +56,7 @@ export const WRITE_TOOLS: ReadonlySet<string> = new Set([
   "google_ads_set_campaign_location_targeting",
   "google_ads_attach_user_list_audience",
   "google_ads_create_and_attach_audience_bundle",
+  "google_ads_update_campaign_ad_rotation",
 ]);
 
 const gate = createWriteGate({

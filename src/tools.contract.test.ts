@@ -72,6 +72,7 @@ describe("Tool Schema Contract", () => {
     "google_ads_link_asset_to_campaign",
     "google_ads_attach_user_list_audience",
     "google_ads_create_and_attach_audience_bundle",
+    "google_ads_update_campaign_ad_rotation",
   ];
 
   it("exports the expected number of tools", () => {
