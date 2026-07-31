@@ -98,4 +98,37 @@ describe("BIDDING_TYPE_ENUM_TO_NAME", () => {
     expect(BIDDING_TYPE_ENUM_TO_NAME[10]).toBe("MAXIMIZE_CONVERSIONS");
     expect(BIDDING_TYPE_ENUM_TO_NAME[11]).toBe("MAXIMIZE_CONVERSION_VALUE");
   });
+
+  // Ground truth from the installed google-ads-api v23 BiddingStrategyType enum
+  // (node_modules/google-ads-api/build/src/protos/autogen/enums.d.ts). The prior
+  // map was built from a misremembered enum ordering and was wrong for every
+  // entry except 10/11 — which is exactly why the test above never caught it.
+  // Anchors below pin each numeric value this tool can actually round-trip
+  // through updateCampaignBidding's "preserve current strategy" fallback.
+  it.each([
+    [3, "MANUAL_CPC"],
+    [6, "TARGET_CPA"],
+    [8, "TARGET_ROAS"],
+    [9, "MAXIMIZE_CLICKS"], // API type TARGET_SPEND=9, exposed to callers as MAXIMIZE_CLICKS
+    [10, "MAXIMIZE_CONVERSIONS"],
+    [11, "MAXIMIZE_CONVERSION_VALUE"],
+  ])("enum %i maps to the real BiddingStrategyType name %s", (enumValue, name) => {
+    expect(BIDDING_TYPE_ENUM_TO_NAME[enumValue]).toBe(name);
+  });
+
+  it("every mapped name round-trips through buildBiddingCampaignUpdate without throwing (or is a documented target-required exception)", () => {
+    const targetRequired = new Set(["TARGET_CPA", "TARGET_ROAS"]);
+    for (const name of Object.values(BIDDING_TYPE_ENUM_TO_NAME)) {
+      if (targetRequired.has(name)) {
+        expect(() => buildBiddingCampaignUpdate(name, { resourceName: RN })).toThrow();
+      } else {
+        expect(() => buildBiddingCampaignUpdate(name, { resourceName: RN })).not.toThrow();
+      }
+    }
+  });
+
+  it("does not map enum values outside this tool's supported strategy set (ENHANCED_CPC=2, PERCENT_CPC=12) — better to fall through to UNKNOWN and throw than silently misapply a strategy", () => {
+    expect(BIDDING_TYPE_ENUM_TO_NAME[2]).toBeUndefined();
+    expect(BIDDING_TYPE_ENUM_TO_NAME[12]).toBeUndefined();
+  });
 });

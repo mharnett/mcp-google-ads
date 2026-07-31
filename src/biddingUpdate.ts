@@ -3,14 +3,21 @@
 // Extracted from GoogleAdsManager.updateCampaignBidding so the mutate-object
 // construction is unit-testable independent of the live Google Ads client.
 
+// Ground truth: google-ads-api v23 BiddingStrategyType enum
+// (node_modules/google-ads-api/build/src/protos/autogen/enums.d.ts).
+// Only the numeric values this tool's `strategy` parameter can actually
+// produce are mapped. Anything else (ENHANCED_CPC=2, PERCENT_CPC=12,
+// TARGET_IMPRESSION_SHARE=15, etc.) is deliberately left unmapped so the
+// "preserve current strategy" fallback in updateCampaignBidding resolves to
+// "UNKNOWN" and buildBiddingCampaignUpdate throws — a loud failure beats
+// silently coercing an unsupported strategy into the wrong one.
 export const BIDDING_TYPE_ENUM_TO_NAME: Record<number, string> = {
-  2: "MANUAL_CPC",
-  6: "MAXIMIZE_CONVERSIONS",
-  8: "TARGET_CPA",
-  9: "TARGET_ROAS",
+  3: "MANUAL_CPC",
+  6: "TARGET_CPA",
+  8: "TARGET_ROAS",
+  9: "MAXIMIZE_CLICKS", // API type TARGET_SPEND=9, exposed to callers as MAXIMIZE_CLICKS
   10: "MAXIMIZE_CONVERSIONS",
   11: "MAXIMIZE_CONVERSION_VALUE",
-  12: "TARGET_SPEND",
 };
 
 export interface BiddingUpdateOpts {
