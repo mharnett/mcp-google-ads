@@ -768,7 +768,7 @@ export const tools: Tool[] = [
   },
   {
     name: "google_ads_update_campaign_bidding",
-    description: "Update a campaign's bidding strategy and/or target CPA / target ROAS. If `strategy` is omitted the current strategy is preserved and only the target values are updated (useful for adding a tCPA to an existing Max Conversions campaign). Dollar amounts are in dollars (converted to micros internally). target_roas is a decimal (e.g., 3.0 = 300%).",
+    description: "Update a campaign's bidding strategy and/or target CPA / target ROAS. If `strategy` is omitted the current strategy is preserved and only the target values are updated (useful for adding a tCPA to an existing Max Conversions campaign). Dollar amounts are in dollars (converted to micros internally). target_roas is a decimal (e.g., 3.0 = 300%). BLOCKS by default if the change implies a >20% target delta from the campaign's current value, or removes an existing target / switches off a target-based strategy entirely (a 'loosening' change with no percentage to measure) — pass confirm_large_change: true to override after reviewing the specific numbers.",
     inputSchema: {
       additionalProperties: false,
       type: "object",
@@ -782,6 +782,7 @@ export const tools: Tool[] = [
         },
         target_cpa_dollars: { type: "number", description: "Target CPA in dollars. Applies to MAXIMIZE_CONVERSIONS (optional ceiling) or TARGET_CPA (required)." },
         target_roas: { type: "number", description: "Target ROAS as decimal (3.0 = 300%). Applies to MAXIMIZE_CONVERSION_VALUE or TARGET_ROAS." },
+        confirm_large_change: { type: "boolean", description: "Required to be true to proceed when the change exceeds the 20% magnitude ceiling or removes an existing target/target-based strategy entirely. Omit or false to get a blocking error describing the exact delta first." },
       },
       required: ["campaign_id"],
     },

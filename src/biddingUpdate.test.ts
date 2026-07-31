@@ -4,6 +4,10 @@ import {
   BIDDING_TYPE_ENUM_TO_NAME,
   wouldDetachPortfolioStrategy,
   PortfolioDetachBlocked,
+  DEFAULT_MAGNITUDE_CEILING_PCT,
+  computeMagnitudeDeltaPct,
+  exceedsMagnitudeCeiling,
+  isStrategyLooseningChange,
 } from "./biddingUpdate.js";
 
 const RN = "customers/4948252953/campaigns/22989093772";
@@ -170,5 +174,89 @@ describe("PortfolioDetachBlocked", () => {
     );
     expect(err.message).toContain("customers/4948252953/biddingStrategies/111");
     expect(err.message).toContain("google_ads_detach_portfolio_bid_strategy");
+  });
+});
+
+// Origin: 2026-07-31 Forcepoint session — 4 live campaigns' target CPA was
+// changed via updateCampaignBidding with no guard at all (a companion
+// magnitude-ceiling gate exists in a DIFFERENT repo, automation/quality-
+// control's gads_apply.py, DEFAULT_MAGNITUDE_CEILING_PCT=20.0, but has zero
+// integration with this MCP server). These mirror that repo's naming/
+// threshold for cross-repo consistency, extended to cover a case Python's
+// version doesn't need to: this session's actual mutations were "remove an
+// existing target entirely" then "add a target where none existed" — neither
+// is a clean percentage delta from a baseline, and losing a target
+// (portfolio/strategy detach) is the literal incident this whole feature
+// class was built for.
+describe("computeMagnitudeDeltaPct", () => {
+  it("computes signed percent change from an existing baseline", () => {
+    expect(computeMagnitudeDeltaPct(2_200_000_000, 2_700_000_000)).toBeCloseTo(22.727, 2);
+    expect(computeMagnitudeDeltaPct(4_400_000_000, 6_000_000_000)).toBeCloseTo(36.364, 2);
+    expect(computeMagnitudeDeltaPct(1_000_000, 500_000)).toBeCloseTo(-50, 5);
+  });
+
+  it("returns null when there is no usable baseline (undefined, null, or zero) — no percentage is meaningful", () => {
+    expect(computeMagnitudeDeltaPct(undefined, 2_700_000_000)).toBeNull();
+    expect(computeMagnitudeDeltaPct(null, 2_700_000_000)).toBeNull();
+    expect(computeMagnitudeDeltaPct(0, 2_700_000_000)).toBeNull();
+  });
+
+  it("returns null when there is no new value to compare (e.g. dropping a target)", () => {
+    expect(computeMagnitudeDeltaPct(2_200_000_000, undefined)).toBeNull();
+    expect(computeMagnitudeDeltaPct(2_200_000_000, null)).toBeNull();
+  });
+});
+
+describe("exceedsMagnitudeCeiling", () => {
+  it("flags a delta beyond the default 20% ceiling in either direction", () => {
+    expect(DEFAULT_MAGNITUDE_CEILING_PCT).toBe(20);
+    expect(exceedsMagnitudeCeiling(4_400_000_000, 6_000_000_000)).toBe(true); // +36.4%
+    expect(exceedsMagnitudeCeiling(1_000_000, 500_000)).toBe(true); // -50%
+  });
+
+  it("does not flag a delta within the ceiling", () => {
+    expect(exceedsMagnitudeCeiling(2_200_000_000, 2_400_000_000)).toBe(false); // +9.1%
+  });
+
+  it("respects a caller-supplied ceiling override", () => {
+    expect(exceedsMagnitudeCeiling(2_200_000_000, 2_700_000_000, 30)).toBe(false); // +22.7% < 30%
+    expect(exceedsMagnitudeCeiling(2_200_000_000, 2_700_000_000, 10)).toBe(true); // +22.7% > 10%
+  });
+
+  it("never flags when there is no baseline to compare against (handled separately by isStrategyLooseningChange)", () => {
+    expect(exceedsMagnitudeCeiling(undefined, 2_700_000_000)).toBe(false);
+    expect(exceedsMagnitudeCeiling(0, 2_700_000_000)).toBe(false);
+  });
+});
+
+describe("isStrategyLooseningChange", () => {
+  it("flags removing an existing numeric target entirely (cap -> uncapped) — this session's first mutation", () => {
+    expect(
+      isStrategyLooseningChange(2_200_000_000, undefined, "TARGET_CPA", "MAXIMIZE_CONVERSIONS")
+    ).toBe(true);
+  });
+
+  it("does NOT flag adding a target where none existed — tightening, not loosening (this session's second mutation)", () => {
+    expect(
+      isStrategyLooseningChange(undefined, 2_700_000_000, "MAXIMIZE_CONVERSIONS", "MAXIMIZE_CONVERSIONS")
+    ).toBe(false);
+  });
+
+  it("flags switching away from a target-based strategy even if a target value is still nominally present", () => {
+    expect(
+      isStrategyLooseningChange(2_200_000_000, 2_200_000_000, "TARGET_CPA", "MANUAL_CPC")
+    ).toBe(true);
+  });
+
+  it("does not flag a plain value change within the same target-based strategy (percentage math handles that)", () => {
+    expect(
+      isStrategyLooseningChange(2_200_000_000, 2_700_000_000, "TARGET_CPA", "TARGET_CPA")
+    ).toBe(false);
+  });
+
+  it("does not flag when neither side ever had a target and strategy is unchanged", () => {
+    expect(
+      isStrategyLooseningChange(undefined, undefined, "MANUAL_CPC", "MANUAL_CPC")
+    ).toBe(false);
   });
 });
