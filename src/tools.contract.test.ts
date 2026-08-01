@@ -185,6 +185,10 @@ describe("Tool Schema Contract", () => {
       expect(schema.properties.logo_image_asset_ids?.type).toBe("array");
       expect(schema.properties.long_headlines?.type).toBe("array");
       expect(schema.properties.labels?.type).toBe("array");
+
+      // video_asset_ids is the DG video-only creative path — settable, not required.
+      expect(schema.properties.video_asset_ids?.type).toBe("array");
+      expect(schema.required).not.toContain("video_asset_ids");
     });
 
     it("update_demand_gen_multi_asset_ad requires the target ad and gates copy fields", () => {

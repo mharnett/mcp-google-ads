@@ -107,6 +107,13 @@ describe("validateDemandGenAd — required fields", () => {
     expect(result.errors).toEqual([]);
   });
 
+  it("accepts a video-only ad using video_asset_ids instead of images", () => {
+    const { marketing_image_asset_ids, ...noImages } = BASE_VALID;
+    const result = validateDemandGenAd({ ...noImages, video_asset_ids: ["555666"] });
+    expect(result.valid).toBe(true);
+    expect(result.errors).toEqual([]);
+  });
+
   it("rejects missing business_name", () => {
     const result = validateDemandGenAd({ ...BASE_VALID, business_name: "   " });
     expect(result.valid).toBe(false);
@@ -189,6 +196,29 @@ describe("buildDemandGenAdPayload", () => {
     expect(dgAd.square_marketing_images).toBeUndefined();
     expect(dgAd.portrait_marketing_images).toBeUndefined();
     expect(dgAd.logo_images).toBeUndefined();
+  });
+
+  it("maps video_asset_ids to a videos array of asset resource names", () => {
+    const { marketing_image_asset_ids, ...noImages } = BASE_VALID;
+    const payload = buildDemandGenAdPayload({
+      customer_id_clean: "1234567890",
+      ad_group_id: "777",
+      input: { ...noImages, video_asset_ids: ["555666", "777888"] },
+    });
+    const dgAd = payload.ad.demand_gen_multi_asset_ad;
+    expect(dgAd.videos).toEqual([
+      { asset: "customers/1234567890/assets/555666" },
+      { asset: "customers/1234567890/assets/777888" },
+    ]);
+  });
+
+  it("omits videos when video_asset_ids not provided", () => {
+    const payload = buildDemandGenAdPayload({
+      customer_id_clean: "11",
+      ad_group_id: "22",
+      input: BASE_VALID,
+    });
+    expect(payload.ad.demand_gen_multi_asset_ad.videos).toBeUndefined();
   });
 });
 
