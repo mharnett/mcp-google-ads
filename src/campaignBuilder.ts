@@ -75,6 +75,14 @@ export function buildCampaignCreatePayload(input: CampaignCreateInput): Campaign
     // rejects with "required field not present").
     contains_eu_political_advertising:
       enums.EuPoliticalAdvertisingStatus?.DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING ?? 3,
+    // API defaults geo_target_type_setting.positive_geo_target_type to
+    // PRESENCE_OR_INTEREST when omitted, which serves ads worldwide to anyone
+    // "interested in" the targeted location regardless of correct geo_target_ids.
+    // Always PRESENCE — caught 3x in production (2026-07-20, 07-31, 08-01) via
+    // next-day monitoring because this field was never set at creation time.
+    geo_target_type_setting: {
+      positive_geo_target_type: enums.PositiveGeoTargetType.PRESENCE,
+    },
   };
 
   // DEMAND_GEN campaigns use target_google_search: true to signal Demand Gen

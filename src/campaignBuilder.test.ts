@@ -162,3 +162,43 @@ describe("buildCampaignCreatePayload — DEMAND_GEN channel", () => {
     expect(plan.campaign.network_settings).toBeUndefined();
   });
 });
+
+describe("buildCampaignCreatePayload — geo_target_type_setting always PRESENCE", () => {
+  // Google Ads API defaults geo_target_type_setting.positive_geo_target_type to
+  // PRESENCE_OR_INTEREST when omitted, which serves ads worldwide to anyone
+  // "interested in" the targeted location regardless of correct geo_target_ids.
+  // Caught 3x in production (2026-07-20, 2026-07-31, 2026-08-01) via next-day
+  // geo_sweep monitoring, never at creation time — this must always be PRESENCE.
+  it("sets positive_geo_target_type=PRESENCE on a SEARCH campaign with geo targeting", () => {
+    const plan = buildCampaignCreatePayload({
+      name: "Search Geo",
+      budget_amount_micros: 10_000_000,
+      geo_target_ids: ["2840"],
+    });
+    expect(plan.campaign.geo_target_type_setting).toEqual({
+      positive_geo_target_type: enums.PositiveGeoTargetType.PRESENCE,
+    });
+  });
+
+  it("sets positive_geo_target_type=PRESENCE on a DEMAND_GEN campaign with geo targeting", () => {
+    const plan = buildCampaignCreatePayload({
+      name: "DG Geo",
+      budget_amount_micros: 10_000_000,
+      channel_type: "DEMAND_GEN",
+      geo_target_ids: ["21134"],
+    });
+    expect(plan.campaign.geo_target_type_setting).toEqual({
+      positive_geo_target_type: enums.PositiveGeoTargetType.PRESENCE,
+    });
+  });
+
+  it("sets positive_geo_target_type=PRESENCE even when no geo_target_ids are provided (back-compat call)", () => {
+    const plan = buildCampaignCreatePayload({
+      name: "Test Campaign",
+      budget_amount_micros: 10_000_000,
+    });
+    expect(plan.campaign.geo_target_type_setting).toEqual({
+      positive_geo_target_type: enums.PositiveGeoTargetType.PRESENCE,
+    });
+  });
+});
