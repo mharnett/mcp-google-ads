@@ -6,6 +6,7 @@
  *   - long_headlines:  max 5, each ≤ 90 chars
  *   - descriptions:    max 5, each ≤ 90 chars
  *   - marketing_image_asset_ids: optional, ≥ 1 when provided (1.91:1 landscape images); video-only ads supported
+ *   - video_asset_ids:  optional, YouTube video asset IDs for video-only (or video+image) ads
  *   - business_name:   required, non-empty
  *   - call_to_action:  required, non-empty (string CTA enum value)
  *   - final_urls:      required, ≥ 1
@@ -22,6 +23,7 @@ export interface DemandGenAdInput {
   square_marketing_image_asset_ids?: string[];
   portrait_marketing_image_asset_ids?: string[];
   logo_image_asset_ids?: string[];
+  video_asset_ids?: string[];
   headlines: Array<string | { text: string; pinned_position?: number }>;
   long_headlines?: string[];
   descriptions: string[];
@@ -92,6 +94,9 @@ export function buildDemandGenAdPayload(args: {
   }
   if (input.logo_image_asset_ids?.length) {
     dgAd.logo_images = input.logo_image_asset_ids.map(assetRef);
+  }
+  if (input.video_asset_ids?.length) {
+    dgAd.videos = input.video_asset_ids.map(assetRef);
   }
   if (input.long_headlines?.length) {
     dgAd.long_headlines = input.long_headlines.map((t) => ({ text: t }));

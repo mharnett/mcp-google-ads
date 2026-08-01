@@ -5398,6 +5398,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               | string[]
               | undefined,
             logo_image_asset_ids: args?.logo_image_asset_ids as string[] | undefined,
+            video_asset_ids: args?.video_asset_ids as string[] | undefined,
             headlines: args?.headlines as Array<string | { text: string; pinned_position?: number }>,
             long_headlines: args?.long_headlines as string[] | undefined,
             descriptions: args?.descriptions as string[],

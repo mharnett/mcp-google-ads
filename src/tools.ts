@@ -1030,7 +1030,7 @@ export const tools: Tool[] = [
   },
   {
     name: "google_ads_create_demand_gen_multi_asset_ad",
-    description: "Create a Demand Gen Multi-Asset ad under a DEMAND_GEN_MULTI_ASSET_AD_GROUP (will be PAUSED until approved). Supports both image-based and video-only ads. Validates character limits and count caps before the API call: headlines (max 5, ≤40 chars each), long_headlines (max 5, ≤90 chars), descriptions (max 5, ≤90 chars). For image ads: marketing_image_asset_ids (1.91:1 landscape, ≥1); for video-only ads, omit images. Square/portrait/logo assets are optional. call_to_action is a string enum value such as 'LEARN_MORE' or 'SHOP_NOW'. Auto-labels the created ad.",
+    description: "Create a Demand Gen Multi-Asset ad under a DEMAND_GEN_MULTI_ASSET_AD_GROUP (will be PAUSED until approved). Supports both image-based and video-only ads. Validates character limits and count caps before the API call: headlines (max 5, ≤40 chars each), long_headlines (max 5, ≤90 chars), descriptions (max 5, ≤90 chars). For image ads: marketing_image_asset_ids (1.91:1 landscape, ≥1); for video ads: video_asset_ids (YouTube video asset IDs) — omit images entirely for a video-only ad, or combine both. Square/portrait/logo assets are optional. call_to_action is a string enum value such as 'LEARN_MORE' or 'SHOP_NOW'. Auto-labels the created ad.",
     inputSchema: {
       additionalProperties: false,
       type: "object",
@@ -1066,6 +1066,11 @@ export const tools: Tool[] = [
           type: "array",
           items: { type: "string" },
           description: "Optional 1:1 logo image asset IDs.",
+        },
+        video_asset_ids: {
+          type: "array",
+          items: { type: "string" },
+          description: "YouTube video asset IDs for video-only (or video+image) DG ads. Get IDs from existing youtube_video_asset assets (e.g. via a GAQL asset query) — there is currently no dedicated 'create YouTube video asset' tool; find-or-create happens implicitly the first time a video is used on a VIDEO campaign ad (see google_ads_update_video_ad_videos), after which its asset ID is reusable here.",
         },
         headlines: {
           type: "array",
