@@ -28,7 +28,7 @@ import {
 } from "./writeGate.js";
 import { sharedSetLinkWarning } from "./gaqlSharedSetGuard.js";
 import { claudeAuditLabel, AUTO_CLAUDE_LABEL_RE } from "./claudeLabel.js";
-import { buildBiddingCampaignUpdate, BIDDING_TYPE_ENUM_TO_NAME } from "./biddingUpdate.js";
+import { buildBiddingCampaignUpdate, BIDDING_TYPE_ENUM_TO_NAME, wouldDetachPortfolioStrategy, PortfolioDetachBlocked } from "./biddingUpdate.js";
 import { buildAdRotationCampaignUpdate, AD_SERVING_OPTIMIZATION_STATUS, AD_SERVING_OPTIMIZATION_STATUS_ENUM_TO_NAME } from "./adRotationUpdate.js";
 import { validateRsa } from "./validateRsa.js";
 import {
@@ -692,23 +692,21 @@ export class GoogleAdsManager {
     if (createNewBudget) {
       const portfolioStrategyResource = currentCampaign.campaign?.bidding_strategy;
 
-      // Google requires an aligned portfolio strategy + shared budget to be broken
-      // atomically — neither can change independently. We use mutateResources to send
-      // both operations in one batch call. The library's getFieldMask is patched to
-      // also exclude snake_case "resource_name" from the update_mask (matching the
-      // existing camelCase "resourceName" exclusion). target_cpa_micros: 0 gets into
-      // the field mask via the raw JS object path (not stripped by proto defaults:false)
-      // and setting a maximize_conversions sub-field triggers proto3 oneof to clear
-      // the bidding_strategy (portfolio) reference atomically.
+      if (wouldDetachPortfolioStrategy(portfolioStrategyResource)) {
+        throw new PortfolioDetachBlocked(campaignId, campaignName, portfolioStrategyResource);
+      }
+
+      // Portfolio-attached campaigns are blocked above, so this only ever runs for
+      // standalone campaigns — the new budget and the campaign's budget reassignment
+      // are still sent atomically via mutateResources in one batch call. The library's
+      // getFieldMask is patched to also exclude snake_case "resource_name" from the
+      // update_mask (matching the existing camelCase "resourceName" exclusion).
       const tempBudgetResourceName = `customers/${cleanId}/campaignBudgets/-1`;
 
       const campaignResource: Record<string, any> = {
         resource_name: `customers/${cleanId}/campaigns/${campaignId}`,
         campaign_budget: tempBudgetResourceName,
       };
-      if (portfolioStrategyResource) {
-        campaignResource.maximize_conversions = { target_cpa_micros: 0 };
-      }
 
       const mutateResult = await withResilience(
         () => customer.mutateResources([
@@ -744,9 +742,6 @@ export class GoogleAdsManager {
         old_daily_budget: Number(oldAmountMicros) / 1_000_000,
         new_budget_resource: newBudgetResourceName,
         new_daily_budget: dailyBudgetDollars,
-        ...(portfolioStrategyResource && {
-          bidding_note: "Detached from portfolio strategy → campaign-level Maximize Conversions. Re-apply tCPA/tROAS targets if needed.",
-        }),
       };
     } else {
       // Update existing budget amount in place
@@ -769,6 +764,52 @@ export class GoogleAdsManager {
         warning: "This update affects ALL campaigns sharing this budget",
       };
     }
+  }
+
+  // Detach a campaign from its portfolio bid strategy, dropping it to
+  // campaign-level Maximize Conversions with no target. This is the only
+  // sanctioned way to break a portfolio attachment — updateCampaignBidding
+  // and updateCampaignBudget's createNewBudget path both refuse to do it
+  // silently and point callers here instead.
+  async detachPortfolioBidStrategy(customerId: string, campaignId: string) {
+    const customer = this.getCustomer(customerId);
+    const cleanId = customerId.replace(/-/g, "");
+
+    const [current] = await withResilience(
+      () =>
+        customer.query(`
+          SELECT campaign.id, campaign.name, campaign.bidding_strategy, campaign.bidding_strategy_type
+          FROM campaign
+          WHERE campaign.id = ${campaignId}
+        `),
+      "detachPortfolioBidStrategy.query"
+    );
+
+    if (!current?.campaign?.name) {
+      throw new Error(`Campaign ${campaignId} not found`);
+    }
+
+    const portfolioStrategyResource = current.campaign.bidding_strategy;
+    if (!wouldDetachPortfolioStrategy(portfolioStrategyResource)) {
+      throw new Error(`Campaign ${campaignId} is not attached to a portfolio bid strategy — nothing to detach`);
+    }
+
+    await withResilience(
+      () =>
+        customer.campaigns.update([{
+          resource_name: `customers/${cleanId}/campaigns/${campaignId}`,
+          maximize_conversions: { target_cpa_micros: 0 },
+        }]),
+      "detachPortfolioBidStrategy.update"
+    );
+
+    return {
+      campaign_id: campaignId,
+      campaign_name: current.campaign.name,
+      previous_portfolio_strategy_resource: portfolioStrategyResource,
+      new_strategy: "MAXIMIZE_CONVERSIONS",
+      warning: "Detached from portfolio strategy → campaign-level Maximize Conversions with no target. Re-apply tCPA/tROAS targets if needed.",
+    };
   }
 
   // Create a campaign (paused by default). Supports SEARCH (back-compat) and
@@ -2244,7 +2285,7 @@ export class GoogleAdsManager {
     const [current] = await withResilience(
       () =>
         customer.query(`
-          SELECT campaign.id, campaign.name, campaign.bidding_strategy_type
+          SELECT campaign.id, campaign.name, campaign.bidding_strategy_type, campaign.bidding_strategy
           FROM campaign
           WHERE campaign.id = ${campaignId}
         `),
@@ -2253,6 +2294,14 @@ export class GoogleAdsManager {
 
     if (!current?.campaign?.name) {
       throw new Error(`Campaign ${campaignId} not found`);
+    }
+
+    if (wouldDetachPortfolioStrategy(current.campaign.bidding_strategy)) {
+      throw new PortfolioDetachBlocked(
+        campaignId,
+        current.campaign.name,
+        current.campaign.bidding_strategy
+      );
     }
 
     const currentTypeEnum = current.campaign.bidding_strategy_type as number;
@@ -4965,6 +5014,31 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           target_cpa_dollars: targetCpaDollars,
           target_roas: targetRoas,
         });
+
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({ success: true, ...result }, null, 2),
+          }],
+        };
+      }
+
+      case "google_ads_detach_portfolio_bid_strategy": {
+        const customerId = args?.customer_id as string || "";
+        const campaignId = args?.campaign_id as string;
+
+        if (args?.confirm !== true) {
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({
+                error: "This is irreversible. Pass confirm: true to detach the portfolio bid strategy and drop this campaign to campaign-level Maximize Conversions with no target.",
+              }, null, 2),
+            }],
+          };
+        }
+
+        const result = await getAdsManager().detachPortfolioBidStrategy(customerId, campaignId);
 
         return {
           content: [{

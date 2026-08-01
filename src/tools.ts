@@ -787,6 +787,23 @@ export const tools: Tool[] = [
     },
   },
   {
+    name: "google_ads_detach_portfolio_bid_strategy",
+    description: "Detach a campaign from its portfolio (cross-campaign) bid strategy, dropping it to campaign-level Maximize Conversions with no target. This is the ONLY sanctioned way to break a portfolio bid-strategy attachment — google_ads_update_campaign_bidding and google_ads_update_campaign_budget (create_new_budget) both refuse to do this silently and point here instead. IRREVERSIBLE: re-attaching or re-applying tCPA/tROAS targets afterward is a separate manual step. Requires confirm: true.",
+    inputSchema: {
+      additionalProperties: false,
+      type: "object",
+      properties: {
+        customer_id: { type: "string" },
+        campaign_id: { type: "string", description: "The numeric string campaign ID to detach from its portfolio strategy." },
+        confirm: {
+          type: "boolean",
+          description: "Must be true to apply. This is irreversible and the only way to break a portfolio bid-strategy attachment.",
+        },
+      },
+      required: ["campaign_id", "confirm"],
+    },
+  },
+  {
     name: "google_ads_update_ad_asset_automation",
     description: "Set asset_automation_settings (auto-generated video, image enhancements, etc.) on one or more AdGroupAds. Use this to opt Demand Gen multi-asset ads OUT of Google's auto-generation features so creative output stays under advertiser control. Likely Demand Gen UI mappings (verify in UI on first use): 'Auto-generate video' → GENERATE_VIDEOS_FROM_OTHER_ASSETS; 'Adaptive layouts' → GENERATE_DESIGN_VERSIONS_FOR_IMAGES. Auto-applies today's Claude-MM-DD-YY label.",
     inputSchema: {
