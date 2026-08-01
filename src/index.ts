@@ -28,7 +28,12 @@ import {
 } from "./writeGate.js";
 import { sharedSetLinkWarning } from "./gaqlSharedSetGuard.js";
 import { claudeAuditLabel, AUTO_CLAUDE_LABEL_RE } from "./claudeLabel.js";
-import { buildBiddingCampaignUpdate, BIDDING_TYPE_ENUM_TO_NAME, wouldDetachPortfolioStrategy, PortfolioDetachBlocked } from "./biddingUpdate.js";
+import {
+  buildBiddingCampaignUpdate, BIDDING_TYPE_ENUM_TO_NAME,
+  wouldDetachPortfolioStrategy, PortfolioDetachBlocked,
+  computeMagnitudeDeltaPct, exceedsMagnitudeCeiling, isStrategyLooseningChange,
+  DEFAULT_MAGNITUDE_CEILING_PCT,
+} from "./biddingUpdate.js";
 import { buildAdRotationCampaignUpdate, AD_SERVING_OPTIMIZATION_STATUS, AD_SERVING_OPTIMIZATION_STATUS_ENUM_TO_NAME } from "./adRotationUpdate.js";
 import { validateRsa } from "./validateRsa.js";
 import {
@@ -2274,10 +2279,19 @@ export class GoogleAdsManager {
 
   // Update campaign bidding strategy (and/or target CPA / target ROAS).
   // If `strategy` is omitted, the current strategy is preserved and only the target is updated.
+  //
+  // Magnitude-ceiling guard (2026-07-31, Forcepoint session origin — see
+  // biddingUpdate.ts): blocks a >20% target delta or a target-based ->
+  // untargeted "loosening" change unless the caller passes
+  // confirm_large_change: true. A companion gate exists in a different repo
+  // (automation/quality-control's gads_apply.py) but has zero integration
+  // with this MCP server — this is the actual enforcement point for direct/
+  // manual bidding changes made through Claude Code or any other caller.
   async updateCampaignBidding(customerId: string, campaignId: string, updates: {
     strategy?: "MAXIMIZE_CONVERSIONS" | "MAXIMIZE_CONVERSION_VALUE" | "TARGET_CPA" | "TARGET_ROAS" | "MANUAL_CPC" | "MAXIMIZE_CLICKS";
     target_cpa_dollars?: number;
     target_roas?: number;
+    confirm_large_change?: boolean;
   }) {
     const customer = this.getCustomer(customerId);
     const cleanId = customerId.replace(/-/g, "");
@@ -2285,7 +2299,12 @@ export class GoogleAdsManager {
     const [current] = await withResilience(
       () =>
         customer.query(`
-          SELECT campaign.id, campaign.name, campaign.bidding_strategy_type, campaign.bidding_strategy
+          SELECT campaign.id, campaign.name, campaign.bidding_strategy_type,
+                 campaign.bidding_strategy,
+                 campaign.target_cpa.target_cpa_micros,
+                 campaign.maximize_conversions.target_cpa_micros,
+                 campaign.target_roas.target_roas,
+                 campaign.maximize_conversion_value.target_roas
           FROM campaign
           WHERE campaign.id = ${campaignId}
         `),
@@ -2311,6 +2330,47 @@ export class GoogleAdsManager {
     const targetCpaMicros = updates.target_cpa_dollars !== undefined
       ? Math.round(updates.target_cpa_dollars * 1_000_000)
       : undefined;
+
+    const oldTargetCpaMicros =
+      current.campaign.target_cpa?.target_cpa_micros ??
+      current.campaign.maximize_conversions?.target_cpa_micros ??
+      undefined;
+    const oldTargetRoas =
+      current.campaign.target_roas?.target_roas ??
+      current.campaign.maximize_conversion_value?.target_roas ??
+      undefined;
+
+    if (!updates.confirm_large_change) {
+      const looseningCpa = isStrategyLooseningChange(
+        oldTargetCpaMicros, targetCpaMicros, currentStrategy, resolvedStrategy
+      );
+      const looseningRoas = isStrategyLooseningChange(
+        oldTargetRoas, updates.target_roas, currentStrategy, resolvedStrategy
+      );
+      const cpaOverCeiling = exceedsMagnitudeCeiling(oldTargetCpaMicros, targetCpaMicros);
+      const roasOverCeiling = exceedsMagnitudeCeiling(oldTargetRoas, updates.target_roas);
+
+      if (looseningCpa || looseningRoas) {
+        throw new Error(
+          `Bidding change on campaign ${campaignId} (${current.campaign.name}) removes an ` +
+          `existing target or switches off a target-based strategy (${currentStrategy} -> ` +
+          `${resolvedStrategy}) — this is a "loosening" change with no percentage delta to ` +
+          `measure, and is the exact class of change (silent target/portfolio detach) that ` +
+          `caused a real incident. Pass confirm_large_change: true to proceed anyway.`
+        );
+      }
+      if (cpaOverCeiling || roasOverCeiling) {
+        const deltaPct = cpaOverCeiling
+          ? computeMagnitudeDeltaPct(oldTargetCpaMicros, targetCpaMicros)
+          : computeMagnitudeDeltaPct(oldTargetRoas, updates.target_roas);
+        throw new Error(
+          `Bidding change on campaign ${campaignId} (${current.campaign.name}) implies a ` +
+          `${deltaPct! >= 0 ? "+" : ""}${deltaPct!.toFixed(0)}% target change, exceeding the ` +
+          `${DEFAULT_MAGNITUDE_CEILING_PCT}% learning-phase-safe ceiling — learning phase reset ` +
+          `risk. Pass confirm_large_change: true to proceed anyway.`
+        );
+      }
+    }
 
     const campaignUpdate = buildBiddingCampaignUpdate(resolvedStrategy, {
       resourceName: `customers/${cleanId}/campaigns/${campaignId}`,
@@ -4983,6 +5043,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const strategy = args?.strategy as "MAXIMIZE_CONVERSIONS" | "MAXIMIZE_CONVERSION_VALUE" | "TARGET_CPA" | "TARGET_ROAS" | "MANUAL_CPC" | "MAXIMIZE_CLICKS" | undefined;
         const targetCpaDollars = args?.target_cpa_dollars as number | undefined;
         const targetRoas = args?.target_roas as number | undefined;
+        const confirmLargeChange = args?.confirm_large_change as boolean | undefined;
 
         if (strategy === undefined && targetCpaDollars === undefined && targetRoas === undefined) {
           return {
@@ -5013,6 +5074,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           strategy,
           target_cpa_dollars: targetCpaDollars,
           target_roas: targetRoas,
+          confirm_large_change: confirmLargeChange,
         });
 
         return {

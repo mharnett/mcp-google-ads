@@ -50,6 +50,55 @@ export class PortfolioDetachBlocked extends Error {
   }
 }
 
+// Magnitude-ceiling guard. Mirrors automation/quality-control's gads_apply.py
+// (DEFAULT_MAGNITUDE_CEILING_PCT, compute_magnitude_delta_pct,
+// exceeds_magnitude_ceiling) for cross-repo naming consistency — that gate
+// only covers a different pipeline (the SPC Slack-card apply flow) and has
+// no integration with this MCP server at all, which is the actual gap this
+// closes for direct/manual bidding changes.
+export const DEFAULT_MAGNITUDE_CEILING_PCT = 20;
+
+export function computeMagnitudeDeltaPct(
+  oldValue: number | undefined | null,
+  newValue: number | undefined | null
+): number | null {
+  if (oldValue === undefined || oldValue === null || oldValue === 0) return null;
+  if (newValue === undefined || newValue === null) return null;
+  return ((newValue - oldValue) / oldValue) * 100;
+}
+
+export function exceedsMagnitudeCeiling(
+  oldValue: number | undefined | null,
+  newValue: number | undefined | null,
+  ceilingPct: number = DEFAULT_MAGNITUDE_CEILING_PCT
+): boolean {
+  const delta = computeMagnitudeDeltaPct(oldValue, newValue);
+  if (delta === null) return false;
+  return Math.abs(delta) > ceilingPct;
+}
+
+const TARGET_BASED_STRATEGIES = new Set(["TARGET_CPA", "TARGET_ROAS"]);
+
+// Losing an existing numeric target entirely (cap -> uncapped) or switching
+// away from a target-based strategy has no percentage delta to compute, but
+// is the exact class of change behind the incident that motivated this
+// feature (silent portfolio/target detachment) — gate it directly rather
+// than let a missing baseline silently mean "nothing to check."
+export function isStrategyLooseningChange(
+  oldTargetMicros: number | undefined | null,
+  newTargetMicros: number | undefined | null,
+  oldStrategy: string,
+  newStrategy: string
+): boolean {
+  const hadTarget = typeof oldTargetMicros === "number" && oldTargetMicros > 0;
+  const hasTarget = typeof newTargetMicros === "number" && newTargetMicros > 0;
+  if (hadTarget && !hasTarget) return true;
+  if (TARGET_BASED_STRATEGIES.has(oldStrategy) && !TARGET_BASED_STRATEGIES.has(newStrategy)) {
+    return true;
+  }
+  return false;
+}
+
 export interface BiddingUpdateOpts {
   resourceName: string;
   targetCpaMicros?: number;
