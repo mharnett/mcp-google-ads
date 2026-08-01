@@ -1,5 +1,29 @@
 # Changelog
 
+## [1.9.0](https://github.com/mharnett/mcp-google-ads/compare/v1.8.0...v1.9.0) (2026-08-01)
+
+
+### Features
+
+* add google_ads_update_campaign_ad_rotation tool ([#25](https://github.com/mharnett/mcp-google-ads/issues/25)) ([205c83e](https://github.com/mharnett/mcp-google-ads/commit/205c83e7466959a8069b7ee6fd97c41db475331d))
+* add google_ads_update_video_ad_videos — ad-level VIDEO channel video management ([6a79491](https://github.com/mharnett/mcp-google-ads/commit/6a79491cd01623d6eb6938e35a963a1077fd3063))
+* **bidding:** add magnitude-ceiling guard to updateCampaignBidding ([#29](https://github.com/mharnett/mcp-google-ads/issues/29)) ([1e63b65](https://github.com/mharnett/mcp-google-ads/commit/1e63b65250c90b6962665bdf6e38958292323e00))
+* **demand-gen:** support video_asset_ids on DG multi-asset ad creation ([#27](https://github.com/mharnett/mcp-google-ads/issues/27)) ([5c8a68b](https://github.com/mharnett/mcp-google-ads/commit/5c8a68bd346df3193e0febd0a9f359eda409228c))
+* **gaql:** warn on campaign_shared_set queries without an ENABLED filter ([f548b9f](https://github.com/mharnett/mcp-google-ads/commit/f548b9fd60ad0b8fe60cc76ae9b2654007498fa5))
+* **gaql:** warn when campaign_shared_set is queried without an ENABLED filter ([895c7ae](https://github.com/mharnett/mcp-google-ads/commit/895c7aede55cbbbff978e5e8e0361c09ecec27ba))
+* google_ads_update_video_ad_videos — ad-level VIDEO channel video management ([b3b7dab](https://github.com/mharnett/mcp-google-ads/commit/b3b7dab85a178e376171e0fe4bb2370bb8add71b))
+* **guards:** canonical claude-MM-DD-YY[-desc] audit-label format ([#22](https://github.com/mharnett/mcp-google-ads/issues/22)) ([a3d075c](https://github.com/mharnett/mcp-google-ads/commit/a3d075c5776c2f656aaa6390937b75f1496e04ea))
+* **labels:** thread label_descriptor into the auto claude label ([#23](https://github.com/mharnett/mcp-google-ads/issues/23)) ([6241206](https://github.com/mharnett/mcp-google-ads/commit/62412060fd0d0e361cdcc9471d05b00cfb671f55))
+
+
+### Bug Fixes
+
+* **bidding:** block silent portfolio-strategy detach, add explicit detach tool ([#26](https://github.com/mharnett/mcp-google-ads/issues/26)) ([f2e1c24](https://github.com/mharnett/mcp-google-ads/commit/f2e1c2464393ea2da3e8417b76fd318e72ce1654))
+* **bidding:** correct BIDDING_TYPE_ENUM_TO_NAME against real BiddingStrategyType enum ([91ff035](https://github.com/mharnett/mcp-google-ads/commit/91ff035fdffaf4ed714c3baa21b3652d0969e270))
+* **bidding:** stop update_campaign_bidding silently no-opping target-less MaxConv/MCV switches ([#24](https://github.com/mharnett/mcp-google-ads/issues/24)) ([04cce8b](https://github.com/mharnett/mcp-google-ads/commit/04cce8b3d7d0c500be326dc8e5cfd8819cdd9ed1))
+* **geo:** force positive_geo_target_type=PRESENCE on campaign creation ([#28](https://github.com/mharnett/mcp-google-ads/issues/28)) ([7d0b090](https://github.com/mharnett/mcp-google-ads/commit/7d0b0901587755241f27e668a795740ece04ca14))
+* uniform return shape for updateVideoAdVideos no-op path (TS18048) ([70aa59c](https://github.com/mharnett/mcp-google-ads/commit/70aa59cd7fd56bdc51d8e9b5e3e436fe66288987))
+
 ## [1.8.0](https://github.com/mharnett/mcp-google-ads/compare/v1.7.0...v1.8.0) (2026-07-12)
 
 
