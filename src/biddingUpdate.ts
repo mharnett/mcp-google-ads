@@ -20,6 +20,36 @@ export const BIDDING_TYPE_ENUM_TO_NAME: Record<number, string> = {
   11: "MAXIMIZE_CONVERSION_VALUE",
 };
 
+// Every branch of buildBiddingCampaignUpdate below sets a non-oneof-portfolio
+// bidding field (maximize_conversions / target_cpa / etc.), which clears the
+// campaign's `bidding_strategy` (portfolio) oneof reference. So any campaign
+// currently attached to a portfolio strategy — bidding_strategy populated —
+// gets silently detached the moment updateCampaignBidding runs, regardless of
+// which strategy the caller asked for.
+export function wouldDetachPortfolioStrategy(
+  currentBiddingStrategyResource: string | null | undefined
+): currentBiddingStrategyResource is string {
+  return typeof currentBiddingStrategyResource === "string" && currentBiddingStrategyResource.length > 0;
+}
+
+export class PortfolioDetachBlocked extends Error {
+  campaignId: string;
+  campaignName: string;
+  portfolioStrategyResource: string;
+
+  constructor(campaignId: string, campaignName: string, portfolioStrategyResource: string) {
+    super(
+      `Campaign ${campaignId} ("${campaignName}") is attached to portfolio bid strategy ` +
+        `${portfolioStrategyResource}. This update would silently detach it. ` +
+        `Use google_ads_detach_portfolio_bid_strategy instead if you intend to break the attachment.`
+    );
+    this.name = "PortfolioDetachBlocked";
+    this.campaignId = campaignId;
+    this.campaignName = campaignName;
+    this.portfolioStrategyResource = portfolioStrategyResource;
+  }
+}
+
 export interface BiddingUpdateOpts {
   resourceName: string;
   targetCpaMicros?: number;

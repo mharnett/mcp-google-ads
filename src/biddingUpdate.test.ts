@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest";
 import {
   buildBiddingCampaignUpdate,
   BIDDING_TYPE_ENUM_TO_NAME,
+  wouldDetachPortfolioStrategy,
+  PortfolioDetachBlocked,
 } from "./biddingUpdate.js";
 
 const RN = "customers/4948252953/campaigns/22989093772";
@@ -130,5 +132,43 @@ describe("BIDDING_TYPE_ENUM_TO_NAME", () => {
   it("does not map enum values outside this tool's supported strategy set (ENHANCED_CPC=2, PERCENT_CPC=12) — better to fall through to UNKNOWN and throw than silently misapply a strategy", () => {
     expect(BIDDING_TYPE_ENUM_TO_NAME[2]).toBeUndefined();
     expect(BIDDING_TYPE_ENUM_TO_NAME[12]).toBeUndefined();
+  });
+});
+
+describe("wouldDetachPortfolioStrategy", () => {
+  it("returns true for a populated portfolio strategy resource name", () => {
+    expect(
+      wouldDetachPortfolioStrategy("customers/4948252953/biddingStrategies/111")
+    ).toBe(true);
+  });
+
+  it("returns false for undefined", () => {
+    expect(wouldDetachPortfolioStrategy(undefined)).toBe(false);
+  });
+
+  it("returns false for null", () => {
+    expect(wouldDetachPortfolioStrategy(null)).toBe(false);
+  });
+
+  it("returns false for an empty string", () => {
+    expect(wouldDetachPortfolioStrategy("")).toBe(false);
+  });
+});
+
+describe("PortfolioDetachBlocked", () => {
+  it("carries campaignId, campaignName, portfolioStrategyResource and names both in the message", () => {
+    const err = new PortfolioDetachBlocked(
+      "22989093772",
+      "Brand — Search",
+      "customers/4948252953/biddingStrategies/111"
+    );
+    expect(err).toBeInstanceOf(Error);
+    expect(err.campaignId).toBe("22989093772");
+    expect(err.campaignName).toBe("Brand — Search");
+    expect(err.portfolioStrategyResource).toBe(
+      "customers/4948252953/biddingStrategies/111"
+    );
+    expect(err.message).toContain("customers/4948252953/biddingStrategies/111");
+    expect(err.message).toContain("google_ads_detach_portfolio_bid_strategy");
   });
 });
