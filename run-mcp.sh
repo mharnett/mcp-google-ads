@@ -4,7 +4,12 @@
 export GOOGLE_ADS_DEVELOPER_TOKEN=$(security find-generic-password -a google-ads-mcp -s GOOGLE_ADS_DEVELOPER_TOKEN -w 2>/dev/null)
 export GOOGLE_ADS_CLIENT_ID=$(security find-generic-password -a google-ads-mcp -s GOOGLE_ADS_CLIENT_ID -w 2>/dev/null)
 export GOOGLE_ADS_CLIENT_SECRET=$(security find-generic-password -a google-ads-mcp -s GOOGLE_ADS_CLIENT_SECRET -w 2>/dev/null)
-export GOOGLE_ADS_REFRESH_TOKEN=$(security find-generic-password -a google-ads-drak -s GOOGLE_ADS_REFRESH_TOKEN -w 2>/dev/null)
+if [ "$GOOGLE_ADS_MCP_WRITE" = "true" ]; then
+  GOOGLE_ADS_REFRESH_TOKEN_ACCOUNT=google-ads-admin-drak
+else
+  GOOGLE_ADS_REFRESH_TOKEN_ACCOUNT=google-ads-ro-drak
+fi
+export GOOGLE_ADS_REFRESH_TOKEN=$(security find-generic-password -a "$GOOGLE_ADS_REFRESH_TOKEN_ACCOUNT" -s GOOGLE_ADS_REFRESH_TOKEN -w 2>/dev/null)
 export GOOGLE_ADS_REFRESH_TOKEN_FLOWSPACE=$(security find-generic-password -a google-ads-flowspace -s GOOGLE_ADS_REFRESH_TOKEN_FLOWSPACE -w 2>/dev/null)
 
 # Fail fast if any required Keychain lookup returned empty
