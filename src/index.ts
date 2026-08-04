@@ -1237,6 +1237,16 @@ export class GoogleAdsManager {
       input,
     });
 
+    // DEBUG: log the payload to see what's being sent
+    if (input.video_asset_ids?.length) {
+      console.error(
+        "[DG_AD_DEBUG] video_asset_ids provided:",
+        input.video_asset_ids,
+        "| payload.ad.demand_gen_multi_asset_ad.videos:",
+        (payload.ad.demand_gen_multi_asset_ad as any).videos
+      );
+    }
+
     const mutateResp: any = await withResilience(
       () =>
         customer.mutateResources([
@@ -1284,6 +1294,38 @@ export class GoogleAdsManager {
       } catch (e: any) {
         assetAutomationOptOut = `failed: ${e.message}`;
         console.error(`[WARN] auto-asset-automation opt-out failed for ${resourceName}: ${e.message}`);
+      }
+    }
+
+    // VALIDATION: If video_asset_ids were requested, verify they actually saved
+    if (input.video_asset_ids?.length && resourceName) {
+      try {
+        const adId = resourceName.split("~").pop();
+        const verifyRows = await withResilience(
+          () =>
+            customer.query(
+              `SELECT ad_group_ad.ad.demand_gen_multi_asset_ad.videos FROM ad_group_ad WHERE ad_group_ad.ad.id = ${sanitizeNumericId(
+                adId || ""
+              )}`
+            ),
+          "createDemandGenMultiAssetAd.verifyVideos"
+        );
+        const savedVideos = (verifyRows?.[0] as any)?.ad_group_ad?.ad?.demand_gen_multi_asset_ad?.videos;
+        if (!savedVideos || savedVideos.length === 0) {
+          console.error(
+            `[ERROR] DG ad ${adId}: video_asset_ids provided (${input.video_asset_ids.join(
+              ","
+            )}) but NO videos saved to Google Ads. This is a silent failure in google-ads-api or the Google Ads API. The ad was created with images only.`
+          );
+        } else if (savedVideos.length !== input.video_asset_ids.length) {
+          console.warn(
+            `[WARN] DG ad ${adId}: requested ${input.video_asset_ids.length} videos but only ${savedVideos.length} saved`
+          );
+        }
+      } catch (e: any) {
+        console.error(
+          `[WARN] Could not verify videos on created ad (post-creation validation failed): ${e.message}`
+        );
       }
     }
 

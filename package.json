@@ -82,7 +82,7 @@
     "cockatiel": "^3.2.1",
     "dotenv": "^17.3.1",
     "env-paths": "^4.0.0",
-    "google-ads-api": "^23.0.0",
+    "google-ads-api": "^24.1.0",
     "mcp-write-gate": "^1.0.0",
     "open": "^11.0.0",
     "pino": "^8.21.0",
