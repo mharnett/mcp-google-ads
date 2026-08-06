@@ -89,3 +89,77 @@ describe("run-mcp.sh Keychain account selection", () => {
     expect(runWithWriteFlag("true")).toBe("google-ads-admin-drak");
   });
 });
+
+// ============================================
+// Keychain RESOLUTION (integration — real `security`).
+// ============================================
+// The selection tests above stub `security`, so they assert only which account
+// NAME each branch picks. By construction they cannot detect that the named
+// account is absent from the Keychain — which is exactly what happened: the RO
+// branch shipped pointing at google-ads-ro-drak two days before that item
+// existed, all three tests green, and every read-only session died at runtime
+// with "[FATAL] GOOGLE_ADS_REFRESH_TOKEN is empty".
+//
+// This block runs the real script against the REAL `security` binary and
+// asserts run-mcp.sh's own fail-fast loop passes for BOTH branches. The `node`
+// stub is silent (never echoes the token) so no secret can reach test output.
+//
+// Local-only by design: run-mcp.sh is Mark's private launcher and the Keychain
+// items exist only on his machine.
+//
+// Gating on "is darwin && has security" was WRONG — GitHub's macos-latest
+// runners satisfy both, but their Keychain is empty, so the script fail-fasts
+// on the very first lookup (GOOGLE_ADS_DEVELOPER_TOKEN) and the test failed on
+// all three macOS jobs. The real prerequisite is "is this the machine whose
+// Keychain is supposed to hold these items", which CI never is.
+//
+// Deliberately NOT gated on whether the items exist. That check would skip
+// precisely when the bug this test exists to catch is present — a guard that
+// disables itself on failure is worse than no guard.
+
+const IS_LOCAL_DEV_MACHINE =
+  !process.env.CI &&
+  process.platform === "darwin" &&
+  spawnSync("command", ["-v", "security"], { shell: true }).status === 0;
+
+describe.skipIf(!IS_LOCAL_DEV_MACHINE)(
+  "run-mcp.sh Keychain accounts resolve to real secrets",
+  () => {
+    let silentBinDir;
+
+    beforeAll(() => {
+      silentBinDir = mkdtempSync(path.join(tmpdir(), "run-mcp-silent-bin-"));
+      // Stops the real server from launching. Prints NOTHING — the real
+      // GOOGLE_ADS_REFRESH_TOKEN is in this env and must not be echoed.
+      writeFileSync(path.join(silentBinDir, "node"), "#!/bin/bash\nexit 0\n");
+      chmodSync(path.join(silentBinDir, "node"), 0o755);
+    });
+
+    afterAll(() => {
+      rmSync(silentBinDir, { recursive: true, force: true });
+    });
+
+    function resolveWithWriteFlag(value) {
+      const env = { ...process.env, PATH: `${silentBinDir}:${process.env.PATH}` };
+      if (value === undefined) {
+        delete env.GOOGLE_ADS_MCP_WRITE;
+      } else {
+        env.GOOGLE_ADS_MCP_WRITE = value;
+      }
+      const result = spawnSync("bash", [SCRIPT], { env, encoding: "utf8" });
+      return { status: result.status, stderr: result.stderr ?? "" };
+    }
+
+    it("read-only branch: every required credential resolves non-empty", () => {
+      const { status, stderr } = resolveWithWriteFlag(undefined);
+      expect(stderr).not.toMatch(/\[FATAL\]/);
+      expect(status).toBe(0);
+    });
+
+    it("write branch: every required credential resolves non-empty", () => {
+      const { status, stderr } = resolveWithWriteFlag("true");
+      expect(stderr).not.toMatch(/\[FATAL\]/);
+      expect(status).toBe(0);
+    });
+  }
+);
