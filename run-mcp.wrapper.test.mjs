@@ -105,14 +105,24 @@ describe("run-mcp.sh Keychain account selection", () => {
 // stub is silent (never echoes the token) so no secret can reach test output.
 //
 // Local-only by design: run-mcp.sh is Mark's private launcher and the Keychain
-// items exist only on his machine, so this skips off-darwin / without
-// `security`. The skip is loud — it must never read as a pass.
+// items exist only on his machine.
+//
+// Gating on "is darwin && has security" was WRONG — GitHub's macos-latest
+// runners satisfy both, but their Keychain is empty, so the script fail-fasts
+// on the very first lookup (GOOGLE_ADS_DEVELOPER_TOKEN) and the test failed on
+// all three macOS jobs. The real prerequisite is "is this the machine whose
+// Keychain is supposed to hold these items", which CI never is.
+//
+// Deliberately NOT gated on whether the items exist. That check would skip
+// precisely when the bug this test exists to catch is present — a guard that
+// disables itself on failure is worse than no guard.
 
-const HAS_KEYCHAIN =
+const IS_LOCAL_DEV_MACHINE =
+  !process.env.CI &&
   process.platform === "darwin" &&
   spawnSync("command", ["-v", "security"], { shell: true }).status === 0;
 
-describe.skipIf(!HAS_KEYCHAIN)(
+describe.skipIf(!IS_LOCAL_DEV_MACHINE)(
   "run-mcp.sh Keychain accounts resolve to real secrets",
   () => {
     let silentBinDir;
