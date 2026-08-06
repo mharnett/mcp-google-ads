@@ -71,6 +71,9 @@ describe("Tool Schema Contract", () => {
     "google_ads_rename_ad_group",
     "google_ads_rename_campaign",
     "google_ads_link_asset_to_campaign",
+    "google_ads_create_callout",
+    "google_ads_create_structured_snippet",
+    "google_ads_link_asset_to_customer",
     "google_ads_attach_user_list_audience",
     "google_ads_create_and_attach_audience_bundle",
     "google_ads_update_campaign_ad_rotation",
@@ -204,6 +207,34 @@ describe("Tool Schema Contract", () => {
       expect(schema.properties.descriptions?.type).toBe("array");
       expect(schema.required).not.toContain("headlines");
       expect(schema.required).not.toContain("descriptions");
+    });
+
+    it("create_callout requires callout_text", () => {
+      const tool = tools.find(t => t.name === "google_ads_create_callout");
+      expect(tool).toBeDefined();
+      expect((tool!.inputSchema as any).required).toEqual(["callout_text"]);
+    });
+
+    it("create_structured_snippet requires header + values, header is the fixed Google enum", () => {
+      const tool = tools.find(t => t.name === "google_ads_create_structured_snippet");
+      expect(tool).toBeDefined();
+      const schema = tool!.inputSchema as any;
+      expect(schema.required).toContain("header");
+      expect(schema.required).toContain("values");
+      expect(schema.properties.header?.enum).toContain("Types");
+      expect(schema.properties.header?.enum).toContain("Service catalog");
+      expect(schema.properties.values?.type).toBe("array");
+    });
+
+    it("link_asset_to_customer requires asset_id + field_type, no campaign_ids (account-level)", () => {
+      // Distinguishes this from link_asset_to_campaign: the whole point of a
+      // customer-level link is that it applies without naming any campaign.
+      const tool = tools.find(t => t.name === "google_ads_link_asset_to_customer");
+      expect(tool).toBeDefined();
+      const schema = tool!.inputSchema as any;
+      expect(schema.required).toEqual(["asset_id", "field_type"]);
+      expect(schema.properties).not.toHaveProperty("campaign_ids");
+      expect(schema.properties.field_type?.enum).toEqual(["SITELINK", "CALLOUT", "STRUCTURED_SNIPPET"]);
     });
 
     it("link_asset_to_campaign field_type enum includes LEAD_FORM", () => {
