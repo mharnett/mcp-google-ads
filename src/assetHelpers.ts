@@ -310,6 +310,190 @@ export function buildReplaceSitelinkDryRun(args: ReplaceSitelinkArgs): ReplaceSi
   };
 }
 
+// ============================================
+// CREATE CALLOUT
+// ============================================
+
+export interface CreateCalloutArgs {
+  customer_id?: string;
+  callout_text: string;
+  confirm?: boolean;
+}
+
+export interface CreateCalloutDryRun {
+  dry_run: true;
+  message: string;
+  customer_id: string;
+  callout_text: string;
+}
+
+export function normalizeCreateCalloutArgs(raw: Record<string, unknown> | undefined): CreateCalloutArgs | { error: string } {
+  const r = raw ?? {};
+  const customer_id = typeof r.customer_id === "string" ? r.customer_id : undefined;
+
+  const calloutText = validateSitelinkText(r.callout_text, "callout_text", 25);
+  if (!calloutText.ok) return { error: calloutText.error };
+
+  return {
+    customer_id,
+    callout_text: calloutText.value,
+    confirm: r.confirm === true || r.confirm === "true",
+  };
+}
+
+export function buildCreateCalloutDryRun(args: CreateCalloutArgs): CreateCalloutDryRun {
+  return {
+    dry_run: true,
+    message: "DRY RUN. Nothing created. Pass confirm: true to actually create the callout asset.",
+    customer_id: args.customer_id ?? "",
+    callout_text: args.callout_text,
+  };
+}
+
+// ============================================
+// CREATE STRUCTURED SNIPPET
+// ============================================
+
+// Google Ads structured-snippet headers are drawn from a fixed, Google-defined
+// list (STRUCTURED_SNIPPET_HEADER_INVALID otherwise) -- not a free-text field.
+// https://support.google.com/google-ads/answer/7332837
+export const STRUCTURED_SNIPPET_HEADERS = [
+  "Amenities",
+  "Brands",
+  "Courses",
+  "Degree programs",
+  "Destinations",
+  "Featured hotels",
+  "Insurance coverage",
+  "Models",
+  "Neighborhoods",
+  "Service catalog",
+  "Shows",
+  "Styles",
+  "Types",
+] as const;
+
+const STRUCTURED_SNIPPET_HEADERS_BY_LOWER = new Map(
+  STRUCTURED_SNIPPET_HEADERS.map(h => [h.toLowerCase(), h])
+);
+
+export interface CreateStructuredSnippetArgs {
+  customer_id?: string;
+  header: string;
+  values: string[];
+  confirm?: boolean;
+}
+
+export interface CreateStructuredSnippetDryRun {
+  dry_run: true;
+  message: string;
+  customer_id: string;
+  header: string;
+  values: string[];
+}
+
+export function normalizeCreateStructuredSnippetArgs(raw: Record<string, unknown> | undefined): CreateStructuredSnippetArgs | { error: string } {
+  const r = raw ?? {};
+  const customer_id = typeof r.customer_id === "string" ? r.customer_id : undefined;
+
+  if (typeof r.header !== "string" || !r.header.trim()) {
+    return { error: "header must be a non-empty string" };
+  }
+  const canonicalHeader = STRUCTURED_SNIPPET_HEADERS_BY_LOWER.get(r.header.trim().toLowerCase());
+  if (!canonicalHeader) {
+    return {
+      error: `Unrecognized structured-snippet header "${r.header}". Must be one of: ${STRUCTURED_SNIPPET_HEADERS.join(", ")}.`,
+    };
+  }
+
+  const rawValues = coerceArray(r.values);
+  if (!rawValues || rawValues.length < 3 || rawValues.length > 10) {
+    return { error: `values must be an array of 3-10 strings (got ${rawValues?.length ?? 0})` };
+  }
+  const values: string[] = [];
+  for (const v of rawValues) {
+    const validated = validateSitelinkText(v, "values entry", 25);
+    if (!validated.ok) return { error: validated.error };
+    values.push(validated.value);
+  }
+
+  return {
+    customer_id,
+    header: canonicalHeader,
+    values,
+    confirm: r.confirm === true || r.confirm === "true",
+  };
+}
+
+export function buildCreateStructuredSnippetDryRun(args: CreateStructuredSnippetArgs): CreateStructuredSnippetDryRun {
+  return {
+    dry_run: true,
+    message: "DRY RUN. Nothing created. Pass confirm: true to actually create the structured snippet asset.",
+    customer_id: args.customer_id ?? "",
+    header: args.header,
+    values: args.values,
+  };
+}
+
+// ============================================
+// LINK ASSET TO CUSTOMER (account-level link)
+// ============================================
+
+export const CUSTOMER_ASSET_FIELD_TYPES = ["SITELINK", "CALLOUT", "STRUCTURED_SNIPPET"] as const;
+export type CustomerAssetFieldType = (typeof CUSTOMER_ASSET_FIELD_TYPES)[number];
+
+export interface LinkAssetToCustomerArgs {
+  customer_id?: string;
+  asset_id: string;
+  field_type: CustomerAssetFieldType;
+  confirm?: boolean;
+}
+
+export interface LinkAssetToCustomerDryRun {
+  dry_run: true;
+  message: string;
+  customer_id: string;
+  asset_id: string;
+  field_type: CustomerAssetFieldType;
+}
+
+export function normalizeLinkAssetToCustomerArgs(raw: Record<string, unknown> | undefined): LinkAssetToCustomerArgs | { error: string } {
+  const r = raw ?? {};
+  const customer_id = typeof r.customer_id === "string" ? r.customer_id : undefined;
+
+  const assetIdRaw = typeof r.asset_id === "string" ? r.asset_id.trim()
+    : typeof r.asset_id === "number" ? String(r.asset_id)
+    : "";
+  if (!assetIdRaw || !/^\d+$/.test(assetIdRaw)) {
+    return { error: `invalid asset_id: ${JSON.stringify(r.asset_id)}. Expected numeric asset ID.` };
+  }
+
+  if (typeof r.field_type !== "string" || !r.field_type.trim()) {
+    return { error: "field_type must be a non-empty string" };
+  }
+  const fieldType = r.field_type.trim().toUpperCase();
+  if (!(CUSTOMER_ASSET_FIELD_TYPES as readonly string[]).includes(fieldType)) {
+    return { error: `Unsupported field_type: "${r.field_type}". Supported values: ${CUSTOMER_ASSET_FIELD_TYPES.join(", ")}` };
+  }
+
+  return {
+    customer_id,
+    asset_id: assetIdRaw,
+    field_type: fieldType as CustomerAssetFieldType,
+    confirm: r.confirm === true || r.confirm === "true",
+  };
+}
+
+export function buildLinkAssetToCustomerDryRun(args: LinkAssetToCustomerArgs): LinkAssetToCustomerDryRun {
+  return {
+    dry_run: true,
+    message: "DRY RUN. Nothing linked. Pass confirm: true to actually link the asset at the customer (account) level.",
+    customer_id: args.customer_id ?? "",
+    asset_id: args.asset_id,
+    field_type: args.field_type,
+  };
+}
+
 export function buildPauseLinksDryRun(args: PauseAssetLinksArgs): PauseLinksDryRun {
   const would: PauseLinksDryRun["would_pause"] = {
     customer_asset: [],

@@ -53,6 +53,12 @@ import {
   buildCreateSitelinkDryRun,
   normalizeReplaceSitelinkArgs,
   buildReplaceSitelinkDryRun,
+  normalizeCreateCalloutArgs,
+  buildCreateCalloutDryRun,
+  normalizeCreateStructuredSnippetArgs,
+  buildCreateStructuredSnippetDryRun,
+  normalizeLinkAssetToCustomerArgs,
+  buildLinkAssetToCustomerDryRun,
 } from "./assetHelpers.js";
 import {
   buildCampaignCreatePayload,
@@ -2937,6 +2943,111 @@ export class GoogleAdsManager {
   }
 
   // ============================================
+  // CALLOUT / STRUCTURED SNIPPET CREATE + CUSTOMER-LEVEL LINK
+  // ============================================
+
+  async createCallout(customerId: string, args: { callout_text: string }) {
+    const customer = this.getCustomer(customerId);
+    const cleanId = customerId.replace(/-/g, "");
+
+    const result = await withResilience(
+      () =>
+        customer.assets.create([
+          {
+            type: enums.AssetType.CALLOUT,
+            callout_asset: { callout_text: args.callout_text },
+          } as any,
+        ]),
+      "createCallout"
+    );
+
+    const results = (result as any).results || [];
+    const resourceName: string | undefined = results[0]?.resource_name;
+    const assetId = resourceName ? resourceName.split("/").pop() : undefined;
+
+    if (resourceName) {
+      await this.autoLabelCreated(customerId, [resourceName], "asset");
+    }
+
+    return {
+      customer_id: cleanId,
+      asset_id: assetId,
+      resource_name: resourceName,
+      callout_text: args.callout_text,
+    };
+  }
+
+  async createStructuredSnippet(customerId: string, args: { header: string; values: string[] }) {
+    const customer = this.getCustomer(customerId);
+    const cleanId = customerId.replace(/-/g, "");
+
+    const result = await withResilience(
+      () =>
+        customer.assets.create([
+          {
+            type: enums.AssetType.STRUCTURED_SNIPPET,
+            structured_snippet_asset: { header: args.header, values: args.values },
+          } as any,
+        ]),
+      "createStructuredSnippet"
+    );
+
+    const results = (result as any).results || [];
+    const resourceName: string | undefined = results[0]?.resource_name;
+    const assetId = resourceName ? resourceName.split("/").pop() : undefined;
+
+    if (resourceName) {
+      await this.autoLabelCreated(customerId, [resourceName], "asset");
+    }
+
+    return {
+      customer_id: cleanId,
+      asset_id: assetId,
+      resource_name: resourceName,
+      header: args.header,
+      values: args.values,
+    };
+  }
+
+  async linkAssetToCustomer(customerId: string, args: { asset_id: string; field_type: string }) {
+    const customer = this.getCustomer(customerId);
+    const cleanId = customerId.replace(/-/g, "");
+
+    const fieldTypeMap: Record<string, any> = {
+      SITELINK: enums.AssetFieldType.SITELINK,
+      CALLOUT: enums.AssetFieldType.CALLOUT,
+      STRUCTURED_SNIPPET: enums.AssetFieldType.STRUCTURED_SNIPPET,
+    };
+
+    const fieldType = fieldTypeMap[args.field_type.toUpperCase()];
+    if (fieldType === undefined) {
+      throw new Error(
+        `Unknown field_type: "${args.field_type}". Supported values: SITELINK, CALLOUT, STRUCTURED_SNIPPET`
+      );
+    }
+
+    const assetResource = `customers/${cleanId}/assets/${args.asset_id}`;
+    const result = await withResilience(
+      () =>
+        customer.customerAssets.create([
+          { asset: assetResource, field_type: fieldType } as any,
+        ]),
+      "linkAssetToCustomer"
+    );
+
+    const results = (result as any).results || [];
+    const resourceName: string | undefined = results[0]?.resource_name;
+
+    return {
+      customer_id: cleanId,
+      asset_id: args.asset_id,
+      asset_resource_name: assetResource,
+      field_type: args.field_type,
+      resource_name: resourceName,
+    };
+  }
+
+  // ============================================
   // EXPERIMENT METHODS
   // ============================================
 
@@ -5360,6 +5471,51 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           field_type: fieldType,
         });
         return { content: [{ type: "text", text: JSON.stringify({ success: true, ...linkResult }, null, 2) }] };
+      }
+
+      case "google_ads_create_callout": {
+        const normalized = normalizeCreateCalloutArgs(args as Record<string, unknown>);
+        if ("error" in normalized) {
+          return { content: [{ type: "text", text: JSON.stringify({ error: normalized.error }, null, 2) }] };
+        }
+        if (!normalized.confirm) {
+          return { content: [{ type: "text", text: JSON.stringify(buildCreateCalloutDryRun(normalized), null, 2) }] };
+        }
+        const customerId = normalized.customer_id || "";
+        const result = await getAdsManager().createCallout(customerId, { callout_text: normalized.callout_text });
+        return { content: [{ type: "text", text: JSON.stringify({ success: true, ...result }, null, 2) }] };
+      }
+
+      case "google_ads_create_structured_snippet": {
+        const normalized = normalizeCreateStructuredSnippetArgs(args as Record<string, unknown>);
+        if ("error" in normalized) {
+          return { content: [{ type: "text", text: JSON.stringify({ error: normalized.error }, null, 2) }] };
+        }
+        if (!normalized.confirm) {
+          return { content: [{ type: "text", text: JSON.stringify(buildCreateStructuredSnippetDryRun(normalized), null, 2) }] };
+        }
+        const customerId = normalized.customer_id || "";
+        const result = await getAdsManager().createStructuredSnippet(customerId, {
+          header: normalized.header,
+          values: normalized.values,
+        });
+        return { content: [{ type: "text", text: JSON.stringify({ success: true, ...result }, null, 2) }] };
+      }
+
+      case "google_ads_link_asset_to_customer": {
+        const normalized = normalizeLinkAssetToCustomerArgs(args as Record<string, unknown>);
+        if ("error" in normalized) {
+          return { content: [{ type: "text", text: JSON.stringify({ error: normalized.error }, null, 2) }] };
+        }
+        if (!normalized.confirm) {
+          return { content: [{ type: "text", text: JSON.stringify(buildLinkAssetToCustomerDryRun(normalized), null, 2) }] };
+        }
+        const customerId = normalized.customer_id || "";
+        const result = await getAdsManager().linkAssetToCustomer(customerId, {
+          asset_id: normalized.asset_id,
+          field_type: normalized.field_type,
+        });
+        return { content: [{ type: "text", text: JSON.stringify({ success: true, ...result }, null, 2) }] };
       }
 
       case "google_ads_get_campaign_diagnostics": {

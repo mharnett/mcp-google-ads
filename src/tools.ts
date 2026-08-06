@@ -1556,6 +1556,71 @@ export const tools: Tool[] = [
     },
   },
   {
+    name: "google_ads_create_callout",
+    description: "Create a new CALLOUT Asset (short promotional snippet, max 25 chars, e.g. \"Free Shipping\"). Callouts are shared and must be linked separately -- use google_ads_link_asset_to_campaign (campaign-level) or google_ads_link_asset_to_customer (account-level) after creation. DRY-RUN BY DEFAULT: omit `confirm` or pass `confirm: false` to preview.",
+    inputSchema: {
+      additionalProperties: false,
+      type: "object",
+      properties: {
+        customer_id: { type: "string" },
+        callout_text: { type: "string", description: "Callout text (max 25 chars)." },
+        confirm: {
+          type: "boolean",
+          description: "Must be true to actually create. Omit or false for dry-run preview.",
+        },
+      },
+      required: ["callout_text"],
+    },
+  },
+  {
+    name: "google_ads_create_structured_snippet",
+    description: "Create a new STRUCTURED_SNIPPET Asset (a header + 3-10 short values, e.g. header \"Types\" with values [\"DLP\", \"DSPM\"]). The header must be one of Google's fixed structured-snippet headers (Amenities, Brands, Courses, Degree programs, Destinations, Featured hotels, Insurance coverage, Models, Neighborhoods, Service catalog, Shows, Styles, Types) -- Google rejects any other header. Each value is max 25 chars. Structured snippets are shared and must be linked separately -- use google_ads_link_asset_to_campaign (campaign-level) or google_ads_link_asset_to_customer (account-level) after creation. DRY-RUN BY DEFAULT: omit `confirm` or pass `confirm: false` to preview.",
+    inputSchema: {
+      additionalProperties: false,
+      type: "object",
+      properties: {
+        customer_id: { type: "string" },
+        header: {
+          type: "string",
+          enum: ["Amenities", "Brands", "Courses", "Degree programs", "Destinations", "Featured hotels", "Insurance coverage", "Models", "Neighborhoods", "Service catalog", "Shows", "Styles", "Types"],
+          description: "One of Google's fixed structured-snippet headers.",
+        },
+        values: {
+          type: "array",
+          items: { type: "string" },
+          description: "3-10 short values (max 25 chars each).",
+        },
+        confirm: {
+          type: "boolean",
+          description: "Must be true to actually create. Omit or false for dry-run preview.",
+        },
+      },
+      required: ["header", "values"],
+    },
+  },
+  {
+    name: "google_ads_link_asset_to_customer",
+    description: "Link an existing asset to the customer account itself (account-level, applies across every campaign unless overridden at a lower level). Supports SITELINK, CALLOUT, and STRUCTURED_SNIPPET. Create the asset first (e.g. with google_ads_create_sitelink, google_ads_create_callout, or google_ads_create_structured_snippet), then use this to attach it at the account level. To remove an account-level link, use google_ads_pause_asset_links against the resulting customer_asset resource name. DRY-RUN BY DEFAULT: omit `confirm` or pass `confirm: false` to preview.",
+    inputSchema: {
+      additionalProperties: false,
+      type: "object",
+      properties: {
+        customer_id: { type: "string" },
+        asset_id: { type: "string", description: "Numeric ID of the existing asset to link." },
+        field_type: {
+          type: "string",
+          enum: ["SITELINK", "CALLOUT", "STRUCTURED_SNIPPET"],
+          description: "Asset field type — determines how the asset appears in ads.",
+        },
+        confirm: {
+          type: "boolean",
+          description: "Must be true to apply. Omit or false for dry-run preview.",
+        },
+      },
+      required: ["asset_id", "field_type"],
+    },
+  },
+  {
     name: "google_ads_attach_user_list_audience",
     description: "Attach a Customer Match / user-list audience to one or more ad groups. Defaults to OBSERVATION mode (reporting-only, does not restrict delivery) — pass mode='TARGETING' to restrict delivery to list members. Use for measuring on-list reach/CPM/conversions of existing campaigns without changing targeting. Get user_list_id from a GAQL query on user_list. DRY-RUN BY DEFAULT: omit `confirm` or pass `confirm: false` to preview.",
     inputSchema: {

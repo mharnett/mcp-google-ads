@@ -11,6 +11,13 @@ import {
   buildCreateSitelinkDryRun,
   normalizeReplaceSitelinkArgs,
   buildReplaceSitelinkDryRun,
+  normalizeCreateCalloutArgs,
+  buildCreateCalloutDryRun,
+  normalizeCreateStructuredSnippetArgs,
+  buildCreateStructuredSnippetDryRun,
+  STRUCTURED_SNIPPET_HEADERS,
+  normalizeLinkAssetToCustomerArgs,
+  buildLinkAssetToCustomerDryRun,
 } from "./assetHelpers.js";
 
 describe("parseAssetLinkResourceName", () => {
@@ -359,5 +366,181 @@ describe("buildPauseLinksDryRun", () => {
     expect(dr.would_pause.customer_asset).toHaveLength(1);
     expect(dr.would_pause.campaign_asset).toHaveLength(1);
     expect(dr.would_pause.ad_group_asset).toHaveLength(1);
+  });
+});
+
+describe("normalizeCreateCalloutArgs", () => {
+  it("accepts a minimal valid call", () => {
+    const r = normalizeCreateCalloutArgs({ callout_text: "Data Loss Prevention" });
+    expect("error" in r).toBe(false);
+    if ("error" in r) return;
+    expect(r.callout_text).toBe("Data Loss Prevention");
+    expect(r.confirm).toBe(false);
+  });
+
+  it("trims callout_text", () => {
+    const r = normalizeCreateCalloutArgs({ callout_text: "  Secure AI Adoption  " });
+    if (!("error" in r)) expect(r.callout_text).toBe("Secure AI Adoption");
+  });
+
+  it("rejects callout_text longer than 25 chars", () => {
+    const r = normalizeCreateCalloutArgs({ callout_text: "x".repeat(26) });
+    expect("error" in r).toBe(true);
+  });
+
+  it("accepts callout_text at exactly 25 chars", () => {
+    const r = normalizeCreateCalloutArgs({ callout_text: "x".repeat(25) });
+    expect("error" in r).toBe(false);
+  });
+
+  it("rejects empty callout_text", () => {
+    const r = normalizeCreateCalloutArgs({ callout_text: "" });
+    expect("error" in r).toBe(true);
+  });
+
+  it("rejects missing callout_text", () => {
+    expect("error" in normalizeCreateCalloutArgs({})).toBe(true);
+  });
+
+  it("accepts confirm: true", () => {
+    const r = normalizeCreateCalloutArgs({ callout_text: "Data Fingerprinting", confirm: true });
+    if (!("error" in r)) expect(r.confirm).toBe(true);
+  });
+});
+
+describe("buildCreateCalloutDryRun", () => {
+  it("returns dry_run with the callout text", () => {
+    const dr = buildCreateCalloutDryRun({ customer_id: "1234567890", callout_text: "GenAI Data Protection" });
+    expect(dr.dry_run).toBe(true);
+    expect(dr.callout_text).toBe("GenAI Data Protection");
+    expect(dr.message).toMatch(/confirm: true/);
+  });
+});
+
+describe("STRUCTURED_SNIPPET_HEADERS", () => {
+  // Anchor: these are the fixed, Google-defined structured-snippet headers.
+  // Google's API rejects any header outside this set (STRUCTURED_SNIPPET_HEADER_INVALID).
+  it("includes the headers this refresh actually uses", () => {
+    expect(STRUCTURED_SNIPPET_HEADERS).toContain("Types");
+    expect(STRUCTURED_SNIPPET_HEADERS).toContain("Service catalog");
+  });
+
+  it("does not include an arbitrary free-text header", () => {
+    expect(STRUCTURED_SNIPPET_HEADERS).not.toContain("Solutions");
+  });
+});
+
+describe("normalizeCreateStructuredSnippetArgs", () => {
+  it("accepts a minimal valid call", () => {
+    const r = normalizeCreateStructuredSnippetArgs({
+      header: "Types",
+      values: ["Data Loss Prevention", "DSPM", "Data Classification", "GenAI Data Protection", "Insider Threat Detection", "Data Access Governance"],
+    });
+    expect("error" in r).toBe(false);
+    if ("error" in r) return;
+    expect(r.header).toBe("Types");
+    expect(r.values).toHaveLength(6);
+    expect(r.confirm).toBe(false);
+  });
+
+  it("normalizes header casing to the canonical form", () => {
+    const r = normalizeCreateStructuredSnippetArgs({ header: "types", values: ["A", "B", "C"] });
+    if (!("error" in r)) expect(r.header).toBe("Types");
+  });
+
+  it("rejects a header outside Google's fixed list", () => {
+    const r = normalizeCreateStructuredSnippetArgs({ header: "Solutions", values: ["A", "B", "C"] });
+    expect("error" in r).toBe(true);
+  });
+
+  it("rejects fewer than 3 values", () => {
+    const r = normalizeCreateStructuredSnippetArgs({ header: "Types", values: ["A", "B"] });
+    expect("error" in r).toBe(true);
+  });
+
+  it("rejects more than 10 values", () => {
+    const r = normalizeCreateStructuredSnippetArgs({
+      header: "Types",
+      values: Array.from({ length: 11 }, (_, i) => `V${i}`),
+    });
+    expect("error" in r).toBe(true);
+  });
+
+  it("rejects a value longer than 25 chars", () => {
+    const r = normalizeCreateStructuredSnippetArgs({ header: "Types", values: ["A", "B", "x".repeat(26)] });
+    expect("error" in r).toBe(true);
+  });
+
+  it("trims values", () => {
+    const r = normalizeCreateStructuredSnippetArgs({ header: "Types", values: ["  A  ", "B", "C"] });
+    if (!("error" in r)) expect(r.values[0]).toBe("A");
+  });
+
+  it("rejects an empty-string value", () => {
+    const r = normalizeCreateStructuredSnippetArgs({ header: "Types", values: ["A", "", "C"] });
+    expect("error" in r).toBe(true);
+  });
+});
+
+describe("buildCreateStructuredSnippetDryRun", () => {
+  it("returns dry_run with header + values", () => {
+    const dr = buildCreateStructuredSnippetDryRun({
+      customer_id: "1234567890",
+      header: "Service catalog",
+      values: ["Endpoint DLP", "Cloud DLP"],
+    });
+    expect(dr.dry_run).toBe(true);
+    expect(dr.header).toBe("Service catalog");
+    expect(dr.values).toEqual(["Endpoint DLP", "Cloud DLP"]);
+  });
+});
+
+describe("normalizeLinkAssetToCustomerArgs", () => {
+  it("accepts a minimal valid call", () => {
+    const r = normalizeLinkAssetToCustomerArgs({ asset_id: "23558472265", field_type: "CALLOUT" });
+    expect("error" in r).toBe(false);
+    if ("error" in r) return;
+    expect(r.asset_id).toBe("23558472265");
+    expect(r.field_type).toBe("CALLOUT");
+    expect(r.confirm).toBe(false);
+  });
+
+  it("coerces numeric asset_id to string", () => {
+    const r = normalizeLinkAssetToCustomerArgs({ asset_id: 23558472265 as any, field_type: "CALLOUT" });
+    if (!("error" in r)) expect(r.asset_id).toBe("23558472265");
+  });
+
+  it("uppercases field_type", () => {
+    const r = normalizeLinkAssetToCustomerArgs({ asset_id: "1", field_type: "sitelink" });
+    if (!("error" in r)) expect(r.field_type).toBe("SITELINK");
+  });
+
+  it("accepts STRUCTURED_SNIPPET", () => {
+    const r = normalizeLinkAssetToCustomerArgs({ asset_id: "1", field_type: "STRUCTURED_SNIPPET" });
+    expect("error" in r).toBe(false);
+  });
+
+  it("rejects an unsupported field_type", () => {
+    const r = normalizeLinkAssetToCustomerArgs({ asset_id: "1", field_type: "LEAD_FORM" });
+    expect("error" in r).toBe(true);
+  });
+
+  it("rejects a non-numeric asset_id", () => {
+    const r = normalizeLinkAssetToCustomerArgs({ asset_id: "not-a-number", field_type: "CALLOUT" });
+    expect("error" in r).toBe(true);
+  });
+
+  it("rejects a missing field_type", () => {
+    const r = normalizeLinkAssetToCustomerArgs({ asset_id: "1" });
+    expect("error" in r).toBe(true);
+  });
+});
+
+describe("buildLinkAssetToCustomerDryRun", () => {
+  it("returns dry_run with asset_id + field_type", () => {
+    const dr = buildLinkAssetToCustomerDryRun({ customer_id: "1234567890", asset_id: "23558472265", field_type: "CALLOUT" });
+    expect(dr.dry_run).toBe(true);
+    expect(dr.asset_id).toBe("23558472265");
+    expect(dr.field_type).toBe("CALLOUT");
   });
 });
