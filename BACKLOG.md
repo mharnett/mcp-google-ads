@@ -2,6 +2,14 @@
 
 ## Open
 
+### config.json's per-client `mcc_customer_id` can be structurally correct and still break login-customer-id
+**Found:** 2026-08-07 (Forcepoint session; every google-ads MCP call failed with `USER_PERMISSION_DENIED` / "must set login-customer-id")
+**Severity:** High while live — every read/write call to the affected client account failed. Resolved for Forcepoint; the underlying footgun is still open for any other client.
+**Root cause:** `config.json`'s `mcc_customer_id` for a client is documentation of the account's real manager in the Google Ads hierarchy (e.g. Forcepoint's own branded MCC, `444-016-4705`) — but the Google Ads API requires `login-customer-id` to be an account the **calling credential has a direct user grant on**, not merely a true ancestor in the hierarchy. Neither `google-ads-admin-drak` nor `google-ads-ro-drak` has a direct grant at `444-016-4705`: `admin-drak` is directly linked to `494-825-2953` itself and to the top Drak Marketing MCC `676-139-6070`; `ro-drak` (created 08-05, see Done section) is directly linked only to `676-139-6070`. Routing through `444-016-4705` failed for both, even though it's the structurally correct manager.
+**Fix applied (Forcepoint):** changed `mcc_customer_id` to `676-139-6070` (the top MCC both credentials do have a direct grant on) — verified live via raw REST calls (`customers:listAccessibleCustomers` + a GAQL search with each `login-customer-id` candidate) that this correctly cascades down the manager hierarchy to reach `494-825-2953`, for both the admin and read-only credential. `config.json` is gitignored (local machine config), so this fix isn't in version control — it's local to this machine only.
+**Still open:** every other client entry in `config.json` has the same latent risk — a `mcc_customer_id` that looks right on paper but that the active credential can't actually log in as. No systemic fix yet; the pattern to apply if another client breaks the same way is: run `customers:listAccessibleCustomers` for the credential in question and use one of the returned IDs (preferring the one closest to the target account) as `mcc_customer_id`, don't assume the account's on-paper manager is usable.
+**Test gap:** nothing in the suite exercises real login-customer-id resolution against the live API (reasonably — it needs live credentials), so this class of bug is invisible to CI by construction. Worth a documented manual-verification step (like the "prove a write fails" step for the RO token below) whenever a client's `mcc_customer_id` changes.
+
 ### run-mcp.sh has no startup preflight for the Keychain entries it requires
 **Found:** 2026-08-05 (fallout from the `1e6f323` Keychain rename — see Done section)
 **Severity:** Medium — turns a one-line config gap into an opaque reconnect failure.
