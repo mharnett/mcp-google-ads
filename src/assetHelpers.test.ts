@@ -11,6 +11,7 @@ import {
   buildCreateSitelinkDryRun,
   normalizeReplaceSitelinkArgs,
   buildReplaceSitelinkDryRun,
+  partitionAssetLinksByParentStatus,
   normalizeCreateCalloutArgs,
   buildCreateCalloutDryRun,
   normalizeCreateStructuredSnippetArgs,
@@ -333,6 +334,59 @@ describe("buildReplaceSitelinkDryRun", () => {
     expect(dr.dry_run).toBe(true);
     expect(dr.warning).toMatch(/re-link/);
     expect(dr.old_asset_id).toBe("286828689294");
+  });
+});
+
+describe("partitionAssetLinksByParentStatus", () => {
+  // Regression guard for the 2026-08-11 Forcepoint sitelink-QA fix: Google Ads
+  // rejects campaign_asset/ad_group_asset mutate ops (create AND remove) whose
+  // parent campaign/ad group is REMOVED -- OPERATION_NOT_PERMITTED_FOR_REMOVED_RESOURCE
+  // -- even when the link's own status is still ENABLED. replaceSitelinkUrl must
+  // filter those out of the migrate batch before mutating, or the whole call fails
+  // for every link, not just the unmutable ones.
+
+  it("anchor: a REMOVED parent always lands in skippedRemoved, regardless of link identity", () => {
+    const { active, skippedRemoved } = partitionAssetLinksByParentStatus([
+      { resource_name: "customers/1/campaignAssets/1~9~SITELINK", attach_to: "customers/1/campaigns/1", parent_status: "REMOVED" },
+    ]);
+    expect(active).toEqual([]);
+    expect(skippedRemoved).toHaveLength(1);
+    expect(skippedRemoved[0].resource_name).toBe("customers/1/campaignAssets/1~9~SITELINK");
+  });
+
+  it("anchor: ENABLED and PAUSED parents always land in active, never skipped", () => {
+    const { active, skippedRemoved } = partitionAssetLinksByParentStatus([
+      { resource_name: "a", attach_to: "customers/1/campaigns/1", parent_status: "ENABLED" },
+      { resource_name: "b", attach_to: "customers/1/campaigns/2", parent_status: "PAUSED" },
+    ]);
+    expect(active.map(r => r.resource_name)).toEqual(["a", "b"]);
+    expect(skippedRemoved).toEqual([]);
+  });
+
+  it("anchor: empty input yields both buckets empty", () => {
+    const { active, skippedRemoved } = partitionAssetLinksByParentStatus([]);
+    expect(active).toEqual([]);
+    expect(skippedRemoved).toEqual([]);
+  });
+
+  it("shape: mixed statuses split without loss and preserve order within each bucket", () => {
+    const rows = [
+      { resource_name: "r1", attach_to: "c1", parent_status: "ENABLED" },
+      { resource_name: "r2", attach_to: "c2", parent_status: "REMOVED" },
+      { resource_name: "r3", attach_to: "c3", parent_status: "PAUSED" },
+      { resource_name: "r4", attach_to: "c4", parent_status: "REMOVED" },
+      { resource_name: "r5", attach_to: "c5", parent_status: "ENABLED" },
+    ];
+    const { active, skippedRemoved } = partitionAssetLinksByParentStatus(rows);
+
+    // no row lost or duplicated across the two buckets
+    expect(active.length + skippedRemoved.length).toBe(rows.length);
+    // aggregate invariant, not just the hand-picked cases above
+    expect(active.every(r => r.parent_status !== "REMOVED")).toBe(true);
+    expect(skippedRemoved.every(r => r.parent_status === "REMOVED")).toBe(true);
+    // order preserved within each bucket (matches input order)
+    expect(active.map(r => r.resource_name)).toEqual(["r1", "r3", "r5"]);
+    expect(skippedRemoved.map(r => r.resource_name)).toEqual(["r2", "r4"]);
   });
 });
 

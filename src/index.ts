@@ -53,6 +53,7 @@ import {
   buildCreateSitelinkDryRun,
   normalizeReplaceSitelinkArgs,
   buildReplaceSitelinkDryRun,
+  partitionAssetLinksByParentStatus,
   normalizeCreateCalloutArgs,
   buildCreateCalloutDryRun,
   normalizeCreateStructuredSnippetArgs,
@@ -2679,7 +2680,11 @@ export class GoogleAdsManager {
     const description1 = args.new_description1 ?? oldAsset.sitelink_asset?.description1 ?? undefined;
     const description2 = args.new_description2 ?? oldAsset.sitelink_asset?.description2 ?? undefined;
 
-    // 2. Find every ENABLED attachment of the old asset.
+    // 2. Find every ENABLED attachment of the old asset. Also pull the parent
+    // campaign/ad_group status: Google Ads rejects mutate ops on a
+    // campaign_asset/ad_group_asset whose PARENT is REMOVED even when the
+    // link's own status is still ENABLED, so those have to be filtered out
+    // before we build the migrate batch (see partitionAssetLinksByParentStatus).
     const campaignLinksRows = await withResilience(
       () =>
         customer.query(`
@@ -2687,7 +2692,8 @@ export class GoogleAdsManager {
             campaign_asset.resource_name,
             campaign_asset.campaign,
             campaign_asset.field_type,
-            campaign_asset.status
+            campaign_asset.status,
+            campaign.status
           FROM campaign_asset
           WHERE campaign_asset.asset = 'customers/${cleanId}/assets/${args.old_asset_id}'
             AND campaign_asset.field_type = 'SITELINK'
@@ -2703,7 +2709,8 @@ export class GoogleAdsManager {
             ad_group_asset.resource_name,
             ad_group_asset.ad_group,
             ad_group_asset.field_type,
-            ad_group_asset.status
+            ad_group_asset.status,
+            ad_group.status
           FROM ad_group_asset
           WHERE ad_group_asset.asset = 'customers/${cleanId}/assets/${args.old_asset_id}'
             AND ad_group_asset.field_type = 'SITELINK'
@@ -2727,17 +2734,30 @@ export class GoogleAdsManager {
       "replaceSitelinkUrl.queryCustomerAssets"
     );
 
-    const campaignLinks = (campaignLinksRows as any[]).map(r => ({
-      resource_name: r.campaign_asset.resource_name,
-      campaign: r.campaign_asset.campaign,
+    const campaignLinkCandidates = (campaignLinksRows as any[]).map(r => ({
+      resource_name: r.campaign_asset.resource_name as string,
+      attach_to: r.campaign_asset.campaign as string,
+      // Query results return status as a raw numeric enum (confirmed live: 2=ENABLED,
+      // 3=PAUSED, 4=REMOVED), NOT a string -- resolve via the enum's reverse lookup.
+      parent_status: enums.CampaignStatus[r.campaign?.status as number] ?? String(r.campaign?.status ?? ""),
     }));
-    const adGroupLinks = (adGroupLinksRows as any[]).map(r => ({
-      resource_name: r.ad_group_asset.resource_name,
-      ad_group: r.ad_group_asset.ad_group,
+    const adGroupLinkCandidates = (adGroupLinksRows as any[]).map(r => ({
+      resource_name: r.ad_group_asset.resource_name as string,
+      attach_to: r.ad_group_asset.ad_group as string,
+      parent_status: enums.AdGroupStatus[r.ad_group?.status as number] ?? String(r.ad_group?.status ?? ""),
     }));
+    // Account-level (customer_asset) links have no removable parent -- always active.
     const customerLinks = (customerLinksRows as any[]).map(r => ({
       resource_name: r.customer_asset.resource_name,
     }));
+
+    const { active: campaignLinksActive, skippedRemoved: campaignLinksSkipped } =
+      partitionAssetLinksByParentStatus(campaignLinkCandidates);
+    const { active: adGroupLinksActive, skippedRemoved: adGroupLinksSkipped } =
+      partitionAssetLinksByParentStatus(adGroupLinkCandidates);
+
+    const campaignLinks = campaignLinksActive.map(l => ({ resource_name: l.resource_name, campaign: l.attach_to }));
+    const adGroupLinks = adGroupLinksActive.map(l => ({ resource_name: l.resource_name, ad_group: l.attach_to }));
 
     // 3. Create the new sitelink asset.
     const newSitelink: any = { link_text };
@@ -2841,7 +2861,11 @@ export class GoogleAdsManager {
         ad_group_assets: adGroupLinks.length,
         customer_assets: customerLinks.length,
       },
-      note: "The old Asset is not deleted; only its ENABLED links were migrated. Paused/removed links on the old asset were left alone.",
+      skipped_removed_parent: {
+        campaign_assets: campaignLinksSkipped.map(l => l.resource_name),
+        ad_group_assets: adGroupLinksSkipped.map(l => l.resource_name),
+      },
+      note: "The old Asset is not deleted; only its ENABLED links were migrated. Paused/removed links on the old asset were left alone. Links whose parent campaign/ad group is itself REMOVED are also left alone (Google Ads rejects mutating them) -- see skipped_removed_parent; they were already 100% inert and cannot serve.",
     };
   }
 

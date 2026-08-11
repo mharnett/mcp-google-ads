@@ -310,6 +310,37 @@ export function buildReplaceSitelinkDryRun(args: ReplaceSitelinkArgs): ReplaceSi
   };
 }
 
+export interface AssetLinkCandidate {
+  resource_name: string;
+  attach_to: string;
+  parent_status: string;
+}
+
+export interface PartitionedAssetLinks<T extends AssetLinkCandidate = AssetLinkCandidate> {
+  active: T[];
+  skippedRemoved: T[];
+}
+
+// Google Ads rejects campaign_asset/ad_group_asset mutate operations (both
+// create and remove) whose parent campaign/ad group is REMOVED --
+// OPERATION_NOT_PERMITTED_FOR_REMOVED_RESOURCE -- even when the link's own
+// status is still ENABLED (a real, observed state: a campaign can be removed
+// while old ENABLED links to it are left behind, permanently frozen). A batch
+// mutate containing even one such link fails the WHOLE call, not just that
+// link. replaceSitelinkUrl must filter these out before building its migrate
+// batch; the caller decides what to do with skippedRemoved (report + leave
+// alone -- they're already 100% inert, can't serve, and can't be touched).
+export function partitionAssetLinksByParentStatus<T extends AssetLinkCandidate>(
+  rows: T[]
+): PartitionedAssetLinks<T> {
+  const active: T[] = [];
+  const skippedRemoved: T[] = [];
+  for (const r of rows) {
+    (r.parent_status === "REMOVED" ? skippedRemoved : active).push(r);
+  }
+  return { active, skippedRemoved };
+}
+
 // ============================================
 // CREATE CALLOUT
 // ============================================
