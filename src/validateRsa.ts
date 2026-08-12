@@ -17,6 +17,17 @@ export interface RsaInput {
   path2?: string;
   /** At least 1 label (string) required. Empty/whitespace entries don't count. */
   labels?: string[];
+  /**
+   * When false, path1/path2 are treated as genuinely optional (length limits
+   * still apply to whichever is provided). Defaults to true -- the "always
+   * required" rule is house hygiene policy for callers AUTHORING a new ad
+   * (google_ads_create_responsive_search_ad), not a real Google Ads API
+   * constraint (the API only requires path2 ⇒ path1, not both). Cloning
+   * tools that reproduce a pre-existing ad's exact content (e.g.
+   * updateAdFinalUrls' clone-and-swap) must pass false so an ad that never
+   * had a display path isn't blocked from being faithfully replicated.
+   */
+  requirePathSegments?: boolean;
 }
 
 export interface RsaValidationResult {
@@ -101,9 +112,10 @@ export function validateRsa(ad: RsaInput): RsaValidationResult {
     errors.push("At least one final URL is required");
   }
 
-  // ── Path 1 (NEW: required, ≤15 chars) ──
+  // ── Path 1 (required by default, ≤15 chars; see requirePathSegments) ──
+  const requirePaths = ad.requirePathSegments !== false;
   if (!isNonEmpty(ad.path1)) {
-    errors.push("path1 is required (display URL path segment)");
+    if (requirePaths) errors.push("path1 is required (display URL path segment)");
   } else {
     const effectiveLen = effectiveTextLength(ad.path1!);
     if (!hasUncountableToken(ad.path1!) && effectiveLen > MAX_PATH_LENGTH) {
@@ -111,9 +123,9 @@ export function validateRsa(ad: RsaInput): RsaValidationResult {
     }
   }
 
-  // ── Path 2 (NEW: required, ≤15 chars) ──
+  // ── Path 2 (required by default, ≤15 chars; see requirePathSegments) ──
   if (!isNonEmpty(ad.path2)) {
-    errors.push("path2 is required (display URL path segment)");
+    if (requirePaths) errors.push("path2 is required (display URL path segment)");
   } else {
     const effectiveLen = effectiveTextLength(ad.path2!);
     if (!hasUncountableToken(ad.path2!) && effectiveLen > MAX_PATH_LENGTH) {
