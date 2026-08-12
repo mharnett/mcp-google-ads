@@ -1124,6 +1124,12 @@ export class GoogleAdsManager {
     /** Optional free-text description appended to the auto label as a kebab
      *  slug: claude-MM-DD-YY-<label_descriptor>. */
     label_descriptor?: string;
+    /** Internal-only: pass false when cloning a pre-existing ad's exact
+     *  content (e.g. from updateAdFinalUrls) so an ad that never had a
+     *  display path isn't blocked from being faithfully replicated. Not
+     *  exposed on the public create_responsive_search_ad tool schema --
+     *  direct callers always get the default (true) hygiene requirement. */
+    requirePathSegments?: boolean;
   }) {
     const customer = this.getCustomer(customerId);
 
@@ -1147,6 +1153,7 @@ export class GoogleAdsManager {
       path1: ad.path1,
       path2: ad.path2,
       labels: ["__auto_claude_label__", ...(ad.labels ?? [])],
+      requirePathSegments: ad.requirePathSegments,
     });
     if (!validation.valid) {
       throw new Error("RSA validation failed:\n" + validation.errors.join("\n"));
@@ -3577,6 +3584,12 @@ export class GoogleAdsManager {
           descriptions: a.descriptions,
           path1: a.path1,
           path2: a.path2,
+          // Cloning must faithfully reproduce the SOURCE ad's display path
+          // state, including "never set" -- that's not a hygiene violation,
+          // it's the ad this account has been serving. See validateRsa's
+          // requirePathSegments doc for why this can't just inherit the
+          // create-tool's default.
+          requirePathSegments: false,
           // Auto-label (claude-MM-DD-YY) is applied by createResponsiveSearchAd.
           // Original non-auto labels are reapplied below.
         });

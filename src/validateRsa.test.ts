@@ -116,6 +116,43 @@ describe("validateRsa", () => {
     });
   });
 
+  describe("requirePathSegments: false (clone-and-swap opt-out)", () => {
+    // updateAdFinalUrls clones a PRE-EXISTING ad's exact content onto a new
+    // final_url. That ad may never have had path1/path2 set -- the "always
+    // required" rule below is new-ad hygiene policy for create_responsive_search_ad,
+    // not a real Google Ads API constraint, and must not block faithfully
+    // reproducing an ad that already serves without them.
+    it("accepts missing path1 and path2 when requirePathSegments is false", () => {
+      const { path1: _p1, path2: _p2, ...rest } = BASE_VALID_AD;
+      const result = validateRsa({ ...rest, requirePathSegments: false });
+      expect(result.valid).toBe(true);
+      expect(result.errors).toEqual([]);
+    });
+
+    it("accepts path1 set with path2 missing when requirePathSegments is false", () => {
+      const { path2: _p2, ...rest } = BASE_VALID_AD;
+      const result = validateRsa({ ...rest, requirePathSegments: false });
+      expect(result.valid).toBe(true);
+    });
+
+    it("still enforces the 15-char length limit on whichever path IS provided", () => {
+      const result = validateRsa({
+        ...BASE_VALID_AD,
+        path1: "this-is-sixteen0",
+        requirePathSegments: false,
+      });
+      expect(result.valid).toBe(false);
+      expect(result.errors.some((e) => /path1 too long/i.test(e))).toBe(true);
+    });
+
+    it("defaults to required (true) when the flag is omitted -- unchanged behavior", () => {
+      const { path1: _p1, ...rest } = BASE_VALID_AD;
+      const result = validateRsa(rest);
+      expect(result.valid).toBe(false);
+      expect(result.errors.some((e) => /path1.*required/i.test(e))).toBe(true);
+    });
+  });
+
   describe("path2 (NEW: required, ≤15 chars, non-empty)", () => {
     it("rejects missing path2", () => {
       const { path2: _p2, ...ad } = BASE_VALID_AD;
