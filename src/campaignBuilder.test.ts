@@ -56,6 +56,36 @@ describe("buildCampaignCreatePayload — budget is dedicated (not shared)", () =
 });
 
 describe("buildCampaignCreatePayload — DEMAND_GEN channel", () => {
+  it("sets demand_gen_campaign_settings.upgraded_targeting = false", () => {
+    // Google defaults upgraded_targeting to TRUE, which routes location/language
+    // targeting to the AD GROUP. Every campaign-level geo write then fails with a
+    // masked `request_error: UNKNOWN` on operations.create.location, and the flag
+    // is IMMUTABLE after creation — the campaign can only be rebuilt, never fixed.
+    //
+    // That is the exact configuration behind the 2026-07-16 Forcepoint geo leak:
+    // $37,187 of $42,044 (88.4%) spent in countries the campaigns never targeted,
+    // reporting a plausible $137 CPA throughout. Reproduced 2026-08-13 building the
+    // Q3 retargeting flight — campaign 24140358400 had to be removed.
+    const plan = buildCampaignCreatePayload({
+      name: "DG Upgraded Targeting",
+      budget_amount_micros: 5_000_000,
+      channel_type: "DEMAND_GEN",
+    });
+
+    expect(plan.campaign.demand_gen_campaign_settings).toEqual({
+      upgraded_targeting: false,
+    });
+  });
+
+  it("SEARCH campaigns do not carry demand_gen_campaign_settings", () => {
+    const plan = buildCampaignCreatePayload({
+      name: "Search Campaign",
+      budget_amount_micros: 5_000_000,
+    });
+
+    expect(plan.campaign.demand_gen_campaign_settings).toBeUndefined();
+  });
+
   it("MAXIMIZE_CLICKS maps to target_spend; target_cpc_cap (dollars) becomes cpc_bid_ceiling_micros", () => {
     const plan = buildCampaignCreatePayload({
       name: "DG Max Clicks",
