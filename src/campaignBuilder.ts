@@ -98,6 +98,17 @@ export function buildCampaignCreatePayload(input: CampaignCreateInput): Campaign
       target_partner_search_network: false,
     };
     campaign.audience_setting = { use_audience_grouped: true };
+    // Google defaults upgraded_targeting to TRUE, which routes location/language
+    // targeting to the AD GROUP. Every campaign-level geo write then fails with a
+    // masked `request_error: UNKNOWN` on operations.create.location — and the flag
+    // is IMMUTABLE after creation, so a campaign built without this can only be
+    // rebuilt, never repaired.
+    //
+    // That is the exact configuration behind the 2026-07-16 Forcepoint geo leak:
+    // $37,187 of $42,044 (88.4%) spent in countries the campaigns never targeted,
+    // reporting a plausible $137 CPA the whole time. Reproduced 2026-08-13 while
+    // building the Q3 retargeting flight — the campaign had to be removed.
+    campaign.demand_gen_campaign_settings = { upgraded_targeting: false };
   }
 
   if (input.start_date) campaign.start_date = input.start_date;
