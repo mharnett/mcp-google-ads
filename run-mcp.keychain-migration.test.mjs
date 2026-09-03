@@ -5,8 +5,10 @@
 // (resolved via keychain_shell_helper_path()) instead of shelling out to
 // `security find-generic-password` inline. run-mcp.wrapper.test.mjs already
 // covers run-mcp.sh's account-selection BEHAVIOR against a stubbed
-// `security` and needs no changes -- it stays valid unchanged because it
-// only asserts on the resolved env var, not on which command produced it.
+// `security` and needed no ASSERTION changes -- it only asserts on the
+// resolved env var, not on which command produced it. It did need a fake
+// `python3` added to its own sandbox (see its own file), since CI runners
+// have no real drak_ops install for the HELPER resolution line to find.
 // This file adds: (1) the wiring check for both scripts, (2) a repo-wide
 // ratchet so no tracked .sh file regresses to the inline call, and (3) a
 // behavioral test of release.sh's own `lookup()` failure path (extracted
@@ -24,6 +26,16 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = __dirname;
 const RUN_MCP = path.join(REPO_ROOT, "run-mcp.sh");
 const RELEASE = path.join(REPO_ROOT, "scripts", "release.sh");
+const FIXTURE_HELPER = path.join(REPO_ROOT, "tests", "fixtures", "keychain_get.sh");
+
+// Files legitimately allowed to still contain the raw literal, and why --
+// an allowance WITH a reason, not a blanket skip, so the set can only
+// shrink. tests/fixtures/keychain_get.sh is a hermetic double of the real
+// shared helper, which itself contains the literal as its own
+// implementation (exactly like the real drak_ops/keychain_get.sh does) --
+// this is the one place the string is SUPPOSED to live, not an inline
+// caller.
+const ALLOWED_LITERAL_FILES = new Set(["tests/fixtures/keychain_get.sh"]);
 
 function sourcesSharedHelper(scriptPath) {
   const text = readFileSync(scriptPath, "utf8");
@@ -42,13 +54,15 @@ describe("scripts/release.sh sources the shared drak_ops helper", () => {
   });
 });
 
-describe("ratchet: no tracked .sh file still shells out to security find-generic-password", () => {
-  it("finds zero offenders", () => {
+describe("ratchet: no unexcused tracked .sh file still shells out to security find-generic-password", () => {
+  it("finds zero unexcused offenders", () => {
     const files = execSync("git ls-files '*.sh'", { cwd: REPO_ROOT, encoding: "utf8" })
       .split("\n")
       .filter(Boolean);
-    const offenders = files.filter((rel) =>
-      readFileSync(path.join(REPO_ROOT, rel), "utf8").includes("find-generic-password")
+    const offenders = files.filter(
+      (rel) =>
+        !ALLOWED_LITERAL_FILES.has(rel) &&
+        readFileSync(path.join(REPO_ROOT, rel), "utf8").includes("find-generic-password")
     );
     expect(offenders).toEqual([]);
   });
@@ -99,6 +113,16 @@ exit 44
 `
   );
   chmodSync(path.join(sandbox, "security"), 0o755);
+
+  // release.sh's lookup() now resolves HELPER via
+  // `python3 -c '...keychain_shell_helper_path...'`. No real drak_ops
+  // install exists on these CI runners (see ALLOWED_LITERAL_FILES comment
+  // above) -- resolve it to the hermetic fixture instead.
+  writeFileSync(
+    path.join(sandbox, "python3"),
+    `#!/bin/bash\necho "${FIXTURE_HELPER}"\n`
+  );
+  chmodSync(path.join(sandbox, "python3"), 0o755);
 
   const script = extractLookupBlock() + `\nlookup "${service}"\necho "EXIT:$?"\n`;
   const scriptPath = path.join(sandbox, "snippet.sh");

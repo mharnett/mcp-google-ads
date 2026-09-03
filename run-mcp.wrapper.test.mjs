@@ -25,11 +25,23 @@ import path from "path";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SCRIPT = path.join(__dirname, "run-mcp.sh");
+// run-mcp.sh now sources the shared drak_ops keychain_get.sh helper via a
+// `python3 -c '...keychain_shell_helper_path...'` one-liner (mcp-google-ads#43).
+// CI runners here have no real drak_ops install (would need a new
+// deploy-key/secret per repo, out of scope for a test-only need), so the
+// `python3` stub below resolves it to this hermetic fixture instead.
+const FIXTURE_HELPER = path.join(__dirname, "tests", "fixtures", "keychain_get.sh");
 
 let binDir;
 
 beforeAll(() => {
   binDir = mkdtempSync(path.join(tmpdir(), "run-mcp-stub-bin-"));
+
+  writeFileSync(
+    path.join(binDir, "python3"),
+    `#!/bin/bash\necho "${FIXTURE_HELPER}"\n`
+  );
+  chmodSync(path.join(binDir, "python3"), 0o755);
 
   writeFileSync(
     path.join(binDir, "security"),
