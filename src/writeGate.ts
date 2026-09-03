@@ -17,6 +17,7 @@ export const WRITE_TOOLS: ReadonlySet<string> = new Set([
   "google_ads_create_demand_gen_multi_asset_ad",
   "google_ads_update_demand_gen_multi_asset_ad",
   "google_ads_update_video_ad_videos",
+  "google_ads_update_responsive_search_ad_text",
   "google_ads_create_image_asset",
   "google_ads_create_lead_form_asset",
   "google_ads_enable_items",

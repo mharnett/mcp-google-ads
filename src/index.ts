@@ -99,7 +99,7 @@ import {
   type DemandGenAdInput,
 } from "./validateDemandGenAd.js";
 import { GoogleAdsApi, enums, resources, MutateOperation } from "google-ads-api";
-import { buildAdGroupAdResourceName } from "./resourceNames.js";
+import { buildAdGroupAdResourceName, buildAdResourceName } from "./resourceNames.js";
 import { readFileSync, existsSync, realpathSync } from "fs";
 import { z } from "zod";
 import v8 from "v8";
@@ -3673,6 +3673,199 @@ export class GoogleAdsManager {
     };
   }
 
+  /**
+   * Update RSA headline/description text IN PLACE via AdService
+   * (customer.ads.update), same ad ID, no clone/pause. This is deliberately
+   * NOT the clone-and-swap pattern updateAdFinalUrls uses -- that pattern
+   * exists because RSA final_urls really does appear to reject in-place
+   * updates; headlines/descriptions do not have that problem (Google's own
+   * update_responsive_search_ad.py sample updates them the same way this
+   * method does). See the class-level history note above updateAdFinalUrls
+   * for how that distinction was confirmed. Payload shape:
+   * `customer.ads.update([{resource_name: "customers/X/ads/Y", responsive_search_ad: {...}}])`
+   * -- responsive_search_ad is a TOP-LEVEL field on the Ad resource, not
+   * nested under an "ad" sub-field (that nesting is the AdGroupAd shape,
+   * a different resource).
+   *
+   * IMPORTANT: an Ad resource can be linked into more than one ad_group_ad
+   * (confirmed live: some Neon CRM ads are shared between a base campaign
+   * and an experiment-page campaign). AdService.update mutates the shared
+   * Ad resource, so ONE call here changes every ad_group_ad that links it.
+   * Both dry-run and confirm paths surface every affected link so a caller
+   * scoped to reviewing just one of them isn't surprised.
+   */
+  async updateResponsiveSearchAdText(
+    customerId: string,
+    adId: string,
+    updates: {
+      headlines?: Array<string | { text: string; pinned_position?: number }>;
+      descriptions?: Array<string | { text: string; pinned_position?: number }>;
+    },
+    confirm = false,
+  ) {
+    const customer = this.getCustomer(customerId);
+    const cleanId = customerId.replace(/-/g, "");
+    const cleanAdId = sanitizeNumericId(adId);
+
+    if (!updates.headlines && !updates.descriptions) {
+      throw new Error("Must provide headlines and/or descriptions to update.");
+    }
+
+    const rows = await withResilience(
+      () => customer.query(`
+        SELECT
+          ad_group_ad.resource_name,
+          ad_group_ad.ad.id,
+          ad_group_ad.ad.type,
+          ad_group_ad.ad.responsive_search_ad.headlines,
+          ad_group_ad.ad.responsive_search_ad.descriptions,
+          ad_group_ad.ad.responsive_search_ad.path1,
+          ad_group_ad.ad.responsive_search_ad.path2,
+          ad_group_ad.ad.final_urls,
+          ad_group_ad.status,
+          ad_group.id,
+          ad_group.name,
+          campaign.id,
+          campaign.name
+        FROM ad_group_ad
+        WHERE ad_group_ad.ad.id = ${cleanAdId}
+          AND ad_group_ad.status != 'REMOVED'
+      `),
+      "updateResponsiveSearchAdText.query"
+    );
+
+    if (!rows || rows.length === 0) {
+      throw new Error(`Ad ${adId} not found (or removed).`);
+    }
+
+    const first: any = rows[0];
+    const adType = first.ad_group_ad?.ad?.type;
+    if (adType !== 15 && adType !== "RESPONSIVE_SEARCH_AD") {
+      throw new Error(
+        `Ad ${adId} is type ${adType}, not RESPONSIVE_SEARCH_AD. This tool only edits RSA text.`
+      );
+    }
+
+    const rsa = first.ad_group_ad?.ad?.responsive_search_ad ?? {};
+
+    // Reverse-map ServedAssetFieldType enum -> pinned_position (mirrors createResponsiveSearchAd).
+    const HEADLINE_PIN_REV: Record<number, number> = { 2: 1, 3: 2, 4: 3 };
+    const DESCRIPTION_PIN_REV: Record<number, number> = { 5: 1, 6: 2 };
+    // And the forward map, for building the payload from pinned_position.
+    const HEADLINE_PIN_MAP: Record<number, number> = { 1: 2, 2: 3, 3: 4 };
+    const DESCRIPTION_PIN_MAP: Record<number, number> = { 1: 5, 2: 6 };
+
+    const currentHeadlines: Array<{ text: string; pinned_position?: number }> = (rsa.headlines ?? []).map(
+      (h: any) => ({
+        text: h.text,
+        ...(h.pinned_field && HEADLINE_PIN_REV[h.pinned_field] ? { pinned_position: HEADLINE_PIN_REV[h.pinned_field] } : {}),
+      })
+    );
+    const currentDescriptions: Array<{ text: string; pinned_position?: number }> = (rsa.descriptions ?? []).map(
+      (d: any) => ({
+        text: d.text,
+        ...(d.pinned_field && DESCRIPTION_PIN_REV[d.pinned_field] ? { pinned_position: DESCRIPTION_PIN_REV[d.pinned_field] } : {}),
+      })
+    );
+
+    const newHeadlines = updates.headlines?.map(h => (typeof h === "string" ? { text: h } : h));
+    const newDescriptions = updates.descriptions?.map(d => (typeof d === "string" ? { text: d } : d));
+
+    // Validate the resulting FULL ad (changed field(s) plus whatever's
+    // untouched), same lint rules create_responsive_search_ad enforces.
+    // requirePathSegments: false -- this edits an existing live ad, it's not
+    // authoring a new one; a path1/path2 this ad never had isn't a defect.
+    const validation = validateRsa({
+      headlines: (newHeadlines ?? currentHeadlines).map(h => h.text),
+      descriptions: (newDescriptions ?? currentDescriptions).map(d => d.text),
+      final_urls: first.ad_group_ad?.ad?.final_urls ?? [],
+      path1: rsa.path1 ?? "",
+      path2: rsa.path2 ?? "",
+      labels: ["__auto_claude_label__"],
+      requirePathSegments: false,
+    });
+    if (!validation.valid) {
+      throw new Error("RSA validation failed:\n" + validation.errors.join("\n"));
+    }
+
+    const diff = (before: Array<{ text: string }>, after?: Array<{ text: string }>) => {
+      if (!after) return [];
+      const changes: Array<{ index: number; from: string; to: string }> = [];
+      after.forEach((a, i) => {
+        const b = before[i]?.text;
+        if (b !== a.text) changes.push({ index: i, from: b ?? "(none)", to: a.text });
+      });
+      return changes;
+    };
+
+    const affectedLinks = (rows as any[]).map(r => ({
+      resource_name: r.ad_group_ad?.resource_name,
+      ad_group_id: String(r.ad_group?.id ?? ""),
+      ad_group_name: r.ad_group?.name ?? "",
+      campaign: r.campaign?.name ?? "",
+      status: r.ad_group_ad?.status,
+    }));
+
+    const headlineChanges = diff(currentHeadlines, newHeadlines);
+    const descriptionChanges = diff(currentDescriptions, newDescriptions);
+
+    if (!confirm) {
+      return {
+        customer_id: cleanId,
+        ad_id: cleanAdId,
+        dry_run: true,
+        mechanism: "in-place update via AdService (customer.ads.update)",
+        affected_ad_group_ad_links: affectedLinks,
+        shared_across_multiple_ad_groups: affectedLinks.length > 1,
+        headline_changes: headlineChanges,
+        description_changes: descriptionChanges,
+        note: "Set confirm=true to apply. Edits the shared Ad resource directly -- if shared_across_multiple_ad_groups is true, EVERY link above gets this change in one mutation, not just the one you queried for.",
+      };
+    }
+
+    // NOTE: responsive_search_ad is a TOP-LEVEL field on the Ad resource
+    // (IAd), not nested under an "ad" sub-field -- that nesting is the
+    // AdGroupAd shape (ad_group_ad.ad.responsive_search_ad), which is a
+    // DIFFERENT resource from what customer.ads.update() takes. Confirmed
+    // against node_modules/google-ads-node's IAd interface directly.
+    const adUpdate: any = { resource_name: buildAdResourceName(cleanId, cleanAdId) };
+    if (newHeadlines) {
+      adUpdate.responsive_search_ad = {
+        ...(adUpdate.responsive_search_ad ?? {}),
+        headlines: newHeadlines.map(h => ({
+          text: h.text,
+          ...(h.pinned_position && HEADLINE_PIN_MAP[h.pinned_position] ? { pinned_field: HEADLINE_PIN_MAP[h.pinned_position] } : {}),
+        })),
+      };
+    }
+    if (newDescriptions) {
+      adUpdate.responsive_search_ad = {
+        ...(adUpdate.responsive_search_ad ?? {}),
+        descriptions: newDescriptions.map(d => ({
+          text: d.text,
+          ...(d.pinned_position && DESCRIPTION_PIN_MAP[d.pinned_position] ? { pinned_field: DESCRIPTION_PIN_MAP[d.pinned_position] } : {}),
+        })),
+      };
+    }
+
+    await withResilience(() => customer.ads.update([adUpdate]), "updateResponsiveSearchAdText.mutate");
+
+    // Label every linked ad_group_ad -- the mutate above touched the shared
+    // Ad resource, so every link that shares it just got this change too.
+    await this.autoLabelCreated(customerId, affectedLinks.map(l => l.resource_name).filter(Boolean), "ad");
+
+    return {
+      customer_id: cleanId,
+      ad_id: cleanAdId,
+      dry_run: false,
+      mechanism: "in-place update via AdService (customer.ads.update)",
+      affected_ad_group_ad_links: affectedLinks,
+      shared_across_multiple_ad_groups: affectedLinks.length > 1,
+      headline_changes: headlineChanges,
+      description_changes: descriptionChanges,
+    };
+  }
+
   // ============================================
   // REPORTING METHODS
   // ============================================
@@ -6034,6 +6227,26 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             args?.ad_group_id as string,
             (args?.ad_ids as string[]) ?? [],
             args?.new_final_url as string,
+            confirm,
+          );
+          return { content: [{ type: "text", text: JSON.stringify({ success: true, ...result }, null, 2) }] };
+        } catch (e: any) {
+          return { content: [{ type: "text", text: JSON.stringify({ success: false, error: e.message }, null, 2) }] };
+        }
+      }
+
+      case "google_ads_update_responsive_search_ad_text": {
+        const customerId = args?.customer_id as string || "";
+        const confirm = args?.confirm === true;
+        if (confirm) assertWriteAllowed(name);
+        try {
+          const result = await getAdsManager().updateResponsiveSearchAdText(
+            customerId,
+            args?.ad_id as string,
+            {
+              headlines: args?.headlines as any,
+              descriptions: args?.descriptions as any,
+            },
             confirm,
           );
           return { content: [{ type: "text", text: JSON.stringify({ success: true, ...result }, null, 2) }] };
