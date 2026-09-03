@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.10.0](https://github.com/mharnett/mcp-google-ads/compare/v1.9.0...v1.10.0) (2026-09-03)
+
+
+### Features
+
+* **assets:** add customer-level callout/structured-snippet/link tools ([#32](https://github.com/mharnett/mcp-google-ads/issues/32)) ([0edef8c](https://github.com/mharnett/mcp-google-ads/commit/0edef8c5dc09efb8617d84a12df3ec7c8f84ec8e))
+* **scripts:** add git-history secret scanner for credential-hygiene audit ([#36](https://github.com/mharnett/mcp-google-ads/issues/36)) ([0d8be28](https://github.com/mharnett/mcp-google-ads/commit/0d8be28117dc3c3d55eec2ec574ec92e39ae47ac))
+* **scripts:** add pass/fail verdict helper for privatize-or-scrub decision ([#39](https://github.com/mharnett/mcp-google-ads/issues/39)) ([d04c106](https://github.com/mharnett/mcp-google-ads/commit/d04c10613ec72cc313d846e9d672083901df1618))
+* **scripts:** add verdict helper for Forcepoint asset-refresh Acceptance check ([#41](https://github.com/mharnett/mcp-google-ads/issues/41)) ([d60e02d](https://github.com/mharnett/mcp-google-ads/commit/d60e02dca9d7744c3ef1a938c51c5aac5f64ed2b))
+
+
+### Bug Fixes
+
+* **campaign:** set upgraded_targeting=false on DEMAND_GEN campaigns ([#38](https://github.com/mharnett/mcp-google-ads/issues/38)) ([a119d35](https://github.com/mharnett/mcp-google-ads/commit/a119d358782aac8a8ba3b2a05951088479cda861))
+* **replaceSitelinkUrl:** skip asset links whose parent campaign/ad group is REMOVED ([#35](https://github.com/mharnett/mcp-google-ads/issues/35)) ([79ae0e3](https://github.com/mharnett/mcp-google-ads/commit/79ae0e3ec76a5403fee75c5c5d91617e4d294d18))
+* **rsa:** clone-and-swap must not require path1/path2 on the clone ([#37](https://github.com/mharnett/mcp-google-ads/issues/37)) ([335e080](https://github.com/mharnett/mcp-google-ads/commit/335e0803a3a9a6fb34ae483bbb7a221b00b97e57))
+* **scripts:** distinguish real history rewrite from ordinary merges ([#42](https://github.com/mharnett/mcp-google-ads/issues/42)) ([dc1c691](https://github.com/mharnett/mcp-google-ads/commit/dc1c691d72656e3d2ac180c9c3b1cc11d32096ab))
+
 ## [1.9.0](https://github.com/mharnett/mcp-google-ads/compare/v1.8.0...v1.9.0) (2026-08-01)
 
 
