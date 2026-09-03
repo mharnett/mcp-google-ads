@@ -21,6 +21,11 @@
 
 set -euo pipefail
 
+# Shared Keychain helper (drak-ops): resolves through the installed package
+# location, not a vendored copy — see drak_ops.keychain.keychain_shell_helper_path().
+HELPER="$(python3 -c 'from drak_ops.keychain import keychain_shell_helper_path as p; print(p())')"
+source "$HELPER"
+
 DRY_RUN=0
 if [[ "${1:-}" == "--dry-run" ]]; then
   DRY_RUN=1
@@ -31,7 +36,7 @@ KEYCHAIN_ACCOUNT="google-ads-mcp"
 lookup() {
   local service="$1"
   local value
-  if ! value=$(security find-generic-password -a "${KEYCHAIN_ACCOUNT}" -s "${service}" -w 2>/dev/null); then
+  if ! value=$(keychain_get "${service}" "${KEYCHAIN_ACCOUNT}" 2>/dev/null); then
     echo "❌ Keychain entry missing: service=${service}, account=${KEYCHAIN_ACCOUNT}" >&2
     echo "   Add with: security add-generic-password -a ${KEYCHAIN_ACCOUNT} -s ${service} -w '<value>'" >&2
     exit 1
