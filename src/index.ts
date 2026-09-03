@@ -253,6 +253,7 @@ import {
 } from "./errors.js";
 
 import { withResilience, safeResponse, logger } from "./resilience.js";
+import { backfillOmittedBooleans } from "./backfillDefaults.js";
 import {
   resolveCredentials,
   readStoredCredentials,
@@ -4345,7 +4346,11 @@ export class GoogleAdsManager {
   async executeGaql(customerId: string, query: string) {
     const customer = this.getCustomer(customerId);
     const result = await withResilience(() => customer.query(query), "executeGaql");
-    return safeResponse(result, "executeGaql");
+    // Google's REST API omits fields at their proto3 default value (e.g.
+    // `false`) from the JSON body entirely -- backfill selected BOOL leaves
+    // so an absent key never reads as "unknown" when it's really `false`.
+    const backfilled = backfillOmittedBooleans(query, result as any[]);
+    return safeResponse(backfilled, "executeGaql");
   }
 
   async keywordVolume(
