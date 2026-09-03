@@ -1493,6 +1493,57 @@ export const tools: Tool[] = [
     },
   },
   {
+    name: "google_ads_update_responsive_search_ad_text",
+    description: "Update an RSA's headline/description text IN PLACE via AdService — same ad ID, no new ad created, no pause/clone. Use this instead of google_ads_create_responsive_search_ad + google_ads_pause_items for a text-only edit. WARNING: an Ad resource can be linked into more than one ad group (e.g. a base campaign and an experiment-page campaign sharing unedited ads); this tool edits the shared Ad resource, so one call changes EVERY linked ad_group_ad — check `affected_ad_group_ad_links` / `shared_across_multiple_ad_groups` in the dry-run before confirming. Pass only headlines and/or descriptions you want changed; omitted fields are left untouched. DRY-RUN BY DEFAULT: omit `confirm` or pass `confirm: false` to preview old→new text and the affected links.",
+    inputSchema: {
+      additionalProperties: false,
+      type: "object",
+      properties: {
+        customer_id: { type: "string" },
+        ad_id: { type: "string", description: "Numeric ad ID of the RESPONSIVE_SEARCH_AD to edit." },
+        headlines: {
+          type: "array",
+          description: "Optional: the FULL replacement headline list (3-15 items, ≤30 chars each). Omit to leave headlines untouched.",
+          items: {
+            oneOf: [
+              { type: "string" },
+              {
+                type: "object",
+                properties: {
+                  text: { type: "string" },
+                  pinned_position: { type: "number", description: "Pin to position 1, 2, or 3" },
+                },
+                required: ["text"],
+              },
+            ],
+          },
+        },
+        descriptions: {
+          type: "array",
+          description: "Optional: the FULL replacement description list (2-4 items, ≤90 chars each). Omit to leave descriptions untouched.",
+          items: {
+            oneOf: [
+              { type: "string" },
+              {
+                type: "object",
+                properties: {
+                  text: { type: "string" },
+                  pinned_position: { type: "number", description: "Pin to position 1 or 2" },
+                },
+                required: ["text"],
+              },
+            ],
+          },
+        },
+        confirm: {
+          type: "boolean",
+          description: "Must be true to apply. Omit or false for dry-run preview.",
+        },
+      },
+      required: ["ad_id"],
+    },
+  },
+  {
     name: "google_ads_rename_ad_group",
     description: "Rename an ad group. DRY-RUN BY DEFAULT: omit `confirm` or pass `confirm: false` to preview the change.",
     inputSchema: {
