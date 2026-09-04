@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.11.0](https://github.com/mharnett/mcp-google-ads/compare/v1.10.0...v1.11.0) (2026-09-04)
+
+
+### Features
+
+* add google_ads_update_campaign_selective_optimization ([#47](https://github.com/mharnett/mcp-google-ads/issues/47)) ([034baac](https://github.com/mharnett/mcp-google-ads/commit/034baac2697c6ce0c1eeb8bb4a0c10741c70d11b))
+* add google_ads_update_responsive_search_ad_text (in-place AdService edit) ([#44](https://github.com/mharnett/mcp-google-ads/issues/44)) ([d78dc7d](https://github.com/mharnett/mcp-google-ads/commit/d78dc7d45d854b3189d452c7f9f723659bc4f432))
+
+
+### Bug Fixes
+
+* **gaql:** backfill omitted BOOL leaves in google_ads_gaql_query results ([#46](https://github.com/mharnett/mcp-google-ads/issues/46)) ([2c76bf2](https://github.com/mharnett/mcp-google-ads/commit/2c76bf2d66a9d7276f1dcd5741f056bd305111e9))
+
 ## [1.10.0](https://github.com/mharnett/mcp-google-ads/compare/v1.9.0...v1.10.0) (2026-09-03)
 
 
