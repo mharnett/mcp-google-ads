@@ -43,6 +43,7 @@ describe("Tool Schema Contract", () => {
     "google_ads_search_term_insight_terms",
     "google_ads_update_campaign_budget",
     "google_ads_update_campaign_bidding",
+    "google_ads_update_campaign_selective_optimization",
     "google_ads_detach_portfolio_bid_strategy",
     "google_ads_update_ad_asset_automation",
     "google_ads_get_campaign_diagnostics",
