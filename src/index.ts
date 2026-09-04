@@ -2450,6 +2450,37 @@ export class GoogleAdsManager {
     };
   }
 
+  // Set a campaign's Selective Optimization conversion actions. Full-array
+  // replace, not additive — the conversion_action_ids list passed in entirely
+  // replaces campaign.selective_optimization.conversion_actions.
+  async updateCampaignSelectiveOptimization(
+    customerId: string,
+    campaignId: string,
+    conversionActionIds: string[]
+  ) {
+    const customer = this.getCustomer(customerId);
+    const cleanId = customerId.replace(/-/g, "");
+
+    const campaignUpdate = {
+      resource_name: `customers/${cleanId}/campaigns/${campaignId}`,
+      selective_optimization: {
+        conversion_actions: conversionActionIds.map(
+          (id) => `customers/${cleanId}/conversionActions/${id}`
+        ),
+      },
+    };
+
+    await withResilience(
+      () => customer.campaigns.update([campaignUpdate]),
+      "updateCampaignSelectiveOptimization.update"
+    );
+
+    return {
+      campaign_id: campaignId,
+      conversion_action_ids: conversionActionIds,
+    };
+  }
+
   // Update campaign ad rotation (ad_serving_optimization_status). ROTATE
   // self-reverts to OPTIMIZE after ~90 days (Google-managed); ROTATE_INDEFINITELY
   // does not. Caller must pass an explicit mode — no default, so ROTATE_INDEFINITELY
@@ -5464,6 +5495,25 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           target_roas: targetRoas,
           confirm_large_change: confirmLargeChange,
         });
+
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({ success: true, ...result }, null, 2),
+          }],
+        };
+      }
+
+      case "google_ads_update_campaign_selective_optimization": {
+        const customerId = args?.customer_id as string || "";
+        const campaignId = args?.campaign_id as string;
+        const conversionActionIds = (args?.conversion_action_ids as string[]) || [];
+
+        const result = await getAdsManager().updateCampaignSelectiveOptimization(
+          customerId,
+          campaignId,
+          conversionActionIds
+        );
 
         return {
           content: [{

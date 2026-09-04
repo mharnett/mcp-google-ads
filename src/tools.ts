@@ -788,6 +788,24 @@ export const tools: Tool[] = [
     },
   },
   {
+    name: "google_ads_update_campaign_selective_optimization",
+    description: "Set a campaign's Selective Optimization conversion actions — the subset of conversion actions a Maximize Conversions / Maximize Conversion Value campaign optimizes bidding toward. FULL-ARRAY REPLACE, not additive: the conversion_action_ids list you pass entirely replaces whatever conversion actions are currently set, it does not merge with them. Pass every conversion action ID you want active, not just the ones to add.",
+    inputSchema: {
+      additionalProperties: false,
+      type: "object",
+      properties: {
+        customer_id: { type: "string" },
+        campaign_id: { type: "string", description: "The numeric string campaign ID to update" },
+        conversion_action_ids: {
+          type: "array",
+          items: { type: "string", description: "Numeric string conversion action ID" },
+          description: "Full replacement list of conversion action IDs for selective optimization. This REPLACES the existing set entirely — it is not additive.",
+        },
+      },
+      required: ["campaign_id", "conversion_action_ids"],
+    },
+  },
+  {
     name: "google_ads_detach_portfolio_bid_strategy",
     description: "Detach a campaign from its portfolio (cross-campaign) bid strategy, dropping it to campaign-level Maximize Conversions with no target. This is the ONLY sanctioned way to break a portfolio bid-strategy attachment — google_ads_update_campaign_bidding and google_ads_update_campaign_budget (create_new_budget) both refuse to do this silently and point here instead. IRREVERSIBLE: re-attaching or re-applying tCPA/tROAS targets afterward is a separate manual step. Requires confirm: true.",
     inputSchema: {
