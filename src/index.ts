@@ -218,13 +218,30 @@ function loadConfig(): Config {
   };
 }
 
-function getClientFromWorkingDir(config: Config, cwd: string): ClientConfig | null {
-  for (const [key, client] of Object.entries(config.clients)) {
-    if (cwd.startsWith(client.folder) || cwd.includes(key)) {
-      return client;
-    }
-  }
-  return null;
+export interface ClientMatch {
+  key: string;
+  client: ClientConfig;
+}
+
+export type ClientResolution =
+  | { kind: "single"; client: ClientConfig }
+  | { kind: "ambiguous"; candidates: ClientMatch[] }
+  | { kind: "none" };
+
+export function getClientFromWorkingDir(config: Config, cwd: string): ClientResolution {
+  const byFolder: ClientMatch[] = Object.entries(config.clients)
+    .filter(([, client]) => client.folder && cwd.startsWith(client.folder))
+    .map(([key, client]) => ({ key, client }));
+
+  const matches = byFolder.length > 0
+    ? byFolder
+    : Object.entries(config.clients)
+        .filter(([key]) => cwd.includes(key))
+        .map(([key, client]) => ({ key, client }));
+
+  if (matches.length === 0) return { kind: "none" };
+  if (matches.length === 1) return { kind: "single", client: matches[0].client };
+  return { kind: "ambiguous", candidates: matches };
 }
 
 // ============================================
@@ -4466,8 +4483,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     switch (name) {
       case "google_ads_get_client_context": {
         const cwd = args?.working_directory as string;
-        const client = getClientFromWorkingDir(getConfig(), cwd);
-        if (!client) {
+        const resolution = getClientFromWorkingDir(getConfig(), cwd);
+        if (resolution.kind === "none") {
           return {
             content: [{
               type: "text",
@@ -4483,6 +4500,24 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             }],
           };
         }
+        if (resolution.kind === "ambiguous") {
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({
+                ambiguous: true,
+                error: "Multiple clients match this working directory",
+                working_directory: cwd,
+                candidates: resolution.candidates.map(({ client }) => ({
+                  client_name: client.name,
+                  customer_id: client.customer_id,
+                  folder: client.folder,
+                })),
+              }, null, 2),
+            }],
+          };
+        }
+        const client = resolution.client;
         return {
           content: [{
             type: "text",
