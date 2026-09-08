@@ -218,13 +218,38 @@ function loadConfig(): Config {
   };
 }
 
-function getClientFromWorkingDir(config: Config, cwd: string): ClientConfig | null {
+interface ClientResolution {
+  /** "one": exactly one client matched — use `client`.
+   *  "none": no client matched — `client` is null, `candidates` empty.
+   *  "several": more than one client matched — `client` is null, inspect `candidates`. */
+  match: "one" | "none" | "several";
+  client: ClientConfig | null;
+  candidates: ClientConfig[];
+}
+
+/**
+ * Resolve every client whose `folder` prefixes `cwd`, or whose config key
+ * appears as a substring of `cwd` (fallback for bare per-account folders
+ * like `clients/imvu` that only a per-key match, not the shared folder
+ * value, can disambiguate). Both paths feed the same de-duplicated
+ * candidate set so a caller can never be handed a single confident answer
+ * when more than one client actually matches.
+ */
+export function getClientFromWorkingDir(config: Config, cwd: string): ClientResolution {
+  const candidates: ClientConfig[] = [];
   for (const [key, client] of Object.entries(config.clients)) {
     if (cwd.startsWith(client.folder) || cwd.includes(key)) {
-      return client;
+      candidates.push(client);
     }
   }
-  return null;
+
+  if (candidates.length === 0) {
+    return { match: "none", client: null, candidates: [] };
+  }
+  if (candidates.length === 1) {
+    return { match: "one", client: candidates[0], candidates };
+  }
+  return { match: "several", client: null, candidates };
 }
 
 // ============================================
@@ -4466,8 +4491,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     switch (name) {
       case "google_ads_get_client_context": {
         const cwd = args?.working_directory as string;
-        const client = getClientFromWorkingDir(getConfig(), cwd);
-        if (!client) {
+        const resolution = getClientFromWorkingDir(getConfig(), cwd);
+
+        if (resolution.match === "none") {
           return {
             content: [{
               type: "text",
@@ -4483,6 +4509,27 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             }],
           };
         }
+
+        if (resolution.match === "several") {
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({
+                ambiguous: true,
+                error: "Multiple clients match this working directory — specify which account explicitly",
+                working_directory: cwd,
+                candidates: resolution.candidates.map((c) => ({
+                  client_name: c.name,
+                  customer_id: c.customer_id,
+                  folder: c.folder,
+                  mcc_id: c.mcc_customer_id || getConfig().google_ads.mcc_customer_id,
+                })),
+              }, null, 2),
+            }],
+          };
+        }
+
+        const client = resolution.client!;
         return {
           content: [{
             type: "text",
