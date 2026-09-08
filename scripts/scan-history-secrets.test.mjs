@@ -14,7 +14,7 @@
 // ============================================
 
 import { describe, it, expect } from "vitest";
-import { scanGitLogForSecrets } from "./scan-history-secrets.mjs";
+import { scanGitLogForSecrets, fingerprintValue, hitFingerprint, evaluateBaseline } from "./scan-history-secrets.mjs";
 
 function fakeLog(commitHash, file, diffLines) {
   return [
@@ -133,5 +133,71 @@ describe("scanGitLogForSecrets aggregate shape", () => {
     expect(placeholder).toHaveLength(2);
     // Cardinality invariant: every hit is classified into exactly one bucket.
     expect(literal.length + placeholder.length).toBe(hits.length);
+  });
+});
+
+// ============================================
+// Baseline-subset logic (Definition of Done #3-#5, #8).
+//
+// The baseline pins every already-known literal hit as-of this card, keyed
+// by commit SHA + file path + a redacted fingerprint of the value (never the
+// value itself: `fingerprintValue` is a one-way hash, not `redact()`'s
+// partial reveal). `evaluateBaseline` is the pass/fail decision: every
+// literal hit found by the scanner must match an entry in the baseline
+// (exit 0), and any hit that isn't covered fails the build (exit non-zero)
+// while naming the hit's commit and file. It also flags baseline entries
+// that no longer correspond to any hit as "stale" — the signal that
+// scrubbing history should have removed that entry rather than leaving it
+// to rot.
+// ============================================
+describe("fingerprintValue", () => {
+  it("never returns the input value itself, even for a short value", () => {
+    const fp = fingerprintValue("GOCSPXabc12XY");
+    expect(fp).not.toContain("GOCSPXabc12XY");
+    expect(fp.length).toBeGreaterThan(0);
+  });
+
+  it("is deterministic for the same value", () => {
+    expect(fingerprintValue("some-secret-value")).toBe(fingerprintValue("some-secret-value"));
+  });
+
+  it("differs for different values", () => {
+    expect(fingerprintValue("some-secret-value")).not.toBe(fingerprintValue("some-other-value"));
+  });
+});
+
+describe("hitFingerprint", () => {
+  it("fingerprints the value extracted from a hit's line", () => {
+    const log = fakeLog("aaa1111", "src/config.ts", [`+  developer_token: "${FAKE_TOKEN_1}",`]);
+    const [hit] = scanGitLogForSecrets(log);
+    expect(hitFingerprint(hit)).toBe(fingerprintValue(FAKE_TOKEN_1));
+  });
+});
+
+describe("evaluateBaseline", () => {
+  it("exits 0 when every literal hit is present in the baseline", () => {
+    const log = fakeLog("aaa1111", "src/config.ts", [`+  developer_token: "${FAKE_TOKEN_1}",`]);
+    const [hit] = scanGitLogForSecrets(log);
+    const baseline = [{ commit: "aaa1111", file: "src/config.ts", fingerprint: hitFingerprint(hit) }];
+    const result = evaluateBaseline([hit], baseline);
+    expect(result.exitCode).toBe(0);
+    expect(result.missing).toHaveLength(0);
+  });
+
+  it("exits non-zero and names the commit and file when a literal hit is absent from the baseline", () => {
+    const log = fakeLog("bbb2222", "src/auth.ts", [`+client_secret=${FAKE_GOCSPX}`]);
+    const [hit] = scanGitLogForSecrets(log);
+    const result = evaluateBaseline([hit], []);
+    expect(result.exitCode).not.toBe(0);
+    expect(result.missing).toHaveLength(1);
+    expect(result.missing[0]).toMatchObject({ commit: "bbb2222", file: "src/auth.ts" });
+  });
+
+  it("reports a baseline entry with no corresponding hit as stale (shrink-only)", () => {
+    const staleEntry = { commit: "ccc3333", file: "src/gone.ts", fingerprint: "deadbeef" };
+    const result = evaluateBaseline([], [staleEntry]);
+    expect(result.exitCode).toBe(0);
+    expect(result.stale).toHaveLength(1);
+    expect(result.stale[0]).toMatchObject(staleEntry);
   });
 });

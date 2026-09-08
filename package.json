@@ -50,7 +50,8 @@
     "test": "vitest run",
     "test:portability": "vitest run src/portability.test.ts",
     "prepublishOnly": "node scripts/check-embedded.mjs && npm run build && npm test",
-    "smoke": "scripts/healthcheck.sh"
+    "smoke": "scripts/healthcheck.sh",
+    "scan:secrets": "node scripts/scan-history-secrets.mjs --repo ."
   },
   "keywords": [
     "mcp",
