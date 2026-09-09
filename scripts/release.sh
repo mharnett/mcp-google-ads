@@ -10,6 +10,13 @@
 # (.github/workflows/publish.yml), which reads the same values from GitHub
 # repository secrets.
 #
+# NOT THE CANONICAL PUBLISH PATH. The canonical path is CI OIDC Trusted
+# Publishing via .github/workflows/publish.yml. Use this script only as a
+# non-canonical fallback (GitHub Actions is down, or a release must ship
+# without a green CI run). Running it requires an interactive WebAuthn
+# passkey tap to unlock the macOS Keychain entries below — it cannot run
+# unattended or from CI.
+#
 # Usage:
 #   ./scripts/release.sh [--dry-run]
 #
