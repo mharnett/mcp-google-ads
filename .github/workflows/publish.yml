@@ -61,10 +61,12 @@ jobs:
       # every end-user's `npx mcp-google-ads-auth` would then error with "set
       # GOOGLE_ADS_CLIENT_ID in your environment", breaking the install flow.
       #
-      # Canonical publish path is scripts/release.sh running locally on Mac with
-      # Keychain-sourced secrets. This CI workflow is a fallback only; configure
-      # secrets in repo settings (Settings > Secrets and variables > Actions)
-      # before triggering a Release-based publish.
+      # Canonical publish path is this CI workflow (OIDC Trusted Publishing —
+      # see the "Publish to npm" step below). scripts/release.sh is a
+      # Mac-local, non-canonical fallback for when GitHub Actions is down or
+      # a release must ship without a green CI run; configure secrets in
+      # repo settings (Settings > Secrets and variables > Actions) before
+      # triggering a Release-based publish here.
       - name: Verify embedded secrets are configured
         env:
           EMBEDDED_CLIENT_ID: ${{ secrets.EMBEDDED_CLIENT_ID }}
