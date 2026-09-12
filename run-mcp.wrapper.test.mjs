@@ -55,11 +55,10 @@ while [ $# -gt 0 ]; do
     *) shift;;
   esac
 done
-if [ "$service" = "GOOGLE_ADS_REFRESH_TOKEN" ]; then
-  echo "$account"
-else
-  echo "stub-value"
-fi
+case "$service" in
+  GOOGLE_ADS_REFRESH_TOKEN|GOOGLE_ADS_REFRESH_TOKEN_AUTOMATION) echo "$service|$account";;
+  *) echo "stub-value";;
+esac
 `
   );
   chmodSync(path.join(binDir, "security"), 0o755);
@@ -88,17 +87,33 @@ function runWithWriteFlag(value) {
   return result.stdout.trim();
 }
 
-describe("run-mcp.sh Keychain account selection", () => {
-  it("GOOGLE_ADS_MCP_WRITE unset -> sources the read-only account", () => {
-    expect(runWithWriteFlag(undefined)).toBe("google-ads-ro-drak");
+describe("run-mcp.sh Keychain item selection", () => {
+  it("GOOGLE_ADS_MCP_WRITE unset -> sources the read-only item", () => {
+    expect(runWithWriteFlag(undefined)).toBe(
+      "GOOGLE_ADS_REFRESH_TOKEN|google-ads-ro-drak"
+    );
   });
 
-  it("GOOGLE_ADS_MCP_WRITE=garbage -> falls back to the read-only account", () => {
-    expect(runWithWriteFlag("garbage")).toBe("google-ads-ro-drak");
+  it("GOOGLE_ADS_MCP_WRITE=garbage -> falls back to the read-only item", () => {
+    expect(runWithWriteFlag("garbage")).toBe(
+      "GOOGLE_ADS_REFRESH_TOKEN|google-ads-ro-drak"
+    );
   });
 
-  it("GOOGLE_ADS_MCP_WRITE=true -> sources the admin account", () => {
-    expect(runWithWriteFlag("true")).toBe("google-ads-admin-drak");
+  // The write branch moved OFF google-ads-admin-drak (which holds a token
+  // byte-identical to mark@'s own admin login) and onto ads-automation@'s
+  // dedicated STANDARD-role credential. That credential was already on the
+  // Keychain under a DIFFERENT SERVICE name, so the write branch varies the
+  // service as well as the account — asserting the account alone would pass
+  // against the wrong item.
+  it("GOOGLE_ADS_MCP_WRITE=true -> sources the ads-automation@ item, service and all", () => {
+    expect(runWithWriteFlag("true")).toBe(
+      "GOOGLE_ADS_REFRESH_TOKEN_AUTOMATION|google-ads-automation"
+    );
+  });
+
+  it("write branch never resolves to the admin-drak item", () => {
+    expect(runWithWriteFlag("true")).not.toContain("google-ads-admin-drak");
   });
 });
 

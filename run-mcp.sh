@@ -10,12 +10,19 @@ source "$HELPER"
 export GOOGLE_ADS_DEVELOPER_TOKEN=$(keychain_get "GOOGLE_ADS_DEVELOPER_TOKEN" "google-ads-mcp" 2>/dev/null)
 export GOOGLE_ADS_CLIENT_ID=$(keychain_get "GOOGLE_ADS_CLIENT_ID" "google-ads-mcp" 2>/dev/null)
 export GOOGLE_ADS_CLIENT_SECRET=$(keychain_get "GOOGLE_ADS_CLIENT_SECRET" "google-ads-mcp" 2>/dev/null)
+# Write and read-only branches select a different Keychain ITEM, and an item is
+# (service, account) — not account alone. The write credential is
+# ads-automation@drakmarketing.com, a STANDARD-role user on the DrakMarketing
+# MCC that is deliberately NOT mark@'s admin login; its token was already
+# stored under its own service name, so both halves vary here.
 if [ "$GOOGLE_ADS_MCP_WRITE" = "true" ]; then
-  GOOGLE_ADS_REFRESH_TOKEN_ACCOUNT=google-ads-admin-drak
+  GOOGLE_ADS_REFRESH_TOKEN_SERVICE=GOOGLE_ADS_REFRESH_TOKEN_AUTOMATION
+  GOOGLE_ADS_REFRESH_TOKEN_ACCOUNT=google-ads-automation
 else
+  GOOGLE_ADS_REFRESH_TOKEN_SERVICE=GOOGLE_ADS_REFRESH_TOKEN
   GOOGLE_ADS_REFRESH_TOKEN_ACCOUNT=google-ads-ro-drak
 fi
-export GOOGLE_ADS_REFRESH_TOKEN=$(keychain_get "GOOGLE_ADS_REFRESH_TOKEN" "$GOOGLE_ADS_REFRESH_TOKEN_ACCOUNT" 2>/dev/null)
+export GOOGLE_ADS_REFRESH_TOKEN=$(keychain_get "$GOOGLE_ADS_REFRESH_TOKEN_SERVICE" "$GOOGLE_ADS_REFRESH_TOKEN_ACCOUNT" 2>/dev/null)
 export GOOGLE_ADS_REFRESH_TOKEN_FLOWSPACE=$(keychain_get "GOOGLE_ADS_REFRESH_TOKEN_FLOWSPACE" "google-ads-flowspace" 2>/dev/null)
 
 # Fail fast if any required Keychain lookup returned empty
