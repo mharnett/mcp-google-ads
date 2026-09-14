@@ -267,3 +267,49 @@ describe("validateResolvedCredentials", () => {
     expect(result.valid).toBe(true);
   });
 });
+
+// ============================================
+// Regression: developer token still resolved
+// ============================================
+// Baseline: as of 2026-09-14, the developer_token header is still required
+// and sent on all Google Ads API calls. This test documents the current behavior.
+// Google stated the header is optional until H1 2027 removal.
+// Ref: src/credentials.ts:125, src/auth-cli.ts:536
+
+describe("developer token resolution (Cloud-project baseline, H1 2027 migration pending)", () => {
+  const freshPath = () => path.join(tmpDir, `creds-${Math.random().toString(36).slice(2)}.json`);
+
+  it("includes developer_token in resolved credentials from env var", () => {
+    process.env.GOOGLE_ADS_CLIENT_ID = "x".repeat(30);
+    process.env.GOOGLE_ADS_CLIENT_SECRET = "x".repeat(30);
+    process.env.GOOGLE_ADS_DEVELOPER_TOKEN = "test-dev-token-12345";
+    process.env.GOOGLE_ADS_REFRESH_TOKEN = "x".repeat(30);
+    process.env.GOOGLE_ADS_CUSTOMER_ID = "1234567890";
+    const resolved = resolveCredentials(freshPath());
+    expect(resolved.developer_token).toBe("test-dev-token-12345");
+  });
+
+  it("trims whitespace from developer_token env var", () => {
+    process.env.GOOGLE_ADS_CLIENT_ID = "x".repeat(30);
+    process.env.GOOGLE_ADS_CLIENT_SECRET = "x".repeat(30);
+    process.env.GOOGLE_ADS_DEVELOPER_TOKEN = "  test-dev-token-with-spaces  ";
+    process.env.GOOGLE_ADS_REFRESH_TOKEN = "x".repeat(30);
+    process.env.GOOGLE_ADS_CUSTOMER_ID = "1234567890";
+    const resolved = resolveCredentials(freshPath());
+    expect(resolved.developer_token).toBe("test-dev-token-with-spaces");
+  });
+
+  it("requires developer_token to be present, throwing with helpful message if missing", () => {
+    process.env.GOOGLE_ADS_CLIENT_ID = "x".repeat(30);
+    process.env.GOOGLE_ADS_CLIENT_SECRET = "x".repeat(30);
+    // Explicitly not setting GOOGLE_ADS_DEVELOPER_TOKEN (and it won't have embedded value)
+    process.env.GOOGLE_ADS_REFRESH_TOKEN = "x".repeat(30);
+    process.env.GOOGLE_ADS_CUSTOMER_ID = "1234567890";
+    try {
+      resolveCredentials(freshPath());
+      throw new Error("Expected resolveCredentials to throw for missing developer_token");
+    } catch (err) {
+      expect((err as Error).message).toContain("developer_token");
+    }
+  });
+});
