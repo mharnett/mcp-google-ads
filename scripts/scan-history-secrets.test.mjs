@@ -200,4 +200,30 @@ describe("evaluateBaseline", () => {
     expect(result.stale).toHaveLength(1);
     expect(result.stale[0]).toMatchObject(staleEntry);
   });
+
+  // A squash-merge rewrites the commit SHA of every commit it flattens. The
+  // credentials.test.ts developer_token fixture was baselined at 5feb999
+  // (mharnett/mcp-google-ads#56's PR-branch commit) but landed on main as
+  // 680f006 once GitHub squash-merged it (#57) -- same file, same value,
+  // different SHA. The baseline must still recognize that hit as covered
+  // without a second entry per squash.
+  it("still covers a baselined literal after a squash-merge changes the commit SHA (real #56/#57 pair)", () => {
+    const log = fakeLog("680f00676762be972a4dc367c89dbb8464d6354a", "src/credentials.test.ts", [
+      '+    process.env.GOOGLE_ADS_DEVELOPER_TOKEN = "test-dev-token-12345";',
+    ]);
+    const [hit] = scanGitLogForSecrets(log);
+    expect(hit.classification).toBe("literal");
+    expect(hitFingerprint(hit)).toBe("e057958ee8947274");
+
+    const baseline = [
+      {
+        commit: "5feb999adcdb42171a351ed625db77969b9faa8d",
+        file: "src/credentials.test.ts",
+        fingerprint: "e057958ee8947274",
+      },
+    ];
+    const result = evaluateBaseline([hit], baseline);
+    expect(result.missing).toHaveLength(0);
+    expect(result.exitCode).toBe(0);
+  });
 });
