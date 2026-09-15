@@ -89,14 +89,20 @@ export function scanGitLogForSecrets(logText, patterns = DEFAULT_PATTERNS) {
 // Baseline support.
 //
 // A committed baseline file pins every literal hit that already exists in
-// history, keyed by commit SHA + file path + a one-way fingerprint of the
-// value (never the value itself, and never even `redact()`'s partial
-// reveal). `evaluateBaseline` is the pass/fail decision the CLI hangs off
-// of: every literal hit the scanner finds must have a matching baseline
-// entry (exit 0); any hit that doesn't fails the build and names its commit
-// and file. Baseline entries with no corresponding hit come back as
-// "stale" -- the baseline is shrink-only, so scrubbing a hit out of history
-// should force that entry's removal rather than leaving it to rot.
+// history, keyed by file path + a one-way fingerprint of the value (never
+// the value itself, and never even `redact()`'s partial reveal).
+// `entry.commit` is carried along for humans (it records where the hit was
+// first seen) but is NOT part of the key: a squash-merge rewrites every
+// commit SHA it flattens, so a literal baselined against a PR-branch commit
+// must still be recognized once that same (file, fingerprint) pair shows up
+// at the squashed commit on main. `evaluateBaseline` is the pass/fail
+// decision the CLI hangs off of: every literal hit the scanner finds must
+// have a matching baseline entry (exit 0); any hit that doesn't fails the
+// build and names its commit and file. Baseline entries whose (file,
+// fingerprint) pair has no corresponding hit ANYWHERE in history come back
+// as "stale" -- the baseline is shrink-only, so scrubbing a value out of
+// every commit that ever held it should force that entry's removal rather
+// than leaving it to rot.
 // ============================================
 
 export function fingerprintValue(value) {
@@ -109,7 +115,7 @@ export function hitFingerprint(hit) {
 }
 
 function baselineKey(entry) {
-  return `${entry.commit}:${entry.file}:${entry.fingerprint}`;
+  return `${entry.file}:${entry.fingerprint}`;
 }
 
 export function evaluateBaseline(literalHits, baselineEntries) {
@@ -119,7 +125,7 @@ export function evaluateBaseline(literalHits, baselineEntries) {
 
   for (const hit of literalHits) {
     const fingerprint = hitFingerprint(hit);
-    const key = baselineKey({ commit: hit.commit, file: hit.file, fingerprint });
+    const key = baselineKey({ file: hit.file, fingerprint });
     seenKeys.add(key);
     if (!baselineSet.has(key)) {
       missing.push({ commit: hit.commit, file: hit.file, pattern: hit.pattern, fingerprint });
