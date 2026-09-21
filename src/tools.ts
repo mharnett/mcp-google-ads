@@ -68,7 +68,7 @@ export const tools: Tool[] = [
   },
   {
     name: "google_ads_validate_ad",
-    description: "Validate an RSA without creating it. Use this to check for errors before creating. Enforces: 3-15 headlines (≤30 chars), 2-4 descriptions (≤90 chars), ≥1 final URL, both path1 AND path2 present (≤15 chars each), ≥1 label.",
+    description: "Validate an RSA without creating it. Use this to check for errors before creating. Enforces: 3-15 headlines (≤30 chars), 2-4 descriptions (≤90 chars), ≥1 final URL, both path1 AND path2 present (≤15 chars each), ≥1 label. Also enforces a house floor of ≥15 headlines and ≥4 descriptions by default (mirroring google_ads_create_responsive_search_ad's pre-check) -- pass allow_partial_assets: true to preview a below-floor ad without that rejection.",
     inputSchema: {
       additionalProperties: false,
       type: "object",
@@ -99,6 +99,10 @@ export const tools: Tool[] = [
           type: "array",
           items: { type: "string" },
           description: "At least 1 label required (e.g. 'claude-2026-04-12' for versioning). Enables later discovery and auditing.",
+        },
+        allow_partial_assets: {
+          type: "boolean",
+          description: "House-floor escape hatch. Defaults to false, meaning ≥15 headlines and ≥4 descriptions are required. Pass true to preview an ad with fewer (still subject to the API's own 3/2 minimums).",
         },
       },
       required: ["headlines", "descriptions", "final_urls", "path1", "path2", "labels"],
@@ -175,7 +179,7 @@ export const tools: Tool[] = [
   },
   {
     name: "google_ads_create_responsive_search_ad",
-    description: "Create a responsive search ad (will be PAUSED until approved). Validates before creating. Headlines/descriptions can be plain strings or objects with pinned_position (1-3 for headlines, 1-2 for descriptions). path1 and path2 are required (display URL paths). A `claude-YYYY-MM-DD` label is auto-applied; pass additional `labels` to attach more.",
+    description: "Create a responsive search ad (will be PAUSED until approved). Validates before creating. Headlines/descriptions can be plain strings or objects with pinned_position (1-3 for headlines, 1-2 for descriptions). path1 and path2 are required (display URL paths). A `claude-YYYY-MM-DD` label is auto-applied; pass additional `labels` to attach more. By default requires ≥15 headlines and ≥4 descriptions (house floor, stricter than the API's own 3/2 minimums); pass allow_partial_assets: true to override.",
     inputSchema: {
       additionalProperties: false,
       type: "object",
@@ -231,6 +235,10 @@ export const tools: Tool[] = [
         label_descriptor: {
           type: "string",
           description: "Optional short description of WHAT this change is, appended to the auto label as a kebab slug: claude-MM-DD-YY-<label_descriptor> (e.g. \"brand cpa fix\" -> claude-07-23-26-brand-cpa-fix). Makes the audit label self-explanatory for rollback. Slugged automatically; bounded to the 80-char label limit on a word boundary.",
+        },
+        allow_partial_assets: {
+          type: "boolean",
+          description: "House-floor escape hatch. Defaults to false, meaning ≥15 headlines and ≥4 descriptions are required. Pass true to create an ad with fewer (still subject to the API's own 3/2 minimums).",
         },
       },
       required: ["ad_group_id", "final_urls", "headlines", "descriptions", "path1", "path2"],

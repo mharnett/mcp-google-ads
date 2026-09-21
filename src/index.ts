@@ -1156,6 +1156,9 @@ export class GoogleAdsManager {
      *  exposed on the public create_responsive_search_ad tool schema --
      *  direct callers always get the default (true) hygiene requirement. */
     requirePathSegments?: boolean;
+    /** Escape hatch for the 15-headline/4-description house floor. Exposed
+     *  on the public create_responsive_search_ad tool schema. */
+    allow_partial_assets?: boolean;
   }) {
     const customer = this.getCustomer(customerId);
 
@@ -1180,6 +1183,7 @@ export class GoogleAdsManager {
       path2: ad.path2,
       labels: ["__auto_claude_label__", ...(ad.labels ?? [])],
       requirePathSegments: ad.requirePathSegments,
+      enforceAssetFloor: !ad.allow_partial_assets,
     });
     if (!validation.valid) {
       throw new Error("RSA validation failed:\n" + validation.errors.join("\n"));
@@ -3647,6 +3651,10 @@ export class GoogleAdsManager {
           // requirePathSegments doc for why this can't just inherit the
           // create-tool's default.
           requirePathSegments: false,
+          // Same reasoning for the 15-headline/4-description house floor --
+          // a clone of a pre-existing ad isn't new authorship, so it can't be
+          // blocked by a policy that postdates the source ad.
+          allow_partial_assets: true,
           // Auto-label (claude-MM-DD-YY) is applied by createResponsiveSearchAd.
           // Original non-auto labels are reapplied below.
         });
@@ -3832,6 +3840,8 @@ export class GoogleAdsManager {
     // untouched), same lint rules create_responsive_search_ad enforces.
     // requirePathSegments: false -- this edits an existing live ad, it's not
     // authoring a new one; a path1/path2 this ad never had isn't a defect.
+    // enforceAssetFloor: false -- same reasoning; the 15/4 house floor is for
+    // ads being authored, not for editing text on an ad that predates it.
     const validation = validateRsa({
       headlines: (newHeadlines ?? currentHeadlines).map(h => h.text),
       descriptions: (newDescriptions ?? currentDescriptions).map(d => d.text),
@@ -3840,6 +3850,7 @@ export class GoogleAdsManager {
       path2: rsa.path2 ?? "",
       labels: ["__auto_claude_label__"],
       requirePathSegments: false,
+      enforceAssetFloor: false,
     });
     if (!validation.valid) {
       throw new Error("RSA validation failed:\n" + validation.errors.join("\n"));
@@ -4271,6 +4282,7 @@ export class GoogleAdsManager {
     path1?: string;
     path2?: string;
     labels?: string[];
+    enforceAssetFloor?: boolean;
   }) {
     // Delegates to the pure validateRsa() function so the logic can be
     // unit-tested without instantiating the full manager. Enforces path1,
@@ -4590,6 +4602,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case "google_ads_validate_ad": {
+        const allowPartialAssets = args?.allow_partial_assets as boolean | undefined;
         const validation = await getAdsManager().validateAd("", {
           headlines: args?.headlines as string[],
           descriptions: args?.descriptions as string[],
@@ -4597,6 +4610,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           path1: args?.path1 as string | undefined,
           path2: args?.path2 as string | undefined,
           labels: args?.labels as string[] | undefined,
+          enforceAssetFloor: !allowPartialAssets,
         });
         return {
           content: [{
@@ -4680,6 +4694,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const headlineTexts = rawHeadlines.map(h => typeof h === "string" ? h : h.text);
         const descriptionTexts = rawDescriptions.map(d => typeof d === "string" ? d : d.text);
         const extraLabels = (args?.labels as string[] | undefined) ?? [];
+        const allowPartialAssets = args?.allow_partial_assets as boolean | undefined;
 
         // Validate first (the create path also runs validateRsa, but we
         // validate here too so the tool returns a clean error rather than
@@ -4692,6 +4707,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           path1: args?.path1 as string | undefined,
           path2: args?.path2 as string | undefined,
           labels: ["__auto_claude_label__", ...extraLabels],
+          enforceAssetFloor: !allowPartialAssets,
         });
 
         if (!validation.valid) {
@@ -4716,6 +4732,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           path2: args?.path2 as string,
           labels: extraLabels,
           label_descriptor: args?.label_descriptor as string | undefined,
+          allow_partial_assets: allowPartialAssets,
         });
 
         return {
