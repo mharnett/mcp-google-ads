@@ -28,6 +28,17 @@ export interface RsaInput {
    * had a display path isn't blocked from being faithfully replicated.
    */
   requirePathSegments?: boolean;
+  /**
+   * When true, rejects fewer than HOUSE_FLOOR_HEADLINES headlines or fewer
+   * than HOUSE_FLOOR_DESCRIPTIONS descriptions. Defaults to false -- this is
+   * house policy for callers AUTHORING a new ad
+   * (google_ads_create_responsive_search_ad / google_ads_validate_ad), not a
+   * real Google Ads API constraint (the API's own floor is 3/2, enforced
+   * separately by MIN_HEADLINES/MIN_DESCRIPTIONS above). Editing tools
+   * (updateResponsiveSearchAdText) must pass false so a pre-existing ad below
+   * the house floor isn't blocked from being edited.
+   */
+  enforceAssetFloor?: boolean;
 }
 
 export interface RsaValidationResult {
@@ -43,6 +54,10 @@ const MIN_DESCRIPTIONS = 2;
 const MAX_DESCRIPTIONS = 4;
 const MAX_DESCRIPTION_LENGTH = 90;
 const MAX_PATH_LENGTH = 15;
+
+// House policy floor for newly-authored ads (see enforceAssetFloor on RsaInput).
+const HOUSE_FLOOR_HEADLINES = 15;
+const HOUSE_FLOOR_DESCRIPTIONS = 4;
 
 // Dynamic insertions in ad text render shorter than their literal form.
 // Google Ads validates against the rendered length (default text for keyword
@@ -87,6 +102,11 @@ export function validateRsa(ad: RsaInput): RsaValidationResult {
       errors.push(`Headline ${i + 1} too long (${effectiveLen}/${MAX_HEADLINE_LENGTH}): "${h}"`);
     }
   });
+  if (ad.enforceAssetFloor && (ad.headlines?.length ?? 0) < HOUSE_FLOOR_HEADLINES) {
+    errors.push(
+      `House floor requires at least ${HOUSE_FLOOR_HEADLINES} headlines, got ${ad.headlines?.length ?? 0}. Pass allow_partial_assets: true to override.`
+    );
+  }
 
   // ── Descriptions ──
   if (!ad.descriptions || ad.descriptions.length < MIN_DESCRIPTIONS) {
@@ -106,6 +126,11 @@ export function validateRsa(ad: RsaInput): RsaValidationResult {
       );
     }
   });
+  if (ad.enforceAssetFloor && (ad.descriptions?.length ?? 0) < HOUSE_FLOOR_DESCRIPTIONS) {
+    errors.push(
+      `House floor requires at least ${HOUSE_FLOOR_DESCRIPTIONS} descriptions, got ${ad.descriptions?.length ?? 0}. Pass allow_partial_assets: true to override.`
+    );
+  }
 
   // ── Final URLs ──
   if (!ad.final_urls || ad.final_urls.length === 0) {

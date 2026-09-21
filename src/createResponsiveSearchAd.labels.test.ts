@@ -90,6 +90,9 @@ const VALID_RSA = {
   descriptions: ["Description one here", "Description two here"],
   path1: "path1",
   path2: "path2",
+  // This suite tests label wiring, not the headline/description count floor;
+  // opt out so it isn't coupled to the house-floor minimums.
+  allow_partial_assets: true,
 };
 
 describe("createResponsiveSearchAd label wiring", () => {
