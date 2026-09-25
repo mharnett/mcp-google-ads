@@ -130,6 +130,15 @@ Alternatively, set credentials via environment variables (these override `config
 | `GOOGLE_ADS_CLIENT_SECRET` | Yes | OAuth 2.0 client secret |
 | `GOOGLE_ADS_REFRESH_TOKEN` | Yes | OAuth 2.0 refresh token |
 | `GOOGLE_ADS_MCP_WRITE` | No | Set to `true` to expose mutating tools (create/update/pause/enable/remove/apply). Default: read-only. |
+| `GOOGLE_ADS_MCP_ALWAYS_LOAD` | No | Comma-separated tool names to mark as always-loaded, e.g. `google_ads_get_client_context,google_ads_gaql_query`. Default: unset (no tool is marked). |
+
+### Always-loaded tools
+
+Clients that defer tool schemas behind a tool-search step only load a tool
+once it is searched for. Naming tools in `GOOGLE_ADS_MCP_ALWAYS_LOAD` stamps
+them with `_meta: {"anthropic/alwaysLoad": true}` in `tools/list`, so those
+tools are offered directly. Names that match no tool are ignored, and the
+marker never exposes a tool that read-only mode hides.
 
 ### Read-only by default
 

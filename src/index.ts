@@ -4489,9 +4489,57 @@ const server = new Server(
   }
 );
 
+/**
+ * Env var naming the tools that should be offered directly rather than
+ * deferred behind tool search. Comma-separated tool names, e.g.
+ * `GOOGLE_ADS_MCP_ALWAYS_LOAD=google_ads_get_client_context,google_ads_gaql_query`.
+ * Unset or empty leaves the tool list exactly as it was.
+ */
+export const ALWAYS_LOAD_ENV_VAR = "GOOGLE_ADS_MCP_ALWAYS_LOAD";
+
+/** `_meta` key a client reads to load a tool's schema up front. */
+export const ALWAYS_LOAD_META_KEY = "anthropic/alwaysLoad";
+
+/**
+ * Stamp `_meta: {"anthropic/alwaysLoad": true}` onto every tool named in
+ * ALWAYS_LOAD_ENV_VAR, merging onto any `_meta` the tool already carries.
+ * Names that match no tool in the list are ignored — this is a hint, not a
+ * contract, and a stale name in a launcher config must not break tools/list.
+ */
+export function applyAlwaysLoad(
+  visibleTools: readonly Tool[],
+  env: NodeJS.ProcessEnv = process.env,
+): Tool[] {
+  const names = new Set(
+    (env[ALWAYS_LOAD_ENV_VAR] ?? "")
+      .split(",")
+      .map((name) => name.trim())
+      .filter((name) => name.length > 0),
+  );
+  if (names.size === 0) return [...visibleTools];
+
+  return visibleTools.map((tool) =>
+    names.has(tool.name)
+      ? {
+          ...tool,
+          _meta: { ...(tool._meta ?? {}), [ALWAYS_LOAD_META_KEY]: true },
+        }
+      : tool
+  );
+}
+
+/**
+ * The tools/list payload: write-gate filtering first, always-load stamping
+ * second. Order matters — stamping must never resurrect a tool that
+ * filterTools hid (a named write tool stays hidden in read-only mode).
+ */
+export function buildToolList(env: NodeJS.ProcessEnv = process.env): Tool[] {
+  return applyAlwaysLoad(filterTools(tools, env), env);
+}
+
 // Handle list tools
 server.setRequestHandler(ListToolsRequestSchema, async () => {
-  return { tools: filterTools(tools) };
+  return { tools: buildToolList() };
 });
 
 // Handle tool calls
