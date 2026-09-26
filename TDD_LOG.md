@@ -262,3 +262,19 @@ REFACTOR: none.
 RED: tools.contract.test.ts + tools.handler.test.ts (3 tests) — `google_ads_update_video_ad_videos` declared in tools.ts with no handler case / not in EXPECTED_TOOLS.
 GREEN: manager method updateVideoAdVideos + handler case in index.ts, WRITE_TOOLS entry, EXPECTED_TOOLS entry. Full suite 484 passed.
 REFACTOR: none.
+
+---
+
+# TDD Log — google_ads_update_campaign_geo_target_type
+
+### Cycle 1 — geoTargetTypeUpdate pure builder
+RED: `npx vitest run src/geoTargetTypeUpdate.test.ts` — `Cannot find module './geoTargetTypeUpdate.js' imported from '.../src/geoTargetTypeUpdate.test.ts'` (9 tests, 0 ran, suite failed).
+GREEN: added src/geoTargetTypeUpdate.ts exporting `POSITIVE_GEO_TARGET_TYPE` (PRESENCE: 7, PRESENCE_OR_INTEREST: 5 — matches google-ads-api v23 `enums.PositiveGeoTargetType`), `buildGeoTargetTypeCampaignUpdate` (single resource_name + geo_target_type_setting.positive_geo_target_type, throws on any other mode incl. SEARCH_INTEREST/UNKNOWN/UNSPECIFIED/garbage), and `buildGeoTargetTypeCampaignUpdates` (maps a mode across N resource names, one payload each). `npx vitest run src/geoTargetTypeUpdate.test.ts` — 9 passed.
+REFACTOR: none.
+
+### Cycle 2 — tool registration + write gate + label pass-through
+RED: `npm test` — `tools.contract.test.ts` (2 failures: tool count 75→76 expected but 76 received before EXPECTED_TOOLS updated; then name-list mismatch) once `google_ads_update_campaign_geo_target_type` was added to `src/tools.ts` but not yet to the EXPECTED_TOOLS fixture.
+GREEN: added `google_ads_update_campaign_geo_target_type` tool schema to src/tools.ts (campaign_ids array, mode enum restricted to PRESENCE/PRESENCE_OR_INTEREST, optional label, confirm dry-run gate), `GoogleAdsManager.updateCampaignGeoTargetType` + dispatch case in src/index.ts (builds one mutate op per campaign via buildGeoTargetTypeCampaignUpdates, then applies `label` to every one of those campaigns via the existing applyCustomLabels path when passed), added the tool name to `WRITE_TOOLS` in src/writeGate.ts and to EXPECTED_TOOLS in src/tools.contract.test.ts. Full suite: 733 passed, 9 skipped, 1 todo.
+REFACTOR: none.
+
+`npm test` — 733 passed + 9 skipped + 1 todo (baseline 724 passed; +9 new tests in geoTargetTypeUpdate.test.ts).
