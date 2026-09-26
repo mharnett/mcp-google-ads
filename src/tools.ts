@@ -1778,4 +1778,34 @@ export const tools: Tool[] = [
       required: ["campaign_id", "mode"],
     },
   },
+  {
+    name: "google_ads_update_campaign_geo_target_type",
+    description: "Set one or more campaigns' positive geo target type (geo_target_type_setting.positive_geo_target_type) — the setting behind the UI's Locations > Location options > \"Presence\" vs \"Presence or interest\". PRESENCE targets people physically in or regularly in the location; PRESENCE_OR_INTEREST also serves people searching about the location from elsewhere. Only these two modes are accepted here. Applies the same mode to every campaign_id passed in the same call. If `label` is passed, it is applied to every one of those campaigns as part of the same call. DRY-RUN BY DEFAULT: omit `confirm` or pass `confirm: false` to preview.",
+    inputSchema: {
+      additionalProperties: false,
+      type: "object",
+      properties: {
+        customer_id: { type: "string" },
+        campaign_ids: {
+          type: "array",
+          items: { type: "string", description: "Numeric ID of a campaign to update." },
+          description: "Campaign IDs to apply the same positive geo target type to.",
+        },
+        mode: {
+          type: "string",
+          enum: ["PRESENCE", "PRESENCE_OR_INTEREST"],
+          description: "PRESENCE = only people physically in / regularly in the targeted locations. PRESENCE_OR_INTEREST = also people who searched about the targeted locations from elsewhere.",
+        },
+        label: {
+          type: "string",
+          description: "Optional label name to apply to every campaign in campaign_ids as part of this call. Created if it doesn't already exist.",
+        },
+        confirm: {
+          type: "boolean",
+          description: "Must be true to apply. Omit or false for dry-run preview.",
+        },
+      },
+      required: ["campaign_ids", "mode"],
+    },
+  },
 ];

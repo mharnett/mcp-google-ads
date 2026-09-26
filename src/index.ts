@@ -35,6 +35,7 @@ import {
   DEFAULT_MAGNITUDE_CEILING_PCT,
 } from "./biddingUpdate.js";
 import { buildAdRotationCampaignUpdate, AD_SERVING_OPTIMIZATION_STATUS, AD_SERVING_OPTIMIZATION_STATUS_ENUM_TO_NAME } from "./adRotationUpdate.js";
+import { buildGeoTargetTypeCampaignUpdates, POSITIVE_GEO_TARGET_TYPE } from "./geoTargetTypeUpdate.js";
 import { validateRsa } from "./validateRsa.js";
 import {
   validateRemoveInput,
@@ -2548,6 +2549,35 @@ export class GoogleAdsManager {
       campaign_name: current.campaign.name,
       previous_mode: previousMode,
       new_mode: mode,
+    };
+  }
+
+  // Set one or more campaigns' geo_target_type_setting.positive_geo_target_type
+  // (PRESENCE vs PRESENCE_OR_INTEREST). Applies the same mode to every
+  // campaign_id in one mutate call. If a label is passed, it's applied to
+  // every one of those campaigns as part of the same call.
+  async updateCampaignGeoTargetType(
+    customerId: string,
+    campaignIds: string[],
+    mode: string,
+    label?: string
+  ) {
+    const customer = this.getCustomer(customerId);
+    const cleanId = customerId.replace(/-/g, "");
+    const resourceNames = campaignIds.map((id) => `customers/${cleanId}/campaigns/${id}`);
+    const operations = buildGeoTargetTypeCampaignUpdates(resourceNames, mode);
+
+    await withResilience(
+      () => customer.campaigns.update(operations),
+      "updateCampaignGeoTargetType.update"
+    );
+
+    await this.applyCustomLabels(customerId, resourceNames, "campaign", label ? [label] : undefined);
+
+    return {
+      campaign_ids: campaignIds,
+      mode,
+      label_applied: label ?? null,
     };
   }
 
@@ -5833,6 +5863,39 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
         const rotationResult = await getAdsManager().updateCampaignAdRotation(customerId, campaignId, mode);
         return { content: [{ type: "text", text: JSON.stringify({ success: true, ...rotationResult }, null, 2) }] };
+      }
+
+      case "google_ads_update_campaign_geo_target_type": {
+        const customerId = args?.customer_id as string || "";
+        const campaignIds = args?.campaign_ids as string[];
+        const mode = args?.mode as string;
+        const label = args?.label as string | undefined;
+
+        if (!campaignIds || campaignIds.length === 0 || !mode) {
+          return { content: [{ type: "text", text: JSON.stringify({ error: "campaign_ids and mode are required." }, null, 2) }] };
+        }
+        if (!(mode in POSITIVE_GEO_TARGET_TYPE)) {
+          return { content: [{ type: "text", text: JSON.stringify({ error: `mode must be one of ${Object.keys(POSITIVE_GEO_TARGET_TYPE).join(", ")}.` }, null, 2) }] };
+        }
+
+        if (!args?.confirm) {
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({
+                dry_run: true,
+                action: "update_campaign_geo_target_type",
+                campaign_ids: campaignIds,
+                mode,
+                label: label ?? null,
+                message: "Pass confirm: true to apply.",
+              }, null, 2),
+            }],
+          };
+        }
+
+        const geoTargetTypeResult = await getAdsManager().updateCampaignGeoTargetType(customerId, campaignIds, mode, label);
+        return { content: [{ type: "text", text: JSON.stringify({ success: true, ...geoTargetTypeResult }, null, 2) }] };
       }
 
       case "google_ads_link_asset_to_campaign": {

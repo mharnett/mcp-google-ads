@@ -79,6 +79,7 @@ describe("Tool Schema Contract", () => {
     "google_ads_attach_user_list_audience",
     "google_ads_create_and_attach_audience_bundle",
     "google_ads_update_campaign_ad_rotation",
+    "google_ads_update_campaign_geo_target_type",
   ];
 
   it("exports the expected number of tools", () => {
