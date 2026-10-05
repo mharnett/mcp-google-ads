@@ -99,6 +99,12 @@ import {
   isDemandGenAdGroup,
   type DemandGenAdInput,
 } from "./validateDemandGenAd.js";
+import {
+  resolveDgPolicy,
+  buildAssetAutomationSettings,
+  type DesiredState,
+  type ResolvedPolicy,
+} from "./assetAutomationPolicy.js";
 import { GoogleAdsApi, enums, resources, MutateOperation } from "google-ads-api";
 import { buildAdGroupAdResourceName, buildAdResourceName } from "./resourceNames.js";
 import { readFileSync, existsSync, realpathSync } from "fs";
@@ -1247,6 +1253,16 @@ export class GoogleAdsManager {
       throw new Error("Demand Gen ad validation failed:\n" + validation.errors.join("\n"));
     }
 
+    // Resolve the client's asset-automation policy BEFORE creating anything:
+    // a malformed policy file refuses the create rather than leaving an ad
+    // behind with Google's default (both automations ON).
+    let policy: ResolvedPolicy;
+    try {
+      policy = resolveDgPolicy(this.getClientForCustomerId(customerId)?.folder);
+    } catch (e: any) {
+      throw new Error(`Demand Gen ad not created: asset-automation policy unreadable (${e.message})`);
+    }
+
     const customer = this.getCustomer(customerId);
     const cleanId = customerId.replace(/-/g, "");
 
@@ -1322,20 +1338,18 @@ export class GoogleAdsManager {
         }
       }
 
-      // Auto opt-out of Google's auto-enhancement features. Demand Gen
-      // multi-asset ads default to OPTED_IN for "auto-generate video"
-      // (GENERATE_VIDEOS_FROM_OTHER_ASSETS) and "adaptive layouts"
-      // (GENERATE_DESIGN_VERSIONS_FOR_IMAGES). Advertisers consistently want
-      // tight creative control, so opt out by default. Best-effort: warn but
-      // don't fail the create if opt-out errors.
+      // Write the client's declared auto-video / adaptive-layouts policy
+      // (<client folder>/google_ads/config/platform_policy.yaml; default-off
+      // when the client has none). Google defaults both to OPTED_IN on a new
+      // DG ad. Best-effort: warn but don't fail the create if the write errors.
       try {
-        await this.updateAdAssetAutomation(
-          customerId,
-          [resourceName],
-          ["GENERATE_VIDEOS_FROM_OTHER_ASSETS", "GENERATE_DESIGN_VERSIONS_FOR_IMAGES"],
-          "OPTED_OUT",
-        );
-        assetAutomationOptOut = "OPTED_OUT";
+        const statuses = new Set(Object.values(policy.desired));
+        if (statuses.size === 0) {
+          assetAutomationOptOut = "unmanaged";
+        } else {
+          await this.writeAdAssetAutomation(customerId, [resourceName], policy.desired);
+          assetAutomationOptOut = statuses.size === 1 ? [...statuses][0] : "mixed";
+        }
       } catch (e: any) {
         assetAutomationOptOut = `failed: ${e.message}`;
         console.error(`[WARN] auto-asset-automation opt-out failed for ${resourceName}: ${e.message}`);
@@ -1378,6 +1392,7 @@ export class GoogleAdsManager {
       resource_name: resourceName,
       ad_id: resourceName ? resourceName.split("~").pop() : undefined,
       asset_automation_opt_out: assetAutomationOptOut,
+      asset_automation_policy: policy,
     };
   }
 
@@ -2185,6 +2200,29 @@ export class GoogleAdsManager {
     return result;
   }
 
+  // Write a per-type desired state onto AdGroupAds in ONE update operation per
+  // ad. Every managed type goes in the same op: Google re-populates any type
+  // left out as OPTED_IN, so splitting by status would undo the first write.
+  async writeAdAssetAutomation(customerId: string, resourceNames: string[], desired: DesiredState) {
+    const customer = this.getCustomer(customerId);
+    const settings = buildAssetAutomationSettings(
+      desired,
+      (enums as any).AssetAutomationType,
+      (enums as any).AssetAutomationStatus
+    );
+    const operations = resourceNames.map(rn => ({
+      entity: "ad_group_ad",
+      operation: "update",
+      resource: {
+        resource_name: rn,
+        // Proto field on AdGroupAd is `ad_group_ad_asset_automation_settings`,
+        // NOT `asset_automation_settings` (verified against v23 fields.js).
+        ad_group_ad_asset_automation_settings: settings,
+      },
+    } as any));
+    return withResilience(() => customer.mutateResources(operations), "updateAdAssetAutomation");
+  }
+
   // Set asset_automation_settings on AdGroupAds (Demand Gen video / image
   // generation opt-outs). Field is not in the v23 typed-client schema for
   // adGroupAds.update, so we go through mutateResources and let the lib's
@@ -2198,39 +2236,18 @@ export class GoogleAdsManager {
     status: "OPTED_IN" | "OPTED_OUT" = "OPTED_OUT",
     labels?: string[]
   ) {
-    const customer = this.getCustomer(customerId);
     const resourceNames = adIds.some(id => id.startsWith("customers/"))
       ? adIds
       : await this.resolveAdGroupAdResourceNames(customerId, adIds);
 
     const typeEnum = (enums as any).AssetAutomationType;
-    const statusEnum = (enums as any).AssetAutomationStatus;
-    const statusValue = statusEnum[status];
     const validNames = Object.keys(typeEnum).filter(k => isNaN(Number(k)));
     const unknown = automationTypes.filter(n => typeEnum[n] === undefined);
     if (unknown.length > 0) {
       throw new Error("Unknown AssetAutomationType value(s); valid set: " + validNames.join(", "));
     }
-    const settings = automationTypes.map(name => ({
-      asset_automation_type: typeEnum[name],
-      asset_automation_status: statusValue,
-    }));
-
-    const operations = resourceNames.map(rn => ({
-      entity: "ad_group_ad",
-      operation: "update",
-      resource: {
-        resource_name: rn,
-        // Proto field on AdGroupAd is `ad_group_ad_asset_automation_settings`,
-        // NOT `asset_automation_settings` (verified against v23 fields.js).
-        ad_group_ad_asset_automation_settings: settings,
-      },
-    } as any));
-
-    const mutateResp = await withResilience(
-      () => customer.mutateResources(operations),
-      "updateAdAssetAutomation"
-    );
+    const desired: DesiredState = Object.fromEntries(automationTypes.map(n => [n, status]));
+    const mutateResp = await this.writeAdAssetAutomation(customerId, resourceNames, desired);
 
     const responses = (mutateResp as any).mutate_operation_responses || [];
     const partialFailure = (mutateResp as any).partial_failure_error || null;
