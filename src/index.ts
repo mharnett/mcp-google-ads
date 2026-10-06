@@ -4026,7 +4026,6 @@ export class GoogleAdsManager {
         metrics.search_rank_lost_impression_share
       FROM keyword_view
       WHERE segments.date BETWEEN '${options.startDate}' AND '${options.endDate}'
-        AND ad_group_criterion.status != 'REMOVED'
     `;
 
     if (options.keywordTextContains) {
@@ -4077,7 +4076,6 @@ export class GoogleAdsManager {
         segments.conversion_action
       FROM keyword_view
       WHERE segments.date BETWEEN '${options.startDate}' AND '${options.endDate}'
-        AND ad_group_criterion.status != 'REMOVED'
     `;
 
     if (options.keywordTextContains) {
@@ -4232,7 +4230,6 @@ export class GoogleAdsManager {
         metrics.conversions_from_interactions_rate
       FROM ad_group_ad
       WHERE segments.date BETWEEN '${options.startDate}' AND '${options.endDate}'
-        AND ad_group_ad.status != 'REMOVED'
     `;
 
     if (options.campaignIds && options.campaignIds.length > 0) {
@@ -4285,7 +4282,6 @@ export class GoogleAdsManager {
         segments.conversion_action
       FROM ad_group_ad
       WHERE segments.date BETWEEN '${options.startDate}' AND '${options.endDate}'
-        AND ad_group_ad.status != 'REMOVED'
     `;
 
     if (options.campaignIds && options.campaignIds.length > 0) {
@@ -4299,6 +4295,41 @@ export class GoogleAdsManager {
 
     const result = await withResilience(() => customer.query(query), "getAdPerformanceWithConversions");
     return safeResponse(result, "getAdPerformanceWithConversions");
+  }
+
+  // Campaign diagnostics: current status/serving/budget fields plus
+  // last-7-days metrics. No status filter: a paused or removed campaign is
+  // the commonest answer to "why isn't this spending", and its recent spend
+  // must not vanish from the window (incident 2026-10-06). campaign.status is
+  // selected so callers can see which rows are not ENABLED.
+  async getCampaignDiagnostics(customerId: string, campaignIds?: string[]) {
+    const customer = this.getCustomer(customerId);
+    let diagQuery = `
+      SELECT
+        campaign.id,
+        campaign.name,
+        campaign.status,
+        campaign.serving_status,
+        campaign.primary_status,
+        campaign.primary_status_reasons,
+        campaign.bidding_strategy_type,
+        campaign_budget.amount_micros,
+        campaign_budget.status,
+        campaign_budget.delivery_method,
+        metrics.cost_micros,
+        metrics.impressions,
+        metrics.clicks,
+        metrics.conversions
+      FROM campaign
+      WHERE segments.date DURING LAST_7_DAYS
+    `;
+    if (campaignIds && campaignIds.length > 0) {
+      diagQuery += ` AND campaign.id IN (${campaignIds.map(sanitizeNumericId).join(",")})`;
+    }
+    diagQuery += ` ORDER BY metrics.cost_micros ASC`;
+
+    const diagResult = await withResilience(() => customer.query(diagQuery), "getCampaignDiagnostics");
+    return safeResponse(diagResult, "getCampaignDiagnostics");
   }
 
   // List available conversion actions
@@ -5998,35 +6029,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "google_ads_get_campaign_diagnostics": {
         const customerId = args?.customer_id as string || "";
         const campaignIds = args?.campaign_ids as string[] | undefined;
-        const customer = getAdsManager().getCustomer(customerId);
-
-        let diagQuery = `
-          SELECT
-            campaign.id,
-            campaign.name,
-            campaign.status,
-            campaign.serving_status,
-            campaign.primary_status,
-            campaign.primary_status_reasons,
-            campaign.bidding_strategy_type,
-            campaign_budget.amount_micros,
-            campaign_budget.status,
-            campaign_budget.delivery_method,
-            metrics.cost_micros,
-            metrics.impressions,
-            metrics.clicks,
-            metrics.conversions
-          FROM campaign
-          WHERE campaign.status = 'ENABLED'
-            AND segments.date DURING LAST_7_DAYS
-        `;
-        if (campaignIds && campaignIds.length > 0) {
-          diagQuery += ` AND campaign.id IN (${campaignIds.map(sanitizeNumericId).join(",")})`;
-        }
-        diagQuery += ` ORDER BY metrics.cost_micros ASC`;
-
-        const diagResult = await withResilience(() => customer.query(diagQuery), "getCampaignDiagnostics");
-        return { content: [{ type: "text", text: JSON.stringify(safeResponse(diagResult, "getCampaignDiagnostics"), null, 2) }] };
+        const diagResult = await getAdsManager().getCampaignDiagnostics(customerId, campaignIds);
+        return { content: [{ type: "text", text: JSON.stringify(diagResult, null, 2) }] };
       }
 
       case "google_ads_get_ad_strength": {
