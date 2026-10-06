@@ -615,7 +615,7 @@ export const tools: Tool[] = [
   // ============================================
   {
     name: "google_ads_keyword_performance",
-    description: "Get keyword performance report with metrics including impressions, clicks, cost, conversions, quality score components (quality score, expected CTR, ad relevance, landing page experience), and impression share metrics.",
+    description: "Get keyword performance report with metrics including impressions, clicks, cost, conversions, quality score components (quality score, expected CTR, ad relevance, landing page experience), and impression share metrics. Includes paused and removed keywords that had activity in the date range (status column labels them) — historical metrics are never filtered by current status.",
     inputSchema: {
       additionalProperties: false,
       type: "object",
@@ -632,7 +632,7 @@ export const tools: Tool[] = [
   },
   {
     name: "google_ads_keyword_performance_by_conversion",
-    description: "Get keyword performance broken down by conversion action. Shows which keywords drive which conversion types (e.g., form fills, MQLs, etc.).",
+    description: "Get keyword performance broken down by conversion action. Shows which keywords drive which conversion types (e.g., form fills, MQLs, etc.). Includes paused and removed keywords that had activity in the date range (status column labels them) — historical metrics are never filtered by current status.",
     inputSchema: {
       additionalProperties: false,
       type: "object",
@@ -685,7 +685,7 @@ export const tools: Tool[] = [
   },
   {
     name: "google_ads_ad_performance",
-    description: "Get ad performance report with metrics, ad copy (headlines/descriptions), final URLs, and ad strength rating.",
+    description: "Get ad performance report with metrics, ad copy (headlines/descriptions), final URLs, and ad strength rating. Includes paused and removed ads that had activity in the date range (status column labels them) — historical metrics are never filtered by current status.",
     inputSchema: {
       additionalProperties: false,
       type: "object",
@@ -701,7 +701,7 @@ export const tools: Tool[] = [
   },
   {
     name: "google_ads_ad_performance_by_conversion",
-    description: "Get ad performance broken down by conversion action. Shows which ads drive which conversion types.",
+    description: "Get ad performance broken down by conversion action. Shows which ads drive which conversion types. Includes paused and removed ads that had activity in the date range (status column labels them) — historical metrics are never filtered by current status.",
     inputSchema: {
       additionalProperties: false,
       type: "object",
@@ -878,7 +878,7 @@ export const tools: Tool[] = [
   },
   {
     name: "google_ads_get_campaign_diagnostics",
-    description: "Diagnose why a campaign is not spending or serving. Returns primary_status, primary_status_reasons, serving_status, budget, bidding strategy, and last-7-days metrics in a single call. Use this as the first step when a campaign has unexpectedly low spend or impressions.",
+    description: "Diagnose why a campaign is not spending or serving. Returns primary_status, primary_status_reasons, serving_status, budget, bidding strategy, and last-7-days metrics in a single call. Use this as the first step when a campaign has unexpectedly low spend or impressions. Includes paused and removed campaigns that had activity in the date range (status column labels them) — historical metrics are never filtered by current status.",
     inputSchema: {
       additionalProperties: false,
       type: "object",
