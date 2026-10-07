@@ -232,3 +232,42 @@ describe("buildCampaignCreatePayload — geo_target_type_setting always PRESENCE
     });
   });
 });
+
+// Lead form rule (2026-10-07). Lives beside the network_settings defaults in
+// campaignBuilder.ts: a Google-hosted lead form is never created or attached
+// unless the user explicitly asked for one. Origin: Forcepoint, a lead form
+// on 22 Search campaigns from 10 July, 555 junk submits, none imported.
+import {
+  LEAD_FORMS_REQUIRE_EXPLICIT_REQUEST,
+  assertLeadFormExplicitlyRequested,
+  isLeadFormFieldType,
+} from "./campaignBuilder.js";
+
+describe("lead form rule — never unless explicitly requested", () => {
+  it("is on", () => {
+    expect(LEAD_FORMS_REQUIRE_EXPLICIT_REQUEST).toBe(true);
+  });
+
+  it("refuses when the explicit flag is missing", () => {
+    expect(() => assertLeadFormExplicitlyRequested({}, "google_ads_create_lead_form_asset")).toThrow(
+      /explicit_lead_form_request/
+    );
+  });
+
+  it("refuses truthy values that are not literally true", () => {
+    for (const v of ["true", 1, "yes", {}]) {
+      expect(() => assertLeadFormExplicitlyRequested({ explicit_lead_form_request: v }, "x")).toThrow();
+    }
+  });
+
+  it("allows only explicit_lead_form_request === true", () => {
+    expect(() => assertLeadFormExplicitlyRequested({ explicit_lead_form_request: true }, "x")).not.toThrow();
+  });
+
+  it("recognises LEAD_FORM field types case-insensitively and nothing else", () => {
+    expect(isLeadFormFieldType("LEAD_FORM")).toBe(true);
+    expect(isLeadFormFieldType("lead_form")).toBe(true);
+    expect(isLeadFormFieldType("SITELINK")).toBe(false);
+    expect(isLeadFormFieldType(undefined)).toBe(false);
+  });
+});

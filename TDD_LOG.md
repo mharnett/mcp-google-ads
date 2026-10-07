@@ -278,3 +278,17 @@ GREEN: added `google_ads_update_campaign_geo_target_type` tool schema to src/too
 REFACTOR: none.
 
 `npm test` — 733 passed + 9 skipped + 1 todo (baseline 724 passed; +9 new tests in geoTargetTypeUpdate.test.ts).
+
+---
+
+## Lead forms never attached unless explicitly requested (2026-10-07)
+
+### Cycle 1 — rule + guard beside the network defaults in campaignBuilder.ts
+RED: `lead form rule — never unless explicitly requested` (4 of 5) — LEAD_FORMS_REQUIRE_EXPLICIT_REQUEST / assertLeadFormExplicitlyRequested / isLeadFormFieldType not exported.
+GREEN: src/campaignBuilder.ts (+35 LOC).
+REFACTOR: none.
+
+### Cycle 2 — both lead-form entry points call the guard before the API
+RED: `lead form rule is wired into every lead-form entry point` (3) — no guard call in the create_lead_form_asset / link_asset_to_campaign case blocks; no explicit_lead_form_request schema property.
+GREEN: src/index.ts (+14 LOC), src/tools.ts (+8 LOC). Full suite: 797 passed.
+REFACTOR: merged the campaignBuilder import.

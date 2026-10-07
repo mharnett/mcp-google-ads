@@ -1260,11 +1260,15 @@ export const tools: Tool[] = [
   },
   {
     name: "google_ads_create_lead_form_asset",
-    description: "Create a LeadFormAsset (Google Demand Gen / Discovery / Search lead form). Validates required fields, enum membership, and Google's character limits before hitting the API. After creation, use google_ads_link_asset_to_campaign with field_type=LEAD_FORM to attach it to a campaign. v1 supports standard fields only (FULL_NAME, EMAIL, WORK_EMAIL, PHONE_NUMBER, COMPANY_NAME, JOB_TITLE, etc.); custom questions, qualifying questions, and CRM delivery_methods (webhook) are NOT yet supported — leads must be downloaded from Google Ads UI as CSV until delivery_methods ships. Auto-labels the created asset. Returns {asset_id, resource_name, name}.",
+    description: "Create a LeadFormAsset (Google Demand Gen / Discovery / Search lead form). Validates required fields, enum membership, and Google's character limits before hitting the API. NEVER use unless the user explicitly asked for a lead form: requires explicit_lead_form_request=true. After creation, use google_ads_link_asset_to_campaign with field_type=LEAD_FORM (also requires explicit_lead_form_request=true) to attach it to a campaign. v1 supports standard fields only (FULL_NAME, EMAIL, WORK_EMAIL, PHONE_NUMBER, COMPANY_NAME, JOB_TITLE, etc.); custom questions, qualifying questions, and CRM delivery_methods (webhook) are NOT yet supported — leads must be downloaded from Google Ads UI as CSV until delivery_methods ships. Auto-labels the created asset. Returns {asset_id, resource_name, name}.",
     inputSchema: {
       additionalProperties: false,
       type: "object",
       properties: {
+        explicit_lead_form_request: {
+          type: "boolean",
+          description: "Lead forms are NEVER created or attached unless the user explicitly asked for a lead form in this conversation. Set true only then; the call is refused otherwise. (Policy 2026-10-07: an unrequested lead form produced 555 junk submits that were never imported.)",
+        },
         customer_id: { type: "string" },
         name: { type: "string", description: "Human-readable asset name shown in the Google Ads UI." },
         business_name: { type: "string", description: "Business name shown on the form (≤25 chars)." },
@@ -1612,6 +1616,10 @@ export const tools: Tool[] = [
       additionalProperties: false,
       type: "object",
       properties: {
+        explicit_lead_form_request: {
+          type: "boolean",
+          description: "Lead forms are NEVER created or attached unless the user explicitly asked for a lead form in this conversation. Set true only then; the call is refused otherwise. (Policy 2026-10-07: an unrequested lead form produced 555 junk submits that were never imported.)",
+        },
         customer_id: { type: "string" },
         asset_id: { type: "string", description: "Numeric ID of the existing asset to link." },
         campaign_ids: {
