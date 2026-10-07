@@ -65,6 +65,8 @@ import {
 import {
   buildCampaignCreatePayload,
   type CampaignCreateInput,
+  assertLeadFormExplicitlyRequested,
+  isLeadFormFieldType,
 } from "./campaignBuilder.js";
 import {
   buildExperimentPayload,
@@ -5956,6 +5958,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           return { content: [{ type: "text", text: JSON.stringify({ error: "asset_id, campaign_ids (non-empty), and field_type are required." }, null, 2) }] };
         }
 
+        if (isLeadFormFieldType(fieldType)) {
+          try {
+            assertLeadFormExplicitlyRequested(args as any, name);
+          } catch (e: any) {
+            return { content: [{ type: "text", text: JSON.stringify({ error: e.message }, null, 2) }], isError: true };
+          }
+        }
+
         if (!args?.confirm) {
           return {
             content: [{
@@ -6329,6 +6339,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "google_ads_create_lead_form_asset": {
         assertWriteAllowed(name);
+        try {
+          assertLeadFormExplicitlyRequested(args as any, name);
+        } catch (e: any) {
+          return { content: [{ type: "text", text: JSON.stringify({ error: e.message }, null, 2) }], isError: true };
+        }
         const customerId = args?.customer_id as string || "";
         try {
           const result = await getAdsManager().createLeadFormAsset(customerId, {

@@ -42,6 +42,37 @@ export interface CampaignCreatePayload {
  * Back-compat: calling with just {name, budget_amount_micros} produces the
  * exact same SEARCH + manual_cpc + no-criteria shape as v1.1.
  */
+// ─── Asset policy, set alongside the network defaults above ──────────────────
+// Lead forms: NEVER attach a Google-hosted lead form unless the user explicitly
+// asked for one. Same family as Display Expansion and Search Partners: a
+// default-on surface that buys traffic nobody signed off on.
+//
+// Origin 2026-10-07 (Forcepoint): a lead form ("Forcepoint Moves First") sat on
+// 22 Search campaigns from 10 July with no delivery to Salesforce. It logged 555
+// submits in Q3, nearly all junk from AI-tool searches, inflated All conversions,
+// and none were ever imported. Enforced at every lead-form entry point
+// (google_ads_create_lead_form_asset, google_ads_link_asset_to_campaign with
+// field_type LEAD_FORM), by a Claude Code PreToolUse hook, and by the
+// quality-control lead_form_attachments audit.
+export const LEAD_FORMS_REQUIRE_EXPLICIT_REQUEST = true;
+
+export function isLeadFormFieldType(fieldType: unknown): boolean {
+  return typeof fieldType === "string" && fieldType.trim().toUpperCase() === "LEAD_FORM";
+}
+
+export function assertLeadFormExplicitlyRequested(
+  args: { explicit_lead_form_request?: unknown } | undefined | null,
+  toolName: string,
+): void {
+  if (!LEAD_FORMS_REQUIRE_EXPLICIT_REQUEST) return;
+  if (args?.explicit_lead_form_request === true) return;
+  throw new Error(
+    `${toolName}: lead forms are never created or attached unless the user explicitly asked for one. ` +
+      "Pass explicit_lead_form_request: true only when they did. (Policy 2026-10-07: an unrequested " +
+      "lead form on 22 Forcepoint Search campaigns produced 555 junk submits that were never imported.)"
+  );
+}
+
 export function buildCampaignCreatePayload(input: CampaignCreateInput): CampaignCreatePayload {
   const budget = {
     name: `${input.name} Budget`,
@@ -90,6 +121,8 @@ export function buildCampaignCreatePayload(input: CampaignCreateInput): Campaign
   // the API rejects DEMAND_GEN with content_network=true as of Apr 2026.
   // audience_setting.use_audience_grouped=true is required for all DG campaigns.
   // SEARCH path retains the historical behavior of omitting these settings.
+  // Every channel: no lead form unless explicitly requested
+  // (LEAD_FORMS_REQUIRE_EXPLICIT_REQUEST, defined above this function).
   if (channelType === "DEMAND_GEN") {
     campaign.network_settings = {
       target_google_search: true,
@@ -98,6 +131,7 @@ export function buildCampaignCreatePayload(input: CampaignCreateInput): Campaign
       target_partner_search_network: false,
     };
     campaign.audience_setting = { use_audience_grouped: true };
+    // Lead forms are never attached by default: see LEAD_FORMS_REQUIRE_EXPLICIT_REQUEST.
     // Google defaults upgraded_targeting to TRUE, which routes location/language
     // targeting to the AD GROUP. Every campaign-level geo write then fails with a
     // masked `request_error: UNKNOWN` on operations.create.location — and the flag
