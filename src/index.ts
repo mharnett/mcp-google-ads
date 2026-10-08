@@ -2072,7 +2072,10 @@ export class GoogleAdsManager {
     const cleanId = customerId.replace(/-/g, "");
     const customer = this.getCustomer(customerId);
     const sanitized = adIds.map(id => sanitizeNumericId(String(id)));
-    const query = `SELECT ad_group.id, ad_group_ad.ad.id FROM ad_group_ad WHERE ad_group_ad.ad.id IN (${sanitized.join(",")})`;
+    // Skip links in REMOVED campaigns (e.g. old [TRIAL] experiment campaigns that
+    // share the Ad): mutating them fails the whole atomic batch with
+    // OPERATION_NOT_PERMITTED_FOR_REMOVED_RESOURCE.
+    const query = `SELECT ad_group.id, ad_group_ad.ad.id FROM ad_group_ad WHERE ad_group_ad.ad.id IN (${sanitized.join(",")}) AND campaign.status != 'REMOVED'`;
     const rows: any[] = await withResilience(
       () => customer.query(query),
       "resolveAdGroupAdResourceNames"
@@ -2100,7 +2103,10 @@ export class GoogleAdsManager {
   async enableAds(customerId: string, adIds: string[], labels?: string[]) {
     const customer = this.getCustomer(customerId);
 
-    const resourceNames = await this.resolveAdGroupAdResourceNames(customerId, adIds);
+    // Full ad_group_ad resource names target one link exactly (same as pauseAds).
+    const resourceNames = adIds.some(id => id.startsWith("customers/"))
+      ? adIds
+      : await this.resolveAdGroupAdResourceNames(customerId, adIds);
     const operations = resourceNames.map(rn => ({
       resource_name: rn,
       status: enums.AdGroupAdStatus.ENABLED,
@@ -3524,13 +3530,14 @@ export class GoogleAdsManager {
     newFinalUrl: string,
     confirm = false,
   ) {
-    // IMPLEMENTATION NOTE: Google Ads API treats RSA final_urls as IMMUTABLE
-    // (errors with IMMUTABLE_FIELD on UPDATE). The only way to change an
-    // RSA's destination is clone-and-swap: read the existing RSA, create a
-    // new RSA in the same ad group with the same content + new URL, copy
-    // labels, match enabled/paused status, then pause the old ad. The
-    // Google Ads UI does the same thing under the hood. Ad-level history
-    // and ad strength reset; keyword-level Quality Score is preserved.
+    // In-place edit via AdService: `ads.update([{resource_name: ads/{id},
+    // final_urls}])`. Same ad ID, ad-level history kept; Google re-reviews the
+    // ad. This used to be clone-and-swap on the premise that RSA final_urls is
+    // "API-immutable" -- false (verified live 2026-10-07). IMMUTABLE_FIELD is
+    // what AdGroupAdService returns for a nested `ad` update, a different
+    // service. Never clone to change a URL: it resets every ad's history.
+    // Note an Ad resource can be linked into several ad groups; AdService
+    // edits the shared Ad, so every link changes (surfaced as other_links).
     const customer = this.getCustomer(customerId);
     const cleanId = customerId.replace(/-/g, "");
 
@@ -3551,70 +3558,36 @@ export class GoogleAdsManager {
           ad_group_ad.ad.id,
           ad_group_ad.ad.type,
           ad_group_ad.ad.final_urls,
-          ad_group_ad.ad.responsive_search_ad.headlines,
-          ad_group_ad.ad.responsive_search_ad.descriptions,
-          ad_group_ad.ad.responsive_search_ad.path1,
-          ad_group_ad.ad.responsive_search_ad.path2,
           ad_group_ad.status,
           ad_group.id,
           ad_group.name,
           campaign.name
         FROM ad_group_ad
-        WHERE ad_group.id = ${cleanAgId}
-          AND ad_group_ad.ad.id IN (${cleanAdIds.join(",")})
+        WHERE ad_group_ad.ad.id IN (${cleanAdIds.join(",")})
           AND ad_group_ad.status != 'REMOVED'
       `),
       "updateAdFinalUrls.query"
     );
 
-    // Reverse-map ServedAssetFieldType enum → pinned_position (mirrors createResponsiveSearchAd).
-    const HEADLINE_PIN_REV: Record<number, number> = { 2: 1, 3: 2, 4: 3 };
-    const DESCRIPTION_PIN_REV: Record<number, number> = { 5: 1, 6: 2 };
+    const all = (rows as any[]).map(r => ({
+      resource_name: r.ad_group_ad?.resource_name as string,
+      ad_id: String(r.ad_group_ad?.ad?.id ?? ""),
+      ad_type: r.ad_group_ad?.ad?.type ?? 0,
+      current_final_urls: r.ad_group_ad?.ad?.final_urls ?? [],
+      ad_group_id: String(r.ad_group?.id ?? ""),
+      ad_group_name: r.ad_group?.name ?? "",
+      campaign_name: r.campaign?.name ?? "",
+      status: r.ad_group_ad?.status ?? 0,
+    }));
+    const found = all.filter(a => a.ad_group_id === cleanAgId);
+    // Links to the same Ad in OTHER ad groups -- an AdService edit changes them too.
+    const otherLinks = all
+      .filter(a => a.ad_group_id !== cleanAgId)
+      .map(a => ({ ad_id: a.ad_id, ad_group: a.ad_group_name, campaign: a.campaign_name, status: a.status }));
 
-    type Found = {
-      resource_name: string;
-      ad_id: string;
-      ad_type: number;
-      current_final_urls: string[];
-      headlines: Array<{ text: string; pinned_position?: number }>;
-      descriptions: Array<{ text: string; pinned_position?: number }>;
-      path1: string;
-      path2: string;
-      ad_group_name: string;
-      status: number;
-    };
-
-    const found: Found[] = (rows as any[]).map(r => {
-      const rsa = r.ad_group_ad?.ad?.responsive_search_ad ?? {};
-      return {
-        resource_name: r.ad_group_ad?.resource_name,
-        ad_id: String(r.ad_group_ad?.ad?.id ?? ""),
-        ad_type: r.ad_group_ad?.ad?.type ?? 0,
-        current_final_urls: r.ad_group_ad?.ad?.final_urls ?? [],
-        headlines: (rsa.headlines ?? []).map((h: any) => ({
-          text: h.text,
-          ...(h.pinned_field && HEADLINE_PIN_REV[h.pinned_field]
-            ? { pinned_position: HEADLINE_PIN_REV[h.pinned_field] }
-            : {}),
-        })),
-        descriptions: (rsa.descriptions ?? []).map((d: any) => ({
-          text: d.text,
-          ...(d.pinned_field && DESCRIPTION_PIN_REV[d.pinned_field]
-            ? { pinned_position: DESCRIPTION_PIN_REV[d.pinned_field] }
-            : {}),
-        })),
-        path1: rsa.path1 ?? "",
-        path2: rsa.path2 ?? "",
-        ad_group_name: r.ad_group?.name ?? "",
-        status: r.ad_group_ad?.status ?? 0,
-      };
-    });
-
-    // RSA type enum = 15 (RESPONSIVE_SEARCH_AD). Clone-and-swap only works
-    // for RSAs — refuse anything else loudly so the caller doesn't get a
-    // half-finished migration.
+    // RSA type enum = 15. Other ad types (e.g. video responsive, 30) really
+    // do reject final_urls updates -- refuse rather than half-apply.
     const nonRsa = found.filter(a => a.ad_type !== 15);
-
     const foundIds = new Set(found.map(a => a.ad_id));
     const missing = cleanAdIds.filter(id => !foundIds.has(id));
 
@@ -3625,20 +3598,21 @@ export class GoogleAdsManager {
       ad_type: a.ad_type,
       from: a.current_final_urls,
       to: [newFinalUrl],
-      will_clone_and_swap: a.ad_type === 15,
     }));
+    const mechanism = "in-place update via AdService (ads.update) -- same ad ID, history kept";
 
     if (!confirm) {
       return {
         customer_id: cleanId,
         ad_group_id: adGroupId,
         dry_run: true,
-        mechanism: "clone-and-swap (RSA final_urls is API-immutable)",
+        mechanism,
         ads_to_update: found.length,
         missing_ad_ids: missing,
         non_rsa_ad_ids: nonRsa.map(a => a.ad_id),
+        other_links: otherLinks,
         preview,
-        note: "Set confirm=true to apply. New ads will be created PAUSED then enabled to match original status; old ads will be PAUSED, not removed.",
+        note: "Set confirm=true to apply. Ads keep their IDs and status; Google re-reviews each edited ad. other_links share the same Ad and change too.",
       };
     }
 
@@ -3649,153 +3623,36 @@ export class GoogleAdsManager {
     }
     if (nonRsa.length > 0) {
       throw new Error(
-        `Refusing to apply: ${nonRsa.length} ad(s) are not RESPONSIVE_SEARCH_AD; clone-and-swap not implemented for other ad types. Ad IDs: ${nonRsa.map(a => a.ad_id).join(", ")}`
+        `Refusing to apply: ${nonRsa.length} ad(s) are not RESPONSIVE_SEARCH_AD; their final_urls cannot be edited via the API. Ad IDs: ${nonRsa.map(a => a.ad_id).join(", ")}`
       );
     }
 
-    // Pull labels per ad so we can reapply to the clones.
-    const labelRows = await withResilience(
-      () => customer.query(`
-        SELECT
-          ad_group_ad.ad.id,
-          ad_group_ad_label.label,
-          label.name
-        FROM ad_group_ad_label
-        WHERE ad_group.id = ${cleanAgId}
-          AND ad_group_ad.ad.id IN (${cleanAdIds.join(",")})
-      `),
-      "updateAdFinalUrls.labels"
+    const updatedIds = found.map(a => a.ad_id);
+    await withResilience(
+      () => customer.ads.update(
+        updatedIds.map(id => ({ resource_name: buildAdResourceName(cleanId, id), final_urls: [newFinalUrl] })) as any
+      ),
+      "updateAdFinalUrls.mutate"
     );
-    const labelsByAdId = new Map<string, string[]>();
-    for (const row of labelRows as any[]) {
-      const adId = String(row.ad_group_ad?.ad?.id ?? "");
-      const name = row.label?.name;
-      if (!adId || !name) continue;
-      if (!labelsByAdId.has(adId)) labelsByAdId.set(adId, []);
-      labelsByAdId.get(adId)!.push(name);
-    }
-
-    const swaps: Array<{
-      old_ad_id: string;
-      new_ad_id: string | null;
-      new_resource_name: string | null;
-      labels_copied: string[];
-      enabled_to_match_original: boolean;
-      old_paused: boolean;
-      error?: string;
-    }> = [];
-
-    for (const a of found) {
-      try {
-        const createResult: any = await this.createResponsiveSearchAd(customerId, {
-          ad_group_id: adGroupId,
-          final_urls: [newFinalUrl],
-          headlines: a.headlines,
-          descriptions: a.descriptions,
-          path1: a.path1,
-          path2: a.path2,
-          // Cloning must faithfully reproduce the SOURCE ad's display path
-          // state, including "never set" -- that's not a hygiene violation,
-          // it's the ad this account has been serving. See validateRsa's
-          // requirePathSegments doc for why this can't just inherit the
-          // create-tool's default.
-          requirePathSegments: false,
-          // Same reasoning for the 15-headline/4-description house floor --
-          // a clone of a pre-existing ad isn't new authorship, so it can't be
-          // blocked by a policy that postdates the source ad.
-          allow_partial_assets: true,
-          // Auto-label (claude-MM-DD-YY) is applied by createResponsiveSearchAd.
-          // Original non-auto labels are reapplied below.
-        });
-
-        const newResourceName: string | null =
-          createResult?.results?.[0]?.resource_name ?? null;
-        // resource_name format: customers/{cid}/adGroupAds/{ad_group_id}~{ad_id}
-        const newAdId = newResourceName
-          ? newResourceName.split("~").pop() ?? null
-          : null;
-
-        // Reapply original labels (skip ones that look like auto date labels —
-        // createResponsiveSearchAd already stamped today's claude-MM-DD-YY).
-        const originalLabels = (labelsByAdId.get(a.ad_id) ?? []).filter(
-          n => !AUTO_CLAUDE_LABEL_RE.test(n)
-        );
-        if (newAdId && originalLabels.length > 0) {
-          for (const labelName of originalLabels) {
-            await this.applyLabel(customerId, labelName, { adIds: [newAdId] });
-          }
-        }
-
-        // Order matters: pause old BEFORE enabling new. Google Ads caps
-        // enabled RSAs at 3 per ad group; if we enable the clone first
-        // while the original is still enabled, the cap trips and the
-        // enable fails with RESOURCE_LIMIT. Pause-first keeps headroom.
-        // Old ads are paused, not removed — preserves historical reporting.
-        await withResilience(
-          () => customer.adGroupAds.update([{
-            resource_name: a.resource_name,
-            status: enums.AdGroupAdStatus.PAUSED,
-          } as any]),
-          "updateAdFinalUrls.pauseOld"
-        );
-
-        // Match original enabled/paused status. AdGroupAdStatus enum: 2=ENABLED, 3=PAUSED.
-        const wasEnabled = a.status === 2;
-        if (wasEnabled && newResourceName) {
-          await withResilience(
-            () => customer.adGroupAds.update([{
-              resource_name: newResourceName,
-              status: enums.AdGroupAdStatus.ENABLED,
-            } as any]),
-            "updateAdFinalUrls.enableNew"
-          );
-        }
-
-        swaps.push({
-          old_ad_id: a.ad_id,
-          new_ad_id: newAdId,
-          new_resource_name: newResourceName,
-          labels_copied: originalLabels,
-          enabled_to_match_original: wasEnabled,
-          old_paused: true,
-        });
-      } catch (e: any) {
-        swaps.push({
-          old_ad_id: a.ad_id,
-          new_ad_id: null,
-          new_resource_name: null,
-          labels_copied: [],
-          enabled_to_match_original: false,
-          old_paused: false,
-          error: e?.message ?? String(e),
-        });
-      }
-    }
-
-    const succeeded = swaps.filter(s => s.new_ad_id && !s.error).length;
-    const failed = swaps.filter(s => s.error).length;
+    await this.autoLabelCreated(customerId, found.map(a => a.resource_name).filter(Boolean), "ad");
 
     return {
       customer_id: cleanId,
       ad_group_id: adGroupId,
       dry_run: false,
-      mechanism: "clone-and-swap",
-      ads_swapped: succeeded,
-      ads_failed: failed,
+      mechanism,
+      ads_updated: updatedIds.length,
+      updated_ad_ids: updatedIds,
+      other_links: otherLinks,
       new_final_url: newFinalUrl,
-      swaps,
     };
   }
 
   /**
    * Update RSA headline/description text IN PLACE via AdService
-   * (customer.ads.update), same ad ID, no clone/pause. This is deliberately
-   * NOT the clone-and-swap pattern updateAdFinalUrls uses -- that pattern
-   * exists because RSA final_urls really does appear to reject in-place
-   * updates; headlines/descriptions do not have that problem (Google's own
-   * update_responsive_search_ad.py sample updates them the same way this
-   * method does). See the class-level history note above updateAdFinalUrls
-   * for how that distinction was confirmed. Payload shape:
+   * (customer.ads.update), same ad ID, no clone/pause -- the same mechanism
+   * updateAdFinalUrls uses for final_urls (Google's own
+   * update_responsive_search_ad.py sample updates text the same way). Payload shape:
    * `customer.ads.update([{resource_name: "customers/X/ads/Y", responsive_search_ad: {...}}])`
    * -- responsive_search_ad is a TOP-LEVEL field on the Ad resource, not
    * nested under an "ad" sub-field (that nesting is the AdGroupAd shape,

@@ -1495,7 +1495,7 @@ export const tools: Tool[] = [
   },
   {
     name: "google_ads_update_ad_final_urls",
-    description: "Update final_urls on specific ads by ID, leaving other ads in the same campaign/ad group untouched. Use this when you need to retarget a subset of ads (e.g. one ad group's ads, or specific experiment-arm-labeled ads) without affecting siblings in the same campaign. Dry-run by default — pass confirm=true to apply.",
+    description: "Update final_urls on specific RSAs by ID, IN PLACE via AdService: same ad ID, status and ad-level history kept; Google re-reviews the edited ad. Leaves other ads in the ad group untouched. Refuses non-RSA ads (video final_urls are API-immutable). If an ad is also linked in other ad groups, those links change too -- see other_links in the dry run. Dry-run by default — pass confirm=true to apply.",
     inputSchema: {
       additionalProperties: false,
       type: "object",

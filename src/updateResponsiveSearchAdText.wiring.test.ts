@@ -1,7 +1,7 @@
 /**
  * `updateResponsiveSearchAdText` — in-place RSA headline/description edit
  * via AdService (customer.ads.update), not the create-new+pause-old
- * clone-and-swap that `updateAdFinalUrls` uses for final_urls.
+ * clone-and-swap (since retired: updateAdFinalUrls is in-place too).
  *
  * Context: updateAdFinalUrls's "RSA final_urls is immutable" conclusion
  * (commit ea6cfb0) was reached by mutating through customer.adGroupAds.update
