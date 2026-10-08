@@ -24,7 +24,7 @@ export interface RsaInput {
    * (google_ads_create_responsive_search_ad), not a real Google Ads API
    * constraint (the API only requires path2 ⇒ path1, not both). Cloning
    * tools that reproduce a pre-existing ad's exact content (e.g.
-   * updateAdFinalUrls' clone-and-swap) must pass false so an ad that never
+   * the former updateAdFinalUrls clone-and-swap) must pass false so an ad that never
    * had a display path isn't blocked from being faithfully replicated.
    */
   requirePathSegments?: boolean;
