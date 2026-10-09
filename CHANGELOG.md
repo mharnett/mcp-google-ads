@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.12.0](https://github.com/mharnett/mcp-google-ads/compare/v1.11.0...v1.12.0) (2026-10-09)
+
+
+### Features
+
+* never create or attach a lead form unless explicitly requested ([#66](https://github.com/mharnett/mcp-google-ads/issues/66)) ([db5f8a2](https://github.com/mharnett/mcp-google-ads/commit/db5f8a2eb13afd2e1710bb14fb3f20945228163d))
+
+
+### Bug Fixes
+
+* never filter dated performance metrics by current status ([#64](https://github.com/mharnett/mcp-google-ads/issues/64)) ([7e18494](https://github.com/mharnett/mcp-google-ads/commit/7e1849498c9ad14209d8068af0c33d4205a2e915))
+* **rsa:** edit final_urls in place via AdService; enable/pause target live links only ([#67](https://github.com/mharnett/mcp-google-ads/issues/67)) ([baea812](https://github.com/mharnett/mcp-google-ads/commit/baea81285bb23b7799e162ae560844d75d24ed15))
+
 ## [1.11.0](https://github.com/mharnett/mcp-google-ads/compare/v1.10.0...v1.11.0) (2026-09-08)
 
 
