@@ -203,120 +203,32 @@ describe.skipIf(!IS_LOCAL_DEV_MACHINE)(
 // That only works if run-mcp.sh actually EXPORTS the named var. The launcher is
 // the sole place these reach the process, so a missing export degrades silently
 // — getCustomer() falls back to the default token and the query 403s, which
-// looks identical to a permissions problem on the account.
+// looks identical to a permissions problem on the account. The JOIN test below
+// is what holds that invariant for whichever clients exist.
 //
-// Informian (Tracers + IRBsearch) is the first such client: read access sits on
-// mark@drakmarketing.com, whose consent is NOT the google-ads-ro-drak token.
+// Informian (Tracers + IRBsearch) was the first such client and is gone: they
+// declined on 2026-10-09 and were archived to ~/clients-archive/informian. The
+// four tests that asserted its export are removed with the export itself, and
+// this guard replaces them — two of those four would otherwise have kept
+// passing vacuously once the feature was deleted.
 
-const INFORMIAN_ENV = "GOOGLE_ADS_REFRESH_TOKEN_INFORMIAN";
-const INFORMIAN_SERVICE = "GOOGLE_ADS_REFRESH_TOKEN_INFORMIAN";
-const INFORMIAN_ACCOUNT = "google-ads-informian";
+const DECOMMISSIONED_CLIENT_ENVS = ["GOOGLE_ADS_REFRESH_TOKEN_INFORMIAN"];
 
-describe("run-mcp.sh per-client refresh tokens", () => {
-  let echoBinDir;
+describe("run-mcp.sh decommissioned per-client tokens", () => {
+  // Reading the script rather than spawning it: absence of an export is not
+  // observable from the environment of a process that never set it.
+  const script = readFileSync(SCRIPT, "utf8");
 
-  beforeAll(() => {
-    echoBinDir = mkdtempSync(path.join(tmpdir(), "run-mcp-percli-bin-"));
-
-    writeFileSync(
-      path.join(echoBinDir, "python3"),
-      `#!/bin/bash\necho "${FIXTURE_HELPER}"\n`
-    );
-    chmodSync(path.join(echoBinDir, "python3"), 0o755);
-
-    // Echo back "service|account" for EVERY lookup, so we can assert exactly
-    // which Keychain item each per-client export was asked for.
-    writeFileSync(
-      path.join(echoBinDir, "security"),
-      `#!/bin/bash
-account=""
-service=""
-while [ $# -gt 0 ]; do
-  case "$1" in
-    -a) account="$2"; shift 2;;
-    -s) service="$2"; shift 2;;
-    *) shift;;
-  esac
-done
-echo "$service|$account"
-`
-    );
-    chmodSync(path.join(echoBinDir, "security"), 0o755);
-
-    writeFileSync(
-      path.join(echoBinDir, "node"),
-      `#!/bin/bash\necho "${INFORMIAN_ENV}=\${${INFORMIAN_ENV}}"\n`
-    );
-    chmodSync(path.join(echoBinDir, "node"), 0o755);
+  it.each(DECOMMISSIONED_CLIENT_ENVS)("no longer exports %s", (envVar) => {
+    expect(script).not.toContain(envVar);
   });
 
-  afterAll(() => {
-    rmSync(echoBinDir, { recursive: true, force: true });
-  });
-
-  function runEcho(writeFlag) {
-    const env = { ...process.env, PATH: `${echoBinDir}:${process.env.PATH}` };
-    delete env[INFORMIAN_ENV];
-    if (writeFlag === undefined) {
-      delete env.GOOGLE_ADS_MCP_WRITE;
-    } else {
-      env.GOOGLE_ADS_MCP_WRITE = writeFlag;
-    }
-    const result = spawnSync("bash", [SCRIPT], { env, encoding: "utf8" });
-    return { stdout: (result.stdout ?? "").trim(), stderr: result.stderr ?? "", status: result.status };
-  }
-
-  it("exports the Informian token from its own Keychain item (read-only branch)", () => {
-    expect(runEcho(undefined).stdout).toBe(
-      `${INFORMIAN_ENV}=${INFORMIAN_SERVICE}|${INFORMIAN_ACCOUNT}`
-    );
-  });
-
-  it("exports the Informian token on the write branch too", () => {
-    expect(runEcho("true").stdout).toBe(
-      `${INFORMIAN_ENV}=${INFORMIAN_SERVICE}|${INFORMIAN_ACCOUNT}`
-    );
-  });
-
-  it("does not reuse the default RO item for the Informian token", () => {
-    expect(runEcho(undefined).stdout).not.toContain("google-ads-ro-drak");
-  });
-
-  // A per-client token is OPTIONAL: an absent item must leave every other
-  // client working, not fail-fast the whole launcher. Simulated by a `security`
-  // that returns empty for the Informian service only.
-  it("a missing Informian item does not trip the fail-fast loop", () => {
-    const missingBinDir = mkdtempSync(path.join(tmpdir(), "run-mcp-missing-bin-"));
-    writeFileSync(
-      path.join(missingBinDir, "python3"),
-      `#!/bin/bash\necho "${FIXTURE_HELPER}"\n`
-    );
-    chmodSync(path.join(missingBinDir, "python3"), 0o755);
-    writeFileSync(
-      path.join(missingBinDir, "security"),
-      `#!/bin/bash
-service=""
-while [ $# -gt 0 ]; do
-  case "$1" in
-    -s) service="$2"; shift 2;;
-    *) shift;;
-  esac
-done
-if [ "$service" = "${INFORMIAN_SERVICE}" ]; then exit 1; fi
-echo "stub-value"
-`
-    );
-    chmodSync(path.join(missingBinDir, "security"), 0o755);
-    writeFileSync(path.join(missingBinDir, "node"), "#!/bin/bash\nexit 0\n");
-    chmodSync(path.join(missingBinDir, "node"), 0o755);
-
-    const env = { ...process.env, PATH: `${missingBinDir}:${process.env.PATH}` };
-    delete env.GOOGLE_ADS_MCP_WRITE;
-    const result = spawnSync("bash", [SCRIPT], { env, encoding: "utf8" });
-    rmSync(missingBinDir, { recursive: true, force: true });
-
-    expect(result.stderr ?? "").not.toMatch(/\[FATAL\]/);
-    expect(result.status).toBe(0);
+  // GOOGLE_ADS_REFRESH_TOKEN_FLOWSPACE is deliberately NOT in that list.
+  // Flowspace's VBB job was decommissioned on 2026-09-15 but the export is
+  // still in the launcher pending a decision, so asserting its absence would
+  // fail today.
+  it("still exports the Flowspace token, which has not been retired", () => {
+    expect(script).toContain("GOOGLE_ADS_REFRESH_TOKEN_FLOWSPACE");
   });
 });
 
