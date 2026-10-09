@@ -23,7 +23,6 @@ else
   GOOGLE_ADS_REFRESH_TOKEN_ACCOUNT=google-ads-ro-drak
 fi
 export GOOGLE_ADS_REFRESH_TOKEN=$(keychain_get "$GOOGLE_ADS_REFRESH_TOKEN_SERVICE" "$GOOGLE_ADS_REFRESH_TOKEN_ACCOUNT" 2>/dev/null)
-export GOOGLE_ADS_REFRESH_TOKEN_FLOWSPACE=$(keychain_get "GOOGLE_ADS_REFRESH_TOKEN_FLOWSPACE" "google-ads-flowspace" 2>/dev/null)
 
 # Fail fast if any required Keychain lookup returned empty.
 # Per-client tokens above are deliberately NOT listed: they are optional, and a
