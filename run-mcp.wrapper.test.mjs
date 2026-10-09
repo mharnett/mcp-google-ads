@@ -211,8 +211,16 @@ describe.skipIf(!IS_LOCAL_DEV_MACHINE)(
 // four tests that asserted its export are removed with the export itself, and
 // this guard replaces them — two of those four would otherwise have kept
 // passing vacuously once the feature was deleted.
+//
+// Flowspace followed. Its VBB restatements job was decommissioned 2026-09-15,
+// Google Ads access to customer 745-851-7309 was removed, and every run from
+// 2026-09-04 had been failing USER_PERMISSION_DENIED. No flowspace client
+// remains in config.json either, so nothing could route to that token.
 
-const DECOMMISSIONED_CLIENT_ENVS = ["GOOGLE_ADS_REFRESH_TOKEN_INFORMIAN"];
+const DECOMMISSIONED_CLIENT_ENVS = [
+  "GOOGLE_ADS_REFRESH_TOKEN_INFORMIAN",
+  "GOOGLE_ADS_REFRESH_TOKEN_FLOWSPACE",
+];
 
 describe("run-mcp.sh decommissioned per-client tokens", () => {
   // Reading the script rather than spawning it: absence of an export is not
@@ -223,13 +231,6 @@ describe("run-mcp.sh decommissioned per-client tokens", () => {
     expect(script).not.toContain(envVar);
   });
 
-  // GOOGLE_ADS_REFRESH_TOKEN_FLOWSPACE is deliberately NOT in that list.
-  // Flowspace's VBB job was decommissioned on 2026-09-15 but the export is
-  // still in the launcher pending a decision, so asserting its absence would
-  // fail today.
-  it("still exports the Flowspace token, which has not been retired", () => {
-    expect(script).toContain("GOOGLE_ADS_REFRESH_TOKEN_FLOWSPACE");
-  });
 });
 
 // ============================================
