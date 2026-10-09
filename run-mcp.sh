@@ -24,12 +24,6 @@ else
 fi
 export GOOGLE_ADS_REFRESH_TOKEN=$(keychain_get "$GOOGLE_ADS_REFRESH_TOKEN_SERVICE" "$GOOGLE_ADS_REFRESH_TOKEN_ACCOUNT" 2>/dev/null)
 export GOOGLE_ADS_REFRESH_TOKEN_FLOWSPACE=$(keychain_get "GOOGLE_ADS_REFRESH_TOKEN_FLOWSPACE" "google-ads-flowspace" 2>/dev/null)
-# Informian (Tracers + IRBsearch). Read access was granted directly to
-# mark@drakmarketing.com, so neither default identity can see these accounts:
-# listAccessibleCustomers on google-ads-ro-drak returns only the Drak MCC
-# (676-139-6070), and both Informian ids are absent from its whole hierarchy.
-# Routed per-client via config.json refresh_token_env + direct_access:true.
-export GOOGLE_ADS_REFRESH_TOKEN_INFORMIAN=$(keychain_get "GOOGLE_ADS_REFRESH_TOKEN_INFORMIAN" "google-ads-informian" 2>/dev/null)
 
 # Fail fast if any required Keychain lookup returned empty.
 # Per-client tokens above are deliberately NOT listed: they are optional, and a
