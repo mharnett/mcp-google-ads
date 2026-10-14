@@ -5,6 +5,17 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # Full OS matrix weekly (and on demand) instead of on every push — see the
+  # matrix comment below and ci-matrix.guard.test.mjs.
+  schedule:
+    - cron: '0 14 * * 1'
+  workflow_dispatch:
+
+# Supersede stale PR runs; never cancel a run on main, so every merge keeps
+# its own complete result.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   test:
@@ -12,7 +23,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        # macOS bills ~10x Linux, Windows ~2x. Ordinary pushes/PRs run Linux
+        # only; schedule, dispatch and release-please PRs (the build about to
+        # be published) run all three. Pinned by ci-matrix.guard.test.mjs.
+        os: ${{ fromJSON((github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'release-please--')) && '["ubuntu-latest","macos-latest","windows-latest"]' || '["ubuntu-latest"]') }}
         node-version: [18, 20, 22]
 
     steps:
