@@ -63,6 +63,11 @@ import {
   buildLinkAssetToCustomerDryRun,
 } from "./assetHelpers.js";
 import {
+  normalizeLinkAssetToAdGroupArgs,
+  runLinkAssetToAdGroup,
+  type AdGroupAssetState,
+} from "./adGroupAssetLink.js";
+import {
   buildCampaignCreatePayload,
   type CampaignCreateInput,
   assertLeadFormExplicitlyRequested,
@@ -3090,6 +3095,103 @@ export class GoogleAdsManager {
   }
 
   // ============================================
+  // LINK ASSET TO AD GROUP
+  // ============================================
+
+  /**
+   * Current ENABLED ad-group links of one field type, per ad group, plus the
+   * ad group and campaign names. REMOVED ad groups are excluded (cannot take
+   * a new link); PAUSED ad groups are included. Read-only.
+   */
+  async getAdGroupAssetState(customerId: string, adGroupIds: string[], fieldType: string): Promise<AdGroupAssetState[]> {
+    const customer = this.getCustomer(customerId);
+    const ids = adGroupIds.filter(id => /^\d+$/.test(id));
+    if (ids.length === 0) return [];
+    if (!/^[A-Z_]+$/.test(fieldType)) throw new Error(`invalid field_type: ${fieldType}`);
+
+    const agRows = await withResilience(
+      () =>
+        customer.query(`
+          SELECT ad_group.id, ad_group.name, ad_group.resource_name, campaign.name
+          FROM ad_group
+          WHERE ad_group.id IN (${ids.join(", ")})
+            AND ad_group.status != 'REMOVED'
+        `),
+      "getAdGroupAssetState.adGroups"
+    );
+    const states = new Map<string, AdGroupAssetState>();
+    for (const r of agRows as any[]) {
+      const id = String(r.ad_group?.id ?? "");
+      if (!id) continue;
+      states.set(id, {
+        ad_group_id: id,
+        ad_group_name: r.ad_group?.name ?? "",
+        campaign_name: r.campaign?.name ?? "",
+        enabled_asset_ids: [],
+      });
+    }
+    if (states.size === 0) return [];
+
+    const cleanId = customerId.replace(/-/g, "");
+    const agResources = [...states.keys()].map(id => `'customers/${cleanId}/adGroups/${id}'`).join(", ");
+    const linkRows = await withResilience(
+      () =>
+        customer.query(`
+          SELECT ad_group_asset.ad_group, ad_group_asset.asset
+          FROM ad_group_asset
+          WHERE ad_group_asset.ad_group IN (${agResources})
+            AND ad_group_asset.field_type = '${fieldType}'
+            AND ad_group_asset.status = 'ENABLED'
+        `),
+      "getAdGroupAssetState.adGroupAssets"
+    );
+    for (const r of linkRows as any[]) {
+      const agId = String(r.ad_group_asset?.ad_group ?? "").split("/").pop() ?? "";
+      const assetId = String(r.ad_group_asset?.asset ?? "").split("/").pop() ?? "";
+      const st = states.get(agId);
+      if (st && assetId && !st.enabled_asset_ids.includes(assetId)) st.enabled_asset_ids.push(assetId);
+    }
+    return [...states.values()];
+  }
+
+  async linkAssetToAdGroup(customerId: string, args: {
+    asset_id: string;
+    ad_group_ids: string[];
+    field_type: string;
+  }) {
+    const customer = this.getCustomer(customerId);
+    const cleanId = customerId.replace(/-/g, "");
+
+    const fieldTypeMap: Record<string, any> = {
+      SITELINK: enums.AssetFieldType.SITELINK,
+      CALLOUT: enums.AssetFieldType.CALLOUT,
+      STRUCTURED_SNIPPET: enums.AssetFieldType.STRUCTURED_SNIPPET,
+      LEAD_FORM: enums.AssetFieldType.LEAD_FORM,
+    };
+    const fieldType = fieldTypeMap[args.field_type.toUpperCase()];
+    if (fieldType === undefined) {
+      throw new Error(
+        `Unknown field_type: "${args.field_type}". Supported values: SITELINK, CALLOUT, STRUCTURED_SNIPPET, LEAD_FORM`
+      );
+    }
+
+    const assetResource = `customers/${cleanId}/assets/${args.asset_id}`;
+    const operations = args.ad_group_ids.map(id => ({
+      ad_group: `customers/${cleanId}/adGroups/${id}`,
+      asset: assetResource,
+      field_type: fieldType,
+    }));
+
+    const result = await withResilience(
+      () => customer.adGroupAssets.create(operations as any),
+      "linkAssetToAdGroup"
+    );
+    const results = (result as any).results || [];
+    const resourceNames: string[] = results.map((r: any) => r.resource_name).filter(Boolean);
+    return { customer_id: cleanId, asset_resource_name: assetResource, resource_names: resourceNames };
+  }
+
+  // ============================================
   // CALLOUT / STRUCTURED SNIPPET CREATE + CUSTOMER-LEVEL LINK
   // ============================================
 
@@ -5846,6 +5948,22 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           field_type: fieldType,
         });
         return { content: [{ type: "text", text: JSON.stringify({ success: true, ...linkResult }, null, 2) }] };
+      }
+
+      case "google_ads_link_asset_to_ad_group": {
+        // Lead-form refusal lives in the normalizer, so it fires before the
+        // dry-run read and before any write.
+        const normalized = normalizeLinkAssetToAdGroupArgs(args as Record<string, unknown>);
+        if ("error" in normalized) {
+          return { content: [{ type: "text", text: JSON.stringify({ error: normalized.error }, null, 2) }], isError: true };
+        }
+        const customerId = normalized.customer_id || "";
+        const manager = getAdsManager();
+        const result = await runLinkAssetToAdGroup(normalized, {
+          getState: (ids, ft) => manager.getAdGroupAssetState(customerId, ids, ft),
+          link: (a) => manager.linkAssetToAdGroup(customerId, a),
+        });
+        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }], ...("error" in result ? { isError: true } : {}) };
       }
 
       case "google_ads_create_callout": {
