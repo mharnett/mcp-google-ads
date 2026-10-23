@@ -54,6 +54,7 @@ export const WRITE_TOOLS: ReadonlySet<string> = new Set([
   "google_ads_rename_ad_group",
   "google_ads_rename_campaign",
   "google_ads_link_asset_to_campaign",
+  "google_ads_link_asset_to_ad_group",
   "google_ads_create_callout",
   "google_ads_create_structured_snippet",
   "google_ads_link_asset_to_customer",

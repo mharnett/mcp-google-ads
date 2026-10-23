@@ -1010,7 +1010,7 @@ export const tools: Tool[] = [
   },
   {
     name: "google_ads_pause_asset_links",
-    description: "Pause asset links (customer_asset, campaign_asset, or ad_group_asset). Use this to stop a sitelink from serving without deleting the underlying asset. DRY-RUN BY DEFAULT: omit `confirm` or pass `confirm: false` to get a preview. Resource name form: customers/{cid}/customerAssets/{assetId}~SITELINK, customers/{cid}/campaignAssets/{campId}~{assetId}~SITELINK, or customers/{cid}/adGroupAssets/{agId}~{assetId}~SITELINK.",
+    description: "Pause asset links (customer_asset, campaign_asset, or ad_group_asset). Use this to stop a sitelink from serving without deleting the underlying asset. DRY-RUN BY DEFAULT: omit `confirm` or pass `confirm: false` to get a preview. Resource name form: customers/{cid}/customerAssets/{assetId}~SITELINK, customers/{cid}/campaignAssets/{campId}~{assetId}~SITELINK, or customers/{cid}/adGroupAssets/{agId}~{assetId}~SITELINK. Ad-group links created by google_ads_link_asset_to_ad_group return their adGroupAssets resource names for exactly this.",
     inputSchema: {
       additionalProperties: false,
       type: "object",
@@ -1638,6 +1638,41 @@ export const tools: Tool[] = [
         },
       },
       required: ["asset_id", "campaign_ids", "field_type"],
+    },
+  },
+  {
+    name: "google_ads_link_asset_to_ad_group",
+    description: "Link an existing asset to one or more ad groups by field type (ad-group level). Supports SITELINK, CALLOUT, STRUCTURED_SNIPPET, and LEAD_FORM (LEAD_FORM requires explicit_lead_form_request=true). Reads each ad group first and reports its name, campaign, current and resulting enabled link count of that field type. WARNS when a SITELINK link would leave an ad group with fewer than 4 enabled ad-group sitelinks: once an ad group has any ad-group sitelink, its campaign-level sitelinks stop serving there, so linking the first one can cut it to 1. The tool does not copy the campaign set; link those yourself if needed. Ad groups that already have the asset are skipped. Ad-group asset links have no label field, so the result carries an audit_label (claude-MM-DD-YY[-desc], default claude-MM-DD-YY-ad-group-asset-link) as the audit record. To pause a link, pass the returned resource_names to google_ads_pause_asset_links. DRY-RUN BY DEFAULT: omit `confirm` or pass `confirm: false` to preview.",
+    inputSchema: {
+      additionalProperties: false,
+      type: "object",
+      properties: {
+        explicit_lead_form_request: {
+          type: "boolean",
+          description: "Lead forms are NEVER created or attached unless the user explicitly asked for a lead form in this conversation. Set true only then; the call is refused otherwise. (Policy 2026-10-07: an unrequested lead form produced 555 junk submits that were never imported.)",
+        },
+        customer_id: { type: "string" },
+        asset_id: { type: "string", description: "Numeric ID of the existing asset to link." },
+        ad_group_ids: {
+          type: "array",
+          items: { type: "string" },
+          description: "Numeric IDs of the ad groups to link the asset to.",
+        },
+        field_type: {
+          type: "string",
+          enum: ["SITELINK", "CALLOUT", "STRUCTURED_SNIPPET", "LEAD_FORM"],
+          description: "Asset field type — determines how the asset appears in ads.",
+        },
+        audit_label: {
+          type: "string",
+          description: "Optional audit label in claude-MM-DD-YY[-desc] form, returned with the result and logged. Defaults to claude-MM-DD-YY-ad-group-asset-link.",
+        },
+        confirm: {
+          type: "boolean",
+          description: "Must be true to apply. Omit or false for dry-run preview.",
+        },
+      },
+      required: ["asset_id", "ad_group_ids", "field_type"],
     },
   },
   {
