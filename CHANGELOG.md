@@ -6,6 +6,20 @@
 
 * add google_ads_link_asset_to_ad_group: links an existing SITELINK / CALLOUT / STRUCTURED_SNIPPET (or, with explicit_lead_form_request, LEAD_FORM) asset to ad groups. Dry-run by default; reads each ad group first and reports its name, campaign, current and resulting enabled link count; warns when a sitelink link would leave an ad group under 4 ad-group sitelinks (the first ad-group sitelink switches off campaign-level sitelinks there); skips ad groups that already have the asset; reads back after confirm; returns a claude-MM-DD-YY audit_label since ad-group links carry no label field. Pause a link by passing its returned adGroupAssets resource name to google_ads_pause_asset_links. Replaces the one-off Forcepoint script apply_brand_sitelinks_exact_2026_10_07.py.
 
+## [1.12.0](https://github.com/mharnett/mcp-google-ads/compare/v1.11.0...v1.12.0) (2026-10-23)
+
+
+### Features
+
+* add google_ads_link_asset_to_ad_group ([#72](https://github.com/mharnett/mcp-google-ads/issues/72)) ([940feb4](https://github.com/mharnett/mcp-google-ads/commit/940feb49a03a214e128db6b6f8e834140a7619b8))
+* never create or attach a lead form unless explicitly requested ([#66](https://github.com/mharnett/mcp-google-ads/issues/66)) ([db5f8a2](https://github.com/mharnett/mcp-google-ads/commit/db5f8a2eb13afd2e1710bb14fb3f20945228163d))
+
+
+### Bug Fixes
+
+* never filter dated performance metrics by current status ([#64](https://github.com/mharnett/mcp-google-ads/issues/64)) ([7e18494](https://github.com/mharnett/mcp-google-ads/commit/7e1849498c9ad14209d8068af0c33d4205a2e915))
+* **rsa:** edit final_urls in place via AdService; enable/pause target live links only ([#67](https://github.com/mharnett/mcp-google-ads/issues/67)) ([baea812](https://github.com/mharnett/mcp-google-ads/commit/baea81285bb23b7799e162ae560844d75d24ed15))
+
 ## [1.11.0](https://github.com/mharnett/mcp-google-ads/compare/v1.10.0...v1.11.0) (2026-09-08)
 
 
