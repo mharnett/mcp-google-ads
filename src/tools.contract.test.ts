@@ -331,12 +331,20 @@ describe("Tool Schema Contract", () => {
       expect((tool!.inputSchema as any).required).toContain("label");
     });
 
-    it("apply_label supports all three resource types", () => {
+    it("apply_label supports all four resource types", () => {
       const tool = tools.find(t => t.name === "google_ads_apply_label");
       const props = (tool!.inputSchema as any).properties;
       expect(props).toHaveProperty("campaign_ids");
       expect(props).toHaveProperty("ad_group_ids");
       expect(props).toHaveProperty("ad_ids");
+      expect(props).toHaveProperty("criterion_resource_names");
+    });
+
+    it("pause_keywords accepts optional custom labels", () => {
+      const tool = tools.find(t => t.name === "google_ads_pause_keywords");
+      const schema = tool!.inputSchema as any;
+      expect(schema.properties).toHaveProperty("labels");
+      expect(schema.required).not.toContain("labels");
     });
 
     it("attach_user_list_audience requires ad_group_ids and user_list_id, defaults to OBSERVATION, dry-run by default", () => {

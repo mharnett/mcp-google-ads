@@ -335,7 +335,7 @@ export const tools: Tool[] = [
   },
   {
     name: "google_ads_apply_label",
-    description: "Attach a label to existing campaigns, ad groups, or ads without changing their status. Label is created if it doesn't exist. Useful for tagging items for audit trails or bulk ops.",
+    description: "Attach a label to existing campaigns, ad groups, ads or keywords without changing their status. Label is created if it doesn't exist. Useful for tagging items for audit trails or bulk ops. Keywords are passed as full criterion resource names and must belong to customer_id.",
     inputSchema: {
       additionalProperties: false,
       type: "object",
@@ -348,6 +348,11 @@ export const tools: Tool[] = [
         campaign_ids: { type: "array", items: { type: "string" } },
         ad_group_ids: { type: "array", items: { type: "string" } },
         ad_ids: { type: "array", items: { type: "string" } },
+        criterion_resource_names: {
+          type: "array",
+          items: { type: "string" },
+          description: "Keyword resource names like customers/123/adGroupCriteria/456~789. Every one must belong to customer_id, or nothing is labelled.",
+        },
       },
       required: ["label"],
     },
@@ -554,13 +559,18 @@ export const tools: Tool[] = [
   },
   {
     name: "google_ads_pause_keywords",
-    description: "Pause active keywords by their criterion resource names.",
+    description: "Pause active keywords by their criterion resource names. Auto-applies today's `claude-MM-DD-YY` label; pass `labels` to attach additional custom labels. Labelling is best-effort and never fails a pause that landed.",
     inputSchema: {
       additionalProperties: false,
       type: "object",
       properties: {
         customer_id: { type: "string" },
         criterion_resource_names: { type: "array", items: { type: "string" }, description: "Full resource names like customers/123/adGroupCriteria/456~789" },
+        labels: {
+          type: "array",
+          items: { type: "string" },
+          description: "Optional custom labels to apply to every paused keyword (in addition to the auto-applied `claude-MM-DD-YY` label). Labels are created if they don't exist.",
+        },
       },
       required: ["criterion_resource_names"],
     },
