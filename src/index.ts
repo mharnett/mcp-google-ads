@@ -1738,7 +1738,10 @@ export class GoogleAdsManager {
   }
 
   // Pause keywords (ad group criteria)
-  async pauseKeywords(customerId: string, criterionResourceNames: string[]) {
+  // Pause keywords (auto-labels with today's claude-MM-DD-YY + any custom labels).
+  // Labelling is best-effort, same as enableKeywords: a label failure never
+  // reports a pause that landed as failed.
+  async pauseKeywords(customerId: string, criterionResourceNames: string[], labels?: string[]) {
     const customer = this.getCustomer(customerId);
 
     const operations = criterionResourceNames.map(rn => ({
@@ -1747,6 +1750,8 @@ export class GoogleAdsManager {
     }));
 
     const result = await withResilience(() => customer.adGroupCriteria.update(operations), "pauseKeywords");
+    await this.autoLabelCreated(customerId, criterionResourceNames, "keyword");
+    await this.applyCustomLabels(customerId, criterionResourceNames, "keyword", labels);
     return result;
   }
 
@@ -2343,9 +2348,16 @@ export class GoogleAdsManager {
   async applyLabel(
     customerId: string,
     label: string,
-    targets: { campaignIds?: string[]; adGroupIds?: string[]; adIds?: string[] }
+    targets: { campaignIds?: string[]; adGroupIds?: string[]; adIds?: string[]; criterionResourceNames?: string[] }
   ) {
     const cleanId = customerId.replace(/-/g, "");
+    // Keyword targets arrive as full resource names, not ids, so check every one
+    // belongs to this customer before touching anything (labels nothing on a miss).
+    const criterionPrefix = `customers/${cleanId}/adGroupCriteria/`;
+    const badCriteria = (targets.criterionResourceNames ?? []).filter(rn => !rn.startsWith(criterionPrefix));
+    if (badCriteria.length) {
+      throw new Error(`criterion_resource_names must start with '${criterionPrefix}': ${badCriteria.join(", ")}`);
+    }
     const labelRN = await this.ensureLabelExists(customerId, label);
     const result: any = { label, label_resource_name: labelRN };
 
@@ -2363,6 +2375,10 @@ export class GoogleAdsManager {
       const rns = await this.resolveAdGroupAdResourceNames(customerId, targets.adIds);
       await this.labelAdGroupAds(customerId, rns, labelRN);
       result.ads_labeled = rns.length;
+    }
+    if (targets.criterionResourceNames?.length) {
+      await this.labelAdGroupCriteria(customerId, targets.criterionResourceNames, labelRN);
+      result.keywords_labeled = targets.criterionResourceNames.length;
     }
     return result;
   }
@@ -5016,6 +5032,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           campaignIds: coerceStringArray(args?.campaign_ids),
           adGroupIds: coerceStringArray(args?.ad_group_ids),
           adIds: coerceStringArray(args?.ad_ids),
+          criterionResourceNames: coerceStringArray(args?.criterion_resource_names),
         });
         return {
           content: [{ type: "text", text: JSON.stringify({ success: true, ...result }, null, 2) }],
@@ -5371,6 +5388,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const result = await getAdsManager().pauseKeywords(
           customerId,
           args?.criterion_resource_names as string[],
+          args?.labels as string[] | undefined,
         );
         return {
           content: [{
