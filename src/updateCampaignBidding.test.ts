@@ -138,7 +138,7 @@ describe("updateCampaignBudget(createNewBudget=true) — portfolio detach guard"
     mgr = makeManager(fake.customer);
 
     await expect(
-      mgr.updateCampaignBudget(CUSTOMER_ID, "333", 25, true)
+      mgr.updateCampaignBudget(CUSTOMER_ID, "333", 11, true)
     ).rejects.toThrow(PortfolioDetachBlocked);
 
     expect(fake.mutateResourcesCalls).toHaveLength(0);
@@ -154,11 +154,11 @@ describe("updateCampaignBudget(createNewBudget=true) — portfolio detach guard"
     });
     mgr = makeManager(fake.customer);
 
-    const result = await mgr.updateCampaignBudget(CUSTOMER_ID, "444", 25, true);
+    const result = await mgr.updateCampaignBudget(CUSTOMER_ID, "444", 11, true);
 
     expect(fake.mutateResourcesCalls).toHaveLength(1);
     expect(result.action).toBe("created_new_budget");
-    expect(result.new_daily_budget).toBe(25);
+    expect(result.new_daily_budget).toBe(11);
   });
 });
 

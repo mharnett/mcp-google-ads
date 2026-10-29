@@ -600,6 +600,15 @@ export const tools: Tool[] = [
       additionalProperties: false,
       type: "object",
       properties: {
+        expected_old: {
+          type: "object",
+          additionalProperties: false,
+          description: "The live tracking values you expect to be overwriting (empty string = none). Only the keys you pass are checked. Optional; when given and it does not match the live value, the tool refuses, returns current vs expected and makes no write.",
+          properties: {
+            final_url_suffix: { type: "string" },
+            tracking_url_template: { type: "string" },
+          },
+        },
         customer_id: { type: "string" },
         campaign_id: { type: "string", description: "The numeric string campaign ID to update" },
         final_url_suffix: { type: "string", description: "New final URL suffix (appended to landing page URLs). Set to empty string to clear." },
@@ -771,11 +780,14 @@ export const tools: Tool[] = [
   },
   {
     name: "google_ads_update_campaign_budget",
-    description: "Update the daily budget for a campaign. Can update the existing budget amount or create a new solo budget and reassign the campaign to it (useful for breaking shared budgets).",
+    description: "Update the daily budget for a campaign. Can update the existing budget amount or create a new solo budget and reassign the campaign to it (useful for breaking shared budgets). Reads the current budget first and BLOCKS a change larger than ±20% unless confirm_large_change: true AND a non-empty reason are passed; each such override is logged. Pass expected_old (current daily budget in dollars) to refuse the write if the live budget has changed.",
     inputSchema: {
       additionalProperties: false,
       type: "object",
       properties: {
+        reason: { type: "string", description: "Why this change is intended. Required (non-empty) together with confirm_large_change: true when the change exceeds the ±20% ceiling; recorded in the override log." },
+        confirm_large_change: { type: "boolean", description: "Required to be true, together with a non-empty reason, when the new daily budget differs from the current one by more than 20%. Omit to get a blocking error naming the campaign, old and new amounts and the percentage." },
+        expected_old: { type: "number", description: "The current daily budget in dollars that you expect to be overwriting (compared to the cent). Optional; when given and it does not match the live value, the tool refuses, returns current vs expected and makes no write." },
         customer_id: { type: "string" },
         campaign_id: { type: "string", description: "The numeric string campaign ID to update" },
         daily_budget: { type: "number", description: "New daily budget in dollars" },
@@ -791,6 +803,17 @@ export const tools: Tool[] = [
       additionalProperties: false,
       type: "object",
       properties: {
+        reason: { type: "string", description: "Why this change is intended. Recorded in the override log when confirm_large_change lets a change past the ceiling." },
+        expected_old: {
+          type: "object",
+          additionalProperties: false,
+          description: "The live bidding values you expect to be overwriting. Only the keys you pass are checked; pass null for a target to assert there is none. Optional; when given and it does not match the live value, the tool refuses, returns current vs expected and makes no write.",
+          properties: {
+            strategy: { type: "string" },
+            target_cpa_dollars: { type: ["number", "null"] },
+            target_roas: { type: ["number", "null"] },
+          },
+        },
         customer_id: { type: "string" },
         campaign_id: { type: "string", description: "The numeric string campaign ID to update" },
         strategy: {
@@ -812,6 +835,7 @@ export const tools: Tool[] = [
       additionalProperties: false,
       type: "object",
       properties: {
+        expected_old: { type: "array", items: { type: "string" }, description: "The conversion action IDs you expect are currently set (order-insensitive). Optional; when given and it does not match the live value, the tool refuses, returns current vs expected and makes no write." },
         customer_id: { type: "string" },
         campaign_id: { type: "string", description: "The numeric string campaign ID to update" },
         conversion_action_ids: {
@@ -957,6 +981,11 @@ export const tools: Tool[] = [
                 items: { type: "string" },
                 description: "New final URLs. Must start with http:// or https://.",
               },
+              expected_old: {
+                type: "array",
+                items: { type: "string" },
+                description: "This asset's current final URLs (order-insensitive). Checked only when confirm is true. Optional; when given and it does not match the live value, the tool refuses, returns current vs expected and makes no write.",
+              },
             },
             required: ["asset_id", "final_urls"],
           },
@@ -1000,6 +1029,7 @@ export const tools: Tool[] = [
       additionalProperties: false,
       type: "object",
       properties: {
+        expected_old: { type: "array", items: { type: "string" }, description: "The old sitelink asset's current final URLs (order-insensitive). Optional; when given and it does not match the live value, the tool refuses, returns current vs expected and makes no write." },
         customer_id: { type: "string" },
         old_asset_id: { type: "string", description: "Numeric ID of the existing sitelink asset to replace." },
         new_final_urls: {
@@ -1159,6 +1189,16 @@ export const tools: Tool[] = [
       additionalProperties: false,
       type: "object",
       properties: {
+        expected_old: {
+          type: "object",
+          additionalProperties: false,
+          description: "The ad's current texts (order-insensitive). Only the keys you pass are checked. Optional; when given and it does not match the live value, the tool refuses, returns current vs expected and makes no write.",
+          properties: {
+            headlines: { type: "array", items: { type: "string" } },
+            long_headlines: { type: "array", items: { type: "string" } },
+            descriptions: { type: "array", items: { type: "string" } },
+          },
+        },
         customer_id: { type: "string" },
         ad_resource_name: {
           type: "string",
@@ -1210,6 +1250,7 @@ export const tools: Tool[] = [
       additionalProperties: false,
       type: "object",
       properties: {
+        expected_old: { type: "array", items: { type: "string" }, description: "The video asset IDs (or asset resource names) currently on the ad (order-insensitive). Optional; when given and it does not match the live value, the tool refuses, returns current vs expected and makes no write." },
         customer_id: { type: "string" },
         ad_id: {
           type: "string",
@@ -1486,6 +1527,7 @@ export const tools: Tool[] = [
       additionalProperties: false,
       type: "object",
       properties: {
+        expected_old: { type: "string", description: "The final URL every non-removed ad in the campaign currently has; refused if any ad differs. Checked only when the change is applied. Optional; when given and it does not match the live value, the tool refuses, returns current vs expected and makes no write." },
         customer_id: { type: "string" },
         campaign_id: {
           type: "string",
@@ -1510,6 +1552,7 @@ export const tools: Tool[] = [
       additionalProperties: false,
       type: "object",
       properties: {
+        expected_old: { type: "string", description: "The final URL every listed ad currently has; refused if any differs. Checked only when confirm is true. Optional; when given and it does not match the live value, the tool refuses, returns current vs expected and makes no write." },
         customer_id: { type: "string" },
         ad_group_id: {
           type: "string",
@@ -1539,6 +1582,15 @@ export const tools: Tool[] = [
       additionalProperties: false,
       type: "object",
       properties: {
+        expected_old: {
+          type: "object",
+          additionalProperties: false,
+          description: "The ad's current headline and/or description texts (order-insensitive). Only the keys you pass are checked; checked only when confirm is true. Optional; when given and it does not match the live value, the tool refuses, returns current vs expected and makes no write.",
+          properties: {
+            headlines: { type: "array", items: { type: "string" } },
+            descriptions: { type: "array", items: { type: "string" } },
+          },
+        },
         customer_id: { type: "string" },
         ad_id: { type: "string", description: "Numeric ad ID of the RESPONSIVE_SEARCH_AD to edit." },
         headlines: {
@@ -1590,6 +1642,7 @@ export const tools: Tool[] = [
       additionalProperties: false,
       type: "object",
       properties: {
+        expected_old: { type: "string", description: "The ad group's current name. Optional; when given and it does not match the live value, the tool refuses, returns current vs expected and makes no write." },
         customer_id: { type: "string" },
         ad_group_id: { type: "string", description: "Numeric ID of the ad group to rename." },
         new_name: { type: "string", description: "New ad group name." },
@@ -1608,6 +1661,7 @@ export const tools: Tool[] = [
       additionalProperties: false,
       type: "object",
       properties: {
+        expected_old: { type: "string", description: "The campaign's current name. Optional; when given and it does not match the live value, the tool refuses, returns current vs expected and makes no write." },
         customer_id: { type: "string" },
         campaign_id: { type: "string", description: "Numeric ID of the campaign to rename." },
         new_name: { type: "string", description: "New campaign name." },
@@ -1816,6 +1870,7 @@ export const tools: Tool[] = [
       additionalProperties: false,
       type: "object",
       properties: {
+        expected_old: { type: "string", enum: ["OPTIMIZE", "CONVERSION_OPTIMIZE", "ROTATE", "ROTATE_INDEFINITELY"], description: "The campaign's current ad rotation mode. Optional; when given and it does not match the live value, the tool refuses, returns current vs expected and makes no write." },
         customer_id: { type: "string" },
         campaign_id: { type: "string", description: "Numeric ID of the campaign to update." },
         mode: {
@@ -1838,6 +1893,7 @@ export const tools: Tool[] = [
       additionalProperties: false,
       type: "object",
       properties: {
+        expected_old: { type: "string", enum: ["PRESENCE", "PRESENCE_OR_INTEREST"], description: "The positive geo target type every listed campaign currently has; refused if any differs. Optional; when given and it does not match the live value, the tool refuses, returns current vs expected and makes no write." },
         customer_id: { type: "string" },
         campaign_ids: {
           type: "array",

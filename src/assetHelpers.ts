@@ -3,6 +3,8 @@
 // without hitting the Google Ads API.
 
 export interface AssetUrlUpdate {
+  /** Current final URLs of the asset; the update is refused if they differ. */
+  expected_old?: string[];
   asset_id: string;
   final_urls: string[];
 }
@@ -79,6 +81,13 @@ function coerceArray(v: unknown): unknown[] | undefined {
   return undefined;
 }
 
+/** expected_old URL list: an array of strings (a JSON-encoded array string is accepted, like other array args). */
+function coerceExpectedOldUrls(v: unknown): string[] | null {
+  const arr = coerceArray(v);
+  if (!arr || !arr.every((x) => typeof x === "string")) return null;
+  return arr as string[];
+}
+
 export function normalizeUpdateAssetUrlsArgs(raw: Record<string, unknown> | undefined): UpdateAssetUrlsArgs | { error: string } {
   const r = raw ?? {};
   const customer_id = typeof r.customer_id === "string" ? r.customer_id : undefined;
@@ -98,7 +107,13 @@ export function normalizeUpdateAssetUrlsArgs(raw: Record<string, unknown> | unde
     }
     const v = validateFinalUrls(obj.final_urls);
     if (!v.ok) return { error: `asset_id ${asset_id}: ${v.error}` };
-    updates.push({ asset_id, final_urls: v.urls });
+    const update: AssetUrlUpdate = { asset_id, final_urls: v.urls };
+    if (obj.expected_old !== undefined) {
+      const eo = coerceExpectedOldUrls(obj.expected_old);
+      if (!eo) return { error: `asset_id ${asset_id}: expected_old must be an array of strings` };
+      update.expected_old = eo;
+    }
+    updates.push(update);
   }
   return {
     customer_id,
@@ -243,6 +258,8 @@ export interface ReplaceSitelinkArgs {
   customer_id?: string;
   old_asset_id: string;
   new_final_urls: string[];
+  /** Current final URLs of the old asset; the replace is refused if they differ. */
+  expected_old?: string[];
   new_link_text?: string;
   new_description1?: string;
   new_description2?: string;
@@ -279,6 +296,11 @@ export function normalizeReplaceSitelinkArgs(raw: Record<string, unknown> | unde
     new_final_urls: urls.urls,
     confirm: r.confirm === true || r.confirm === "true",
   };
+  if (r.expected_old !== undefined) {
+    const eo = coerceExpectedOldUrls(r.expected_old);
+    if (!eo) return { error: "expected_old must be an array of strings" };
+    out.expected_old = eo;
+  }
 
   if (r.new_link_text !== undefined && r.new_link_text !== null && r.new_link_text !== "") {
     const d = validateSitelinkText(r.new_link_text, "new_link_text", 25);
