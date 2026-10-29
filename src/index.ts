@@ -34,6 +34,8 @@ import {
   computeMagnitudeDeltaPct, exceedsMagnitudeCeiling, isStrategyLooseningChange,
   DEFAULT_MAGNITUDE_CEILING_PCT,
 } from "./biddingUpdate.js";
+import { evaluateBudgetChange, formatDollarsFromMicros, assertExpectedOld, idOf, ExpectedOldMismatch, MagnitudeCeilingBlocked, type ExpectedOldField } from "./writeGuards.js";
+import { recordOverride, type OverrideLogTarget } from "./overrideLog.js";
 import { buildAdRotationCampaignUpdate, AD_SERVING_OPTIMIZATION_STATUS, AD_SERVING_OPTIMIZATION_STATUS_ENUM_TO_NAME } from "./adRotationUpdate.js";
 import { buildGeoTargetTypeCampaignUpdates, POSITIVE_GEO_TARGET_TYPE } from "./geoTargetTypeUpdate.js";
 import { validateRsa } from "./validateRsa.js";
@@ -315,6 +317,22 @@ function mimeToAssetMimeEnum(mime: "image/png" | "image/jpeg" | "image/gif"): nu
     case "image/gif":
       return enums.MimeType.IMAGE_GIF;
   }
+}
+
+/** current/expected for an expected_old refusal, so callers can see the live value without parsing the message. */
+function guardErrorDetail(e: unknown): Record<string, unknown> {
+  if (e instanceof ExpectedOldMismatch) return { current: e.current, expected: e.expected, write_made: false };
+  if (e instanceof MagnitudeCeilingBlocked) return { write_made: false };
+  return {};
+}
+
+export interface BudgetUpdateOpts {
+  confirm_large_change?: boolean;
+  reason?: string;
+  /** Expected current daily budget in dollars; the write is refused if the live amount differs. */
+  expected_old?: number;
+  /** Test seam / override for where large-change overrides are recorded. */
+  overrideLog?: OverrideLogTarget;
 }
 
 export class GoogleAdsManager {
@@ -717,7 +735,16 @@ export class GoogleAdsManager {
   }
 
   // Update campaign budget — either in-place or by creating a new solo budget
-  async updateCampaignBudget(customerId: string, campaignId: string, dailyBudgetDollars: number, createNewBudget: boolean = false) {
+  // Magnitude ceiling (see writeGuards.ts): a daily-budget change larger than
+  // ±20% of the current amount is refused unless the caller passes
+  // confirm_large_change: true AND a non-empty reason.
+  async updateCampaignBudget(
+    customerId: string,
+    campaignId: string,
+    dailyBudgetDollars: number,
+    createNewBudget: boolean = false,
+    opts: BudgetUpdateOpts = {}
+  ) {
     const customer = this.getCustomer(customerId);
     const cleanId = customerId.replace(/-/g, "");
 
@@ -740,6 +767,38 @@ export class GoogleAdsManager {
     const oldBudgetId = currentCampaign.campaign_budget.id;
     const oldAmountMicros = currentCampaign.campaign_budget.amount_micros ?? 0;
     const newAmountMicros = Math.round(dailyBudgetDollars * 1_000_000);
+
+    assertExpectedOld("google_ads_update_campaign_budget", `campaign "${campaignName}" (id ${campaignId})`, [
+      { field: "daily_budget", expected: opts.expected_old, current: Number(oldAmountMicros) / 1_000_000, kind: "money" },
+    ]);
+
+    const ceiling = evaluateBudgetChange({
+      campaignId,
+      campaignName,
+      oldMicros: Number(oldAmountMicros),
+      newMicros: newAmountMicros,
+      confirmLargeChange: opts.confirm_large_change,
+      reason: opts.reason,
+    });
+    const overrideFields = ceiling.override
+      ? { large_change_override: true, change_pct: Math.round(ceiling.deltaPct!), reason: opts.reason }
+      : {};
+    const logBudgetOverride = async () =>
+      ceiling.override
+        ? {
+            override_log: await recordOverride(
+              {
+                tool: "google_ads_update_campaign_budget",
+                entity: `campaign "${campaignName}" (id ${campaignId})`,
+                old: formatDollarsFromMicros(Number(oldAmountMicros)),
+                new: formatDollarsFromMicros(newAmountMicros),
+                change_pct: ceiling.deltaPct,
+                reason: opts.reason ?? null,
+              },
+              opts.overrideLog
+            ),
+          }
+        : {};
 
     if (createNewBudget) {
       const portfolioStrategyResource = currentCampaign.campaign?.bidding_strategy;
@@ -794,6 +853,8 @@ export class GoogleAdsManager {
         old_daily_budget: Number(oldAmountMicros) / 1_000_000,
         new_budget_resource: newBudgetResourceName,
         new_daily_budget: dailyBudgetDollars,
+        ...overrideFields,
+        ...(await logBudgetOverride()),
       };
     } else {
       // Update existing budget amount in place
@@ -814,6 +875,8 @@ export class GoogleAdsManager {
         old_daily_budget: Number(oldAmountMicros) / 1_000_000,
         new_daily_budget: dailyBudgetDollars,
         warning: "This update affects ALL campaigns sharing this budget",
+        ...overrideFields,
+        ...(await logBudgetOverride()),
       };
     }
   }
@@ -1411,6 +1474,7 @@ export class GoogleAdsManager {
       long_headlines?: string[];
       descriptions?: string[];
       labels?: string[];
+      expected_old?: { headlines?: string[]; long_headlines?: string[]; descriptions?: string[] };
     }
   ) {
     const customer = this.getCustomer(customerId);
@@ -1465,6 +1529,29 @@ export class GoogleAdsManager {
     // recreate the ad (create new + pause old). This payload is still built for
     // other DG ad formats that may permit copy edits; for multi-asset ads the
     // mutate below will throw and the caller should recreate instead.
+    if (input.expected_old) {
+      const [live] = await withResilience(
+        () =>
+          customer.query(`
+            SELECT ad_group_ad.resource_name,
+                   ad_group_ad.ad.demand_gen_multi_asset_ad.headlines,
+                   ad_group_ad.ad.demand_gen_multi_asset_ad.long_headlines,
+                   ad_group_ad.ad.demand_gen_multi_asset_ad.descriptions
+            FROM ad_group_ad
+            WHERE ad_group_ad.resource_name = '${resourceName}'
+          `),
+        "updateDemandGenMultiAssetAd.expectedOld"
+      );
+      if (!live?.ad_group_ad) throw new Error(`Ad ${resourceName} not found`);
+      const dg = (live as any).ad_group_ad.ad?.demand_gen_multi_asset_ad ?? {};
+      const texts = (xs: any[] | undefined) => (xs ?? []).map((x: any) => x?.text ?? "");
+      assertExpectedOld("google_ads_update_demand_gen_multi_asset_ad", `ad ${resourceName}`, [
+        { field: "headlines", expected: input.expected_old.headlines, current: texts(dg.headlines), kind: "set" },
+        { field: "long_headlines", expected: input.expected_old.long_headlines, current: texts(dg.long_headlines), kind: "set" },
+        { field: "descriptions", expected: input.expected_old.descriptions, current: texts(dg.descriptions), kind: "set" },
+      ]);
+    }
+
     const updateResource: any = {
       resource_name: resourceName,
     };
@@ -1540,6 +1627,7 @@ export class GoogleAdsManager {
       videos: string[];
       mode?: "append" | "replace";
       skip_visibility_check?: boolean;
+      expected_old?: string[];
     }
   ) {
     const customer = this.getCustomer(customerId);
@@ -1587,6 +1675,12 @@ export class GoogleAdsManager {
     const currentVideos: string[] = (
       adRow.ad_group_ad.ad.video_responsive_ad?.videos ?? []
     ).map((v: any) => v.asset);
+
+    if (input.expected_old !== undefined) {
+      assertExpectedOld("google_ads_update_video_ad_videos", `video ad ${adId} ("${adRow.ad_group_ad.ad?.name ?? ""}")`, [
+        { field: "video_asset_ids", expected: input.expected_old.map(idOf), current: currentVideos.map(idOf), kind: "set" },
+      ]);
+    }
 
     // Preflight: private videos are rejected by Google Ads (and silently stop
     // serving if flipped private later). oEmbed 200 = Public/Unlisted.
@@ -2388,9 +2482,17 @@ export class GoogleAdsManager {
     final_url_suffix?: string;
     tracking_url_template?: string;
     url_custom_parameters?: Array<{ key: string; value: string }>;
-  }) {
+  }, opts: { expected_old?: { final_url_suffix?: string | null; tracking_url_template?: string | null } } = {}) {
     const customer = this.getCustomer(customerId);
     const cleanId = customerId.replace(/-/g, "");
+
+    if (opts.expected_old) {
+      const live: any = await this.getCampaignTracking(customerId, campaignId);
+      assertExpectedOld("google_ads_update_campaign_tracking", `campaign "${live.campaign_name}" (id ${campaignId})`, [
+        { field: "final_url_suffix", expected: opts.expected_old.final_url_suffix, current: live.final_url_suffix, kind: "exact" },
+        { field: "tracking_url_template", expected: opts.expected_old.tracking_url_template, current: live.tracking_url_template, kind: "exact" },
+      ]);
+    }
 
     const campaignUpdate: any = {
       resource_name: `customers/${cleanId}/campaigns/${campaignId}`,
@@ -2425,6 +2527,9 @@ export class GoogleAdsManager {
     target_cpa_dollars?: number;
     target_roas?: number;
     confirm_large_change?: boolean;
+    reason?: string;
+    expected_old?: { strategy?: string; target_cpa_dollars?: number | null; target_roas?: number | null };
+    overrideLog?: OverrideLogTarget;
   }) {
     const customer = this.getCustomer(customerId);
     const cleanId = customerId.replace(/-/g, "");
@@ -2473,6 +2578,27 @@ export class GoogleAdsManager {
       current.campaign.maximize_conversion_value?.target_roas ??
       undefined;
 
+    if (updates.expected_old) {
+      const liveCpaDollars =
+        typeof oldTargetCpaMicros === "number" && oldTargetCpaMicros > 0 ? oldTargetCpaMicros / 1_000_000 : null;
+      const liveRoas = typeof oldTargetRoas === "number" && oldTargetRoas > 0 ? oldTargetRoas : null;
+      assertExpectedOld("google_ads_update_campaign_bidding", `campaign "${current.campaign.name}" (id ${campaignId})`, [
+        { field: "strategy", expected: updates.expected_old.strategy, current: currentStrategy, kind: "exact" },
+        { field: "target_cpa_dollars", expected: updates.expected_old.target_cpa_dollars, current: liveCpaDollars, kind: "money" },
+        { field: "target_roas", expected: updates.expected_old.target_roas, current: liveRoas, kind: "number" },
+      ]);
+    }
+
+    // Evaluate the gate regardless of confirm_large_change so an override that
+    // actually bypassed it can be logged.
+    const gateLoosening =
+      isStrategyLooseningChange(oldTargetCpaMicros, targetCpaMicros, currentStrategy, resolvedStrategy) ||
+      isStrategyLooseningChange(oldTargetRoas, updates.target_roas, currentStrategy, resolvedStrategy);
+    const gateOverCeiling =
+      exceedsMagnitudeCeiling(oldTargetCpaMicros, targetCpaMicros) ||
+      exceedsMagnitudeCeiling(oldTargetRoas, updates.target_roas);
+    const biddingOverride = updates.confirm_large_change === true && (gateLoosening || gateOverCeiling);
+
     if (!updates.confirm_large_change) {
       const looseningCpa = isStrategyLooseningChange(
         oldTargetCpaMicros, targetCpaMicros, currentStrategy, resolvedStrategy
@@ -2516,7 +2642,35 @@ export class GoogleAdsManager {
       "updateCampaignBidding.update"
     );
 
+    let overrideLogResult: Record<string, unknown> = {};
+    if (biddingOverride) {
+      const describe = (strategy: string, cpaMicros: number | undefined | null, roas: number | undefined | null) => {
+        const parts = [strategy];
+        if (typeof cpaMicros === "number" && cpaMicros > 0) parts.push(formatDollarsFromMicros(cpaMicros));
+        if (typeof roas === "number" && roas > 0) parts.push(`tROAS ${roas}`);
+        return parts.join(" ");
+      };
+      const pct =
+        computeMagnitudeDeltaPct(oldTargetCpaMicros, targetCpaMicros) ??
+        computeMagnitudeDeltaPct(oldTargetRoas, updates.target_roas);
+      overrideLogResult = {
+        large_change_override: true,
+        override_log: await recordOverride(
+          {
+            tool: "google_ads_update_campaign_bidding",
+            entity: `campaign "${current.campaign.name}" (id ${campaignId})`,
+            old: describe(currentStrategy, oldTargetCpaMicros, oldTargetRoas),
+            new: describe(resolvedStrategy, targetCpaMicros, updates.target_roas),
+            change_pct: pct,
+            reason: updates.reason ?? null,
+          },
+          updates.overrideLog
+        ),
+      };
+    }
+
     return {
+      ...overrideLogResult,
       campaign_id: campaignId,
       campaign_name: current.campaign.name,
       previous_strategy: currentStrategy,
@@ -2532,10 +2686,28 @@ export class GoogleAdsManager {
   async updateCampaignSelectiveOptimization(
     customerId: string,
     campaignId: string,
-    conversionActionIds: string[]
+    conversionActionIds: string[],
+    opts: { expected_old?: string[] } = {}
   ) {
     const customer = this.getCustomer(customerId);
     const cleanId = customerId.replace(/-/g, "");
+
+    if (opts.expected_old !== undefined) {
+      const [row] = await withResilience(
+        () =>
+          customer.query(`
+            SELECT campaign.id, campaign.name, campaign.selective_optimization.conversion_actions
+            FROM campaign
+            WHERE campaign.id = ${sanitizeNumericId(campaignId)}
+          `),
+        "updateCampaignSelectiveOptimization.expectedOld"
+      );
+      if (!row?.campaign) throw new Error(`Campaign ${campaignId} not found`);
+      const liveIds = (row.campaign.selective_optimization?.conversion_actions ?? []).map(idOf);
+      assertExpectedOld("google_ads_update_campaign_selective_optimization", `campaign "${row.campaign.name}" (id ${campaignId})`, [
+        { field: "conversion_action_ids", expected: opts.expected_old.map(idOf), current: liveIds, kind: "set" },
+      ]);
+    }
 
     const campaignUpdate = {
       resource_name: `customers/${cleanId}/campaigns/${campaignId}`,
@@ -2561,7 +2733,7 @@ export class GoogleAdsManager {
   // self-reverts to OPTIMIZE after ~90 days (Google-managed); ROTATE_INDEFINITELY
   // does not. Caller must pass an explicit mode — no default, so ROTATE_INDEFINITELY
   // can never be applied by omission.
-  async updateCampaignAdRotation(customerId: string, campaignId: string, mode: string) {
+  async updateCampaignAdRotation(customerId: string, campaignId: string, mode: string, opts: { expected_old?: string } = {}) {
     const customer = this.getCustomer(customerId);
     const cleanId = customerId.replace(/-/g, "");
     const resourceName = `customers/${cleanId}/campaigns/${campaignId}`;
@@ -2582,6 +2754,10 @@ export class GoogleAdsManager {
 
     const previousEnum = current.campaign.ad_serving_optimization_status as number;
     const previousMode = AD_SERVING_OPTIMIZATION_STATUS_ENUM_TO_NAME[previousEnum] || "UNKNOWN";
+
+    assertExpectedOld("google_ads_update_campaign_ad_rotation", `campaign "${current.campaign.name}" (id ${campaignId})`, [
+      { field: "mode", expected: opts.expected_old, current: previousMode, kind: "exact" },
+    ]);
 
     const campaignUpdate = buildAdRotationCampaignUpdate(resourceName, mode);
 
@@ -2606,11 +2782,40 @@ export class GoogleAdsManager {
     customerId: string,
     campaignIds: string[],
     mode: string,
-    label?: string
+    label?: string,
+    opts: { expected_old?: string } = {}
   ) {
     const customer = this.getCustomer(customerId);
     const cleanId = customerId.replace(/-/g, "");
     const resourceNames = campaignIds.map((id) => `customers/${cleanId}/campaigns/${id}`);
+
+    if (opts.expected_old !== undefined) {
+      const wanted = new Set(campaignIds.map((id) => sanitizeNumericId(id)));
+      const rows = await withResilience(
+        () =>
+          customer.query(`
+            SELECT campaign.id, campaign.name, campaign.geo_target_type_setting.positive_geo_target_type
+            FROM campaign
+            WHERE campaign.id IN (${[...wanted].join(",")})
+          `),
+        "updateCampaignGeoTargetType.expectedOld"
+      );
+      const enumToName: Record<number, string> = Object.fromEntries(
+        Object.entries(POSITIVE_GEO_TARGET_TYPE).map(([k, v]) => [v, k])
+      );
+      const fields: ExpectedOldField[] = (rows as any[])
+        .filter((r) => wanted.has(String(r.campaign?.id)))
+        .map((r) => {
+          const raw = r.campaign?.geo_target_type_setting?.positive_geo_target_type;
+          return {
+            field: `"${r.campaign?.name}" (id ${r.campaign?.id}).mode`,
+            expected: opts.expected_old,
+            current: typeof raw === "number" ? enumToName[raw] ?? `UNKNOWN(${raw})` : raw,
+            kind: "exact" as const,
+          };
+        });
+      assertExpectedOld("google_ads_update_campaign_geo_target_type", `${fields.length} campaign(s)`, fields);
+    }
     const operations = buildGeoTargetTypeCampaignUpdates(resourceNames, mode);
 
     await withResilience(
@@ -2627,7 +2832,7 @@ export class GoogleAdsManager {
     };
   }
 
-  async updateAssetUrls(customerId: string, updates: Array<{ asset_id: string; final_urls: string[] }>) {
+  async updateAssetUrls(customerId: string, updates: Array<{ asset_id: string; final_urls: string[]; expected_old?: string[] }>) {
     const customer = this.getCustomer(customerId);
     const cleanId = customerId.replace(/-/g, "");
 
@@ -2653,6 +2858,17 @@ export class GoogleAdsManager {
     if (missing.length > 0) {
       throw new Error(`Asset ID(s) not found in customer ${customerId}: ${missing.join(", ")}`);
     }
+
+    assertExpectedOld(
+      "google_ads_update_asset_urls",
+      `${updates.length} asset(s)`,
+      updates.map((u) => ({
+        field: `asset ${u.asset_id}${byId.get(u.asset_id)?.sitelink_asset?.link_text ? ` ("${byId.get(u.asset_id).sitelink_asset.link_text}")` : ""}.final_urls`,
+        expected: u.expected_old,
+        current: byId.get(u.asset_id)?.final_urls ?? [],
+        kind: "set" as const,
+      }))
+    );
 
     const operations = updates.map(u => ({
       resource_name: `customers/${cleanId}/assets/${u.asset_id}`,
@@ -2781,6 +2997,7 @@ export class GoogleAdsManager {
     new_link_text?: string;
     new_description1?: string;
     new_description2?: string;
+    expected_old?: string[];
   }) {
     const customer = this.getCustomer(customerId);
     const cleanId = customerId.replace(/-/g, "");
@@ -2813,6 +3030,10 @@ export class GoogleAdsManager {
         `This tool only replaces sitelink assets; use google_ads_update_asset_urls for other asset types.`
       );
     }
+
+    assertExpectedOld("google_ads_replace_sitelink_url", `sitelink asset ${args.old_asset_id} ("${oldAsset.sitelink_asset?.link_text ?? ""}")`, [
+      { field: "final_urls", expected: args.expected_old, current: oldAsset.final_urls ?? [], kind: "set" },
+    ]);
 
     const link_text = args.new_link_text ?? oldAsset.sitelink_asset?.link_text;
     if (!link_text) {
@@ -3017,10 +3238,21 @@ export class GoogleAdsManager {
   // AD GROUP RENAME
   // ============================================
 
-  async renameAdGroup(customerId: string, adGroupId: string, newName: string) {
+  async renameAdGroup(customerId: string, adGroupId: string, newName: string, opts: { expected_old?: string } = {}) {
     const customer = this.getCustomer(customerId);
     const cleanId = customerId.replace(/-/g, "");
     const resourceName = `customers/${cleanId}/adGroups/${adGroupId}`;
+
+    if (opts.expected_old !== undefined) {
+      const [row] = await withResilience(
+        () => customer.query(`SELECT ad_group.id, ad_group.name FROM ad_group WHERE ad_group.id = ${sanitizeNumericId(adGroupId)}`),
+        "renameAdGroup.expectedOld"
+      );
+      if (!row?.ad_group) throw new Error(`Ad group ${adGroupId} not found`);
+      assertExpectedOld("google_ads_rename_ad_group", `ad group (id ${adGroupId})`, [
+        { field: "name", expected: opts.expected_old, current: row.ad_group.name, kind: "exact" },
+      ]);
+    }
 
     await withResilience(
       () => customer.adGroups.update([{ resource_name: resourceName, name: newName } as any]),
@@ -3041,10 +3273,21 @@ export class GoogleAdsManager {
   // CAMPAIGN RENAME
   // ============================================
 
-  async renameCampaign(customerId: string, campaignId: string, newName: string) {
+  async renameCampaign(customerId: string, campaignId: string, newName: string, opts: { expected_old?: string } = {}) {
     const customer = this.getCustomer(customerId);
     const cleanId = customerId.replace(/-/g, "");
     const resourceName = `customers/${cleanId}/campaigns/${campaignId}`;
+
+    if (opts.expected_old !== undefined) {
+      const [row] = await withResilience(
+        () => customer.query(`SELECT campaign.id, campaign.name FROM campaign WHERE campaign.id = ${sanitizeNumericId(campaignId)}`),
+        "renameCampaign.expectedOld"
+      );
+      if (!row?.campaign) throw new Error(`Campaign ${campaignId} not found`);
+      assertExpectedOld("google_ads_rename_campaign", `campaign (id ${campaignId})`, [
+        { field: "name", expected: opts.expected_old, current: row.campaign.name, kind: "exact" },
+      ]);
+    }
 
     await withResilience(
       () => customer.campaigns.update([{ resource_name: resourceName, name: newName } as any]),
@@ -3568,7 +3811,7 @@ export class GoogleAdsManager {
     };
   }
 
-  async updateCampaignAdUrls(customerId: string, campaignId: string, newFinalUrl: string, execute = false) {
+  async updateCampaignAdUrls(customerId: string, campaignId: string, newFinalUrl: string, execute = false, opts: { expected_old?: string } = {}) {
     const customer = this.getCustomer(customerId);
     const cleanId = customerId.replace(/-/g, "");
 
@@ -3616,6 +3859,15 @@ export class GoogleAdsManager {
       };
     }
 
+    if (opts.expected_old !== undefined) {
+      const campaignName = (rows as any[])[0]?.campaign?.name ?? "";
+      assertExpectedOld(
+        "google_ads_update_campaign_ad_urls",
+        `campaign "${campaignName}" (id ${campaignId})`,
+        ads.map(a => ({ field: `ad ${a.ad_id}.final_urls`, expected: [opts.expected_old], current: a.current_final_urls, kind: "set" as const }))
+      );
+    }
+
     // 2. Bulk update
     const updates = ads.map(a => ({
       resource_name: a.resource_name,
@@ -3647,6 +3899,7 @@ export class GoogleAdsManager {
     adIds: string[],
     newFinalUrl: string,
     confirm = false,
+    opts: { expected_old?: string } = {},
   ) {
     // In-place edit via AdService: `ads.update([{resource_name: ads/{id},
     // final_urls}])`. Same ad ID, ad-level history kept; Google re-reviews the
@@ -3745,6 +3998,14 @@ export class GoogleAdsManager {
       );
     }
 
+    if (opts.expected_old !== undefined) {
+      assertExpectedOld(
+        "google_ads_update_ad_final_urls",
+        `ad group "${found[0]?.ad_group_name ?? ""}" (id ${adGroupId})`,
+        found.map(a => ({ field: `ad ${a.ad_id}.final_urls`, expected: [opts.expected_old], current: a.current_final_urls, kind: "set" as const }))
+      );
+    }
+
     const updatedIds = found.map(a => a.ad_id);
     await withResilience(
       () => customer.ads.update(
@@ -3791,6 +4052,7 @@ export class GoogleAdsManager {
       descriptions?: Array<string | { text: string; pinned_position?: number }>;
     },
     confirm = false,
+    opts: { expected_old?: { headlines?: string[]; descriptions?: string[] } } = {},
   ) {
     const customer = this.getCustomer(customerId);
     const cleanId = customerId.replace(/-/g, "");
@@ -3920,6 +4182,13 @@ export class GoogleAdsManager {
     // AdGroupAd shape (ad_group_ad.ad.responsive_search_ad), which is a
     // DIFFERENT resource from what customer.ads.update() takes. Confirmed
     // against node_modules/google-ads-node's IAd interface directly.
+    if (opts.expected_old) {
+      assertExpectedOld("google_ads_update_responsive_search_ad_text", `ad ${cleanAdId} in ad group "${first.ad_group?.name ?? ""}"`, [
+        { field: "headlines", expected: opts.expected_old.headlines, current: currentHeadlines.map(h => h.text), kind: "set" },
+        { field: "descriptions", expected: opts.expected_old.descriptions, current: currentDescriptions.map(d => d.text), kind: "set" },
+      ]);
+    }
+
     const adUpdate: any = { resource_name: buildAdResourceName(cleanId, cleanAdId) };
     if (newHeadlines) {
       adUpdate.responsive_search_ad = {
@@ -5051,7 +5320,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (args?.tracking_url_template !== undefined) updates.tracking_url_template = args.tracking_url_template as string;
         if (args?.url_custom_parameters !== undefined) updates.url_custom_parameters = args.url_custom_parameters as Array<{ key: string; value: string }>;
 
-        const result = await getAdsManager().updateCampaignTracking(customerId, campaignId, updates);
+        const result = await getAdsManager().updateCampaignTracking(customerId, campaignId, updates, {
+          expected_old: args?.expected_old as any,
+        });
 
         // Get updated values
         const updatedTracking = await getAdsManager().getCampaignTracking(customerId, campaignId);
@@ -5612,7 +5883,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           };
         }
 
-        const result = await getAdsManager().updateCampaignBudget(customerId, campaignId, dailyBudget, createNew);
+        const result = await getAdsManager().updateCampaignBudget(customerId, campaignId, dailyBudget, createNew, {
+          confirm_large_change: args?.confirm_large_change === true,
+          reason: args?.reason as string | undefined,
+          expected_old: args?.expected_old as number | undefined,
+        });
 
         return {
           content: [{
@@ -5663,6 +5938,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           target_cpa_dollars: targetCpaDollars,
           target_roas: targetRoas,
           confirm_large_change: confirmLargeChange,
+          reason: args?.reason as string | undefined,
+          expected_old: args?.expected_old as any,
         });
 
         return {
@@ -5681,7 +5958,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const result = await getAdsManager().updateCampaignSelectiveOptimization(
           customerId,
           campaignId,
-          conversionActionIds
+          conversionActionIds,
+          { expected_old: args?.expected_old as string[] | undefined }
         );
 
         return {
@@ -5783,6 +6061,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           new_link_text: normalized.new_link_text,
           new_description1: normalized.new_description1,
           new_description2: normalized.new_description2,
+          expected_old: normalized.expected_old,
         });
         return { content: [{ type: "text", text: JSON.stringify({ success: true, ...result }, null, 2) }] };
       }
@@ -5824,7 +6103,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           };
         }
 
-        const renameResult = await getAdsManager().renameAdGroup(customerId, adGroupId, newName);
+        const renameResult = await getAdsManager().renameAdGroup(customerId, adGroupId, newName, {
+          expected_old: args?.expected_old as string | undefined,
+        });
         return { content: [{ type: "text", text: JSON.stringify({ success: true, ...renameResult }, null, 2) }] };
       }
 
@@ -5852,7 +6133,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           };
         }
 
-        const renameResult = await getAdsManager().renameCampaign(customerId, campaignId, newName);
+        const renameResult = await getAdsManager().renameCampaign(customerId, campaignId, newName, {
+          expected_old: args?.expected_old as string | undefined,
+        });
         return { content: [{ type: "text", text: JSON.stringify({ success: true, ...renameResult }, null, 2) }] };
       }
 
@@ -5888,7 +6171,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           };
         }
 
-        const rotationResult = await getAdsManager().updateCampaignAdRotation(customerId, campaignId, mode);
+        const rotationResult = await getAdsManager().updateCampaignAdRotation(customerId, campaignId, mode, {
+          expected_old: args?.expected_old as string | undefined,
+        });
         return { content: [{ type: "text", text: JSON.stringify({ success: true, ...rotationResult }, null, 2) }] };
       }
 
@@ -5921,7 +6206,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           };
         }
 
-        const geoTargetTypeResult = await getAdsManager().updateCampaignGeoTargetType(customerId, campaignIds, mode, label);
+        const geoTargetTypeResult = await getAdsManager().updateCampaignGeoTargetType(customerId, campaignIds, mode, label, {
+          expected_old: args?.expected_old as string | undefined,
+        });
         return { content: [{ type: "text", text: JSON.stringify({ success: true, ...geoTargetTypeResult }, null, 2) }] };
       }
 
@@ -6162,7 +6449,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           return {
             content: [{
               type: "text",
-              text: JSON.stringify({ success: false, error: e.message }, null, 2),
+              text: JSON.stringify({ success: false, error: e.message, ...guardErrorDetail(e) }, null, 2),
             }],
           };
         }
@@ -6177,6 +6464,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             long_headlines: args?.long_headlines as string[] | undefined,
             descriptions: args?.descriptions as string[] | undefined,
             labels: args?.labels as string[] | undefined,
+            expected_old: args?.expected_old as any,
           });
           return {
             content: [{
@@ -6193,7 +6481,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           return {
             content: [{
               type: "text",
-              text: JSON.stringify({ success: false, error: e.message }, null, 2),
+              text: JSON.stringify({ success: false, error: e.message, ...guardErrorDetail(e) }, null, 2),
             }],
           };
         }
@@ -6207,6 +6495,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             videos: args?.videos as string[],
             mode: args?.mode as "append" | "replace" | undefined,
             skip_visibility_check: args?.skip_visibility_check as boolean | undefined,
+            expected_old: args?.expected_old as string[] | undefined,
           });
           return {
             content: [{
@@ -6222,7 +6511,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           return {
             content: [{
               type: "text",
-              text: JSON.stringify({ success: false, error: e.message }, null, 2),
+              text: JSON.stringify({ success: false, error: e.message, ...guardErrorDetail(e) }, null, 2),
             }],
           };
         }
@@ -6300,7 +6589,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           return {
             content: [{
               type: "text",
-              text: JSON.stringify({ success: false, error: e.message }, null, 2),
+              text: JSON.stringify({ success: false, error: e.message, ...guardErrorDetail(e) }, null, 2),
             }],
           };
         }
@@ -6324,7 +6613,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           return {
             content: [{
               type: "text",
-              text: JSON.stringify({ success: false, error: e.message }, null, 2),
+              text: JSON.stringify({ success: false, error: e.message, ...guardErrorDetail(e) }, null, 2),
             }],
           };
         }
@@ -6366,7 +6655,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           return {
             content: [{
               type: "text",
-              text: JSON.stringify({ success: false, error: e.message }, null, 2),
+              text: JSON.stringify({ success: false, error: e.message, ...guardErrorDetail(e) }, null, 2),
             }],
           };
         }
@@ -6391,7 +6680,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           });
           return { content: [{ type: "text", text: JSON.stringify({ success: true, ...result }, null, 2) }] };
         } catch (e: any) {
-          return { content: [{ type: "text", text: JSON.stringify({ success: false, error: e.message }, null, 2) }] };
+          return { content: [{ type: "text", text: JSON.stringify({ success: false, error: e.message, ...guardErrorDetail(e) }, null, 2) }] };
         }
       }
 
@@ -6410,7 +6699,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           const result = await getAdsManager().getExperiment(customerId, args?.experiment_id as string);
           return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
         } catch (e: any) {
-          return { content: [{ type: "text", text: JSON.stringify({ success: false, error: e.message }, null, 2) }] };
+          return { content: [{ type: "text", text: JSON.stringify({ success: false, error: e.message, ...guardErrorDetail(e) }, null, 2) }] };
         }
       }
 
@@ -6421,7 +6710,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           const result = await getAdsManager().scheduleExperiment(customerId, args?.experiment_id as string);
           return { content: [{ type: "text", text: JSON.stringify({ success: true, ...result }, null, 2) }] };
         } catch (e: any) {
-          return { content: [{ type: "text", text: JSON.stringify({ success: false, error: e.message }, null, 2) }] };
+          return { content: [{ type: "text", text: JSON.stringify({ success: false, error: e.message, ...guardErrorDetail(e) }, null, 2) }] };
         }
       }
 
@@ -6432,7 +6721,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           const result = await getAdsManager().endExperiment(customerId, args?.experiment_id as string);
           return { content: [{ type: "text", text: JSON.stringify({ success: true, ...result }, null, 2) }] };
         } catch (e: any) {
-          return { content: [{ type: "text", text: JSON.stringify({ success: false, error: e.message }, null, 2) }] };
+          return { content: [{ type: "text", text: JSON.stringify({ success: false, error: e.message, ...guardErrorDetail(e) }, null, 2) }] };
         }
       }
 
@@ -6444,7 +6733,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           const result = await getAdsManager().promoteExperiment(customerId, args?.experiment_id as string, validateOnly);
           return { content: [{ type: "text", text: JSON.stringify({ success: true, ...result }, null, 2) }] };
         } catch (e: any) {
-          return { content: [{ type: "text", text: JSON.stringify({ success: false, error: e.message }, null, 2) }] };
+          return { content: [{ type: "text", text: JSON.stringify({ success: false, error: e.message, ...guardErrorDetail(e) }, null, 2) }] };
         }
       }
 
@@ -6455,7 +6744,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           const result = await getAdsManager().removeExperiment(customerId, args?.experiment_id as string);
           return { content: [{ type: "text", text: JSON.stringify({ success: true, ...result }, null, 2) }] };
         } catch (e: any) {
-          return { content: [{ type: "text", text: JSON.stringify({ success: false, error: e.message }, null, 2) }] };
+          return { content: [{ type: "text", text: JSON.stringify({ success: false, error: e.message, ...guardErrorDetail(e) }, null, 2) }] };
         }
       }
 
@@ -6469,10 +6758,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             args?.campaign_id as string,
             args?.new_final_url as string,
             execute,
+            { expected_old: args?.expected_old as string | undefined },
           );
           return { content: [{ type: "text", text: JSON.stringify({ success: true, ...result }, null, 2) }] };
         } catch (e: any) {
-          return { content: [{ type: "text", text: JSON.stringify({ success: false, error: e.message }, null, 2) }] };
+          return { content: [{ type: "text", text: JSON.stringify({ success: false, error: e.message, ...guardErrorDetail(e) }, null, 2) }] };
         }
       }
 
@@ -6487,10 +6777,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             (args?.ad_ids as string[]) ?? [],
             args?.new_final_url as string,
             confirm,
+            { expected_old: args?.expected_old as string | undefined },
           );
           return { content: [{ type: "text", text: JSON.stringify({ success: true, ...result }, null, 2) }] };
         } catch (e: any) {
-          return { content: [{ type: "text", text: JSON.stringify({ success: false, error: e.message }, null, 2) }] };
+          return { content: [{ type: "text", text: JSON.stringify({ success: false, error: e.message, ...guardErrorDetail(e) }, null, 2) }] };
         }
       }
 
@@ -6507,10 +6798,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               descriptions: args?.descriptions as any,
             },
             confirm,
+            { expected_old: args?.expected_old as any },
           );
           return { content: [{ type: "text", text: JSON.stringify({ success: true, ...result }, null, 2) }] };
         } catch (e: any) {
-          return { content: [{ type: "text", text: JSON.stringify({ success: false, error: e.message }, null, 2) }] };
+          return { content: [{ type: "text", text: JSON.stringify({ success: false, error: e.message, ...guardErrorDetail(e) }, null, 2) }] };
         }
       }
 
@@ -6529,6 +6821,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       message: error.message,
       server: __cliPkg.name,
     };
+
+    if (rawError instanceof ExpectedOldMismatch) {
+      response.current = rawError.current;
+      response.expected = rawError.expected;
+      response.write_made = false;
+    } else if (rawError instanceof MagnitudeCeilingBlocked) {
+      response.write_made = false;
+    }
 
     if (error instanceof GoogleAdsAuthError) {
       response.action_required = "Re-authenticate: check refresh token in macOS Keychain. Token may be expired or revoked.";
