@@ -220,6 +220,33 @@ describe("override log wiring", () => {
     expect(line.reason).toBe("new conversion action");
   });
 
+  it("bidding override over the ceiling with confirm_large_change but no reason is refused, no write", async () => {
+    const { customer, writes } = makeBiddingFake();
+    for (const reason of [undefined, "   "]) {
+      await expect(
+        mgrFor(customer).updateCampaignBidding("1234567890", "111", {
+          target_cpa_dollars: 100,
+          confirm_large_change: true,
+          reason,
+          overrideLog: { logPath: null, webhookUrl: null },
+        })
+      ).rejects.toThrow(/non-empty reason/);
+    }
+    expect(writes).toHaveLength(0);
+  });
+
+  it("loosening bidding override with confirm_large_change but no reason is refused, no write", async () => {
+    const { customer, writes } = makeBiddingFake();
+    await expect(
+      mgrFor(customer).updateCampaignBidding("1234567890", "111", {
+        strategy: "MAXIMIZE_CLICKS",
+        confirm_large_change: true,
+        overrideLog: { logPath: null, webhookUrl: null },
+      })
+    ).rejects.toThrow(/non-empty reason/);
+    expect(writes).toHaveLength(0);
+  });
+
   it("a within-ceiling bidding change with confirm_large_change writes no log line", async () => {
     const logPath = join(dir, "o.jsonl");
     const { customer } = makeBiddingFake();

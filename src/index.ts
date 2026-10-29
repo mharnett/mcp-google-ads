@@ -2598,6 +2598,12 @@ export class GoogleAdsManager {
       exceedsMagnitudeCeiling(oldTargetCpaMicros, targetCpaMicros) ||
       exceedsMagnitudeCeiling(oldTargetRoas, updates.target_roas);
     const biddingOverride = updates.confirm_large_change === true && (gateLoosening || gateOverCeiling);
+    if (biddingOverride && !(typeof updates.reason === "string" && updates.reason.trim().length > 0)) {
+      throw new Error(
+        `Bidding change on campaign ${campaignId} (${current.campaign.name}) needs an override, and ` +
+        `confirm_large_change was passed without a reason: add a non-empty reason string to proceed.`
+      );
+    }
 
     if (!updates.confirm_large_change) {
       const looseningCpa = isStrategyLooseningChange(
