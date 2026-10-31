@@ -5,11 +5,11 @@
  * History: the tool shipped (ea6cfb0, 2026-05-16) as clone-and-swap on the
  * premise that "RSA final_urls is API-immutable". That premise was never
  * backed by a recorded error and is false: verified live 2026-10-07
- * (Forcepoint ad 798991480203) that `ads.update([{resource_name:
+ * (on a client RSA) that `ads.update([{resource_name:
  * "customers/X/ads/Y", final_urls: [url]}])` succeeds and keeps the ad ID.
  * IMMUTABLE_FIELD is what you get going through AdGroupAdService with a
  * nested `ad` -- a different service. Clone-and-swap reset ad-level history
- * on every ad it touched (39 DLP ads on 2026-10-07), so this test pins the
+ * on every ad it touched (39 ads on 2026-10-07), so this test pins the
  * in-place mechanism and forbids any create / pause on the apply path.
  */
 

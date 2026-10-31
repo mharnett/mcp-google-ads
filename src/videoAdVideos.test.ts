@@ -3,7 +3,7 @@
  *
  * Context: the VIDEO channel is campaign-level locked in the Google Ads API,
  * but AD-level `video_responsive_ad.videos` updates ARE allowed (verified
- * live 2026-07-18 on the Forcepoint Safeguard AI reach ads). These helpers
+ * live 2026-07-18 on a client's YouTube reach ads). These helpers
  * back the google_ads_update_video_ad_videos tool.
  */
 import { describe, expect, it } from "vitest";
@@ -128,24 +128,24 @@ describe("planVideoUpdate", () => {
 
 describe("buildVideoAdUpdateResource", () => {
   it("targets the ads resource (NOT adGroupAds) with an asset list", () => {
-    const resource = buildVideoAdUpdateResource("4948252953", "815638860130", [
-      "customers/4948252953/assets/111",
-      "customers/4948252953/assets/222",
+    const resource = buildVideoAdUpdateResource("1234567890", "815638860130", [
+      "customers/1234567890/assets/111",
+      "customers/1234567890/assets/222",
     ]);
     expect(resource).toEqual({
-      resource_name: "customers/4948252953/ads/815638860130",
+      resource_name: "customers/1234567890/ads/815638860130",
       video_responsive_ad: {
         videos: [
-          { asset: "customers/4948252953/assets/111" },
-          { asset: "customers/4948252953/assets/222" },
+          { asset: "customers/1234567890/assets/111" },
+          { asset: "customers/1234567890/assets/222" },
         ],
       },
     });
   });
 
   it("strips dashes from the customer ID", () => {
-    const resource = buildVideoAdUpdateResource("494-825-2953", "1", ["customers/4948252953/assets/1"]);
-    expect(resource.resource_name).toBe("customers/4948252953/ads/1");
+    const resource = buildVideoAdUpdateResource("123-456-7890", "1", ["customers/1234567890/assets/1"]);
+    expect(resource.resource_name).toBe("customers/1234567890/ads/1");
   });
 });
 

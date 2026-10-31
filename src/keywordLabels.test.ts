@@ -1,7 +1,7 @@
 /**
  * Keyword (ad_group_criterion) labelling: pause and apply_label.
  *
- * GAP (found 2026-10-28): 15 Forcepoint keywords were paused through
+ * GAP (found 2026-10-28): 15 client keywords were paused through
  * `google_ads_pause_keywords` and none carried an audit label — pause never
  * labelled, and `google_ads_apply_label` had no keyword target, so there was
  * no MCP path to backfill one. `enableKeywords` already auto-labels; pause

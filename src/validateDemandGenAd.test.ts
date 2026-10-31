@@ -224,7 +224,7 @@ describe("buildDemandGenAdPayload", () => {
 
 describe("isDemandGenAdGroup — accepts campaign channel_type as canonical check", () => {
   it("accepts when ad_group.type is undefined but parent campaign is DEMAND_GEN (14)", () => {
-    // Reproduces the Survey Measure bug: google-ads-api v23 returns undefined
+    // Reproduces the client DG launch bug: google-ads-api v23 returns undefined
     // for ad_group.type because proto value 21 isn't in its enum map. The
     // parent campaign's advertising_channel_type (DEMAND_GEN = 14) is the
     // authoritative signal — DG campaigns can only contain DG ad groups.

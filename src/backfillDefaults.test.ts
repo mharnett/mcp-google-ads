@@ -5,7 +5,7 @@ import {
   backfillOmittedBooleans,
 } from "./backfillDefaults.js";
 
-// Origin: 2026-09-03, Forcepoint. google_ads_gaql_query returned a row with no
+// Origin: 2026-09-03, client session. google_ads_gaql_query returned a row with no
 // `optimized_targeting_enabled` key at all for an ad_group that genuinely had
 // it set to `false` -- Google's REST API omits fields at their proto3 default
 // value from the JSON body entirely (confirmed live: direct python client

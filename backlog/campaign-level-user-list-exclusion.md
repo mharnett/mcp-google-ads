@@ -1,6 +1,6 @@
 # Add tool for campaign-level user_list exclusion (NCA-style suppression)
 
-**Found:** 2026-05-11 (Forcepoint DG NCA setup)
+**Found:** 2026-05-11 (client Demand Gen setup)
 **Severity:** Medium — biggest single audience lever per Google's DG best-practices guide is currently only reachable via the UI.
 
 ## Symptom
@@ -9,7 +9,7 @@
 
 ## Concrete blocked use case
 
-Forcepoint has `Customers-Partners-Suppression` user_list (id 8979393153, 17K members). We want to attach it as a negative CampaignCriterion to 14 enabled DG campaigns. Today this is 14 separate UI clicks; with an MCP tool it's a single call across all 14 campaign IDs.
+A client has a customer/partner suppression user_list (17K members). We want to attach it as a negative CampaignCriterion to 14 enabled DG campaigns. Today this is 14 separate UI clicks; with an MCP tool it's a single call across all 14 campaign IDs.
 
 ## Fix direction
 

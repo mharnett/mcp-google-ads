@@ -47,7 +47,7 @@ export interface CampaignCreatePayload {
 // asked for one. Same family as Display Expansion and Search Partners: a
 // default-on surface that buys traffic nobody signed off on.
 //
-// Origin 2026-10-07 (Forcepoint): a lead form ("Forcepoint Moves First") sat on
+// Origin 2026-10-07 (client account): an unrequested lead form sat on
 // 22 Search campaigns from 10 July with no delivery to Salesforce. It logged 555
 // submits in Q3, nearly all junk from AI-tool searches, inflated All conversions,
 // and none were ever imported. Enforced at every lead-form entry point
@@ -69,7 +69,7 @@ export function assertLeadFormExplicitlyRequested(
   throw new Error(
     `${toolName}: lead forms are never created or attached unless the user explicitly asked for one. ` +
       "Pass explicit_lead_form_request: true only when they did. (Policy 2026-10-07: an unrequested " +
-      "lead form on 22 Forcepoint Search campaigns produced 555 junk submits that were never imported.)"
+      "lead form on 22 Search campaigns produced 555 junk submits that were never imported.)"
   );
 }
 
@@ -138,7 +138,7 @@ export function buildCampaignCreatePayload(input: CampaignCreateInput): Campaign
     // is IMMUTABLE after creation, so a campaign built without this can only be
     // rebuilt, never repaired.
     //
-    // That is the exact configuration behind the 2026-07-16 Forcepoint geo leak:
+    // That is the exact configuration behind the 2026-07-16 client geo leak:
     // $37,187 of $42,044 (88.4%) spent in countries the campaigns never targeted,
     // reporting a plausible $137 CPA the whole time. Reproduced 2026-08-13 while
     // building the Q3 retargeting flight — the campaign had to be removed.

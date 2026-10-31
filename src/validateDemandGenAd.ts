@@ -211,7 +211,7 @@ export function isDemandGenAdGroup(row: any): boolean {
  * accepts. Display-cased strings pass through unchanged. Unknown values pass
  * through so the server's error (rather than a silent fallback) surfaces.
  *
- * Discovered during live Survey Measure launch 2026-04-17.
+ * Discovered during a live client launch 2026-04-17.
  */
 const CTA_DISPLAY_MAP: Record<string, string> = {
   LEARN_MORE: "Learn more",

@@ -246,7 +246,7 @@ interface ClientResolution {
 /**
  * Resolve every client whose `folder` prefixes `cwd`, or whose config key
  * appears as a substring of `cwd` (fallback for bare per-account folders
- * like `clients/imvu` that only a per-key match, not the shared folder
+ * like `clients/acme` that only a per-key match, not the shared folder
  * value, can disambiguate). Both paths feed the same de-duplicated
  * candidate set so a caller can never be handed a single confident answer
  * when more than one client actually matches.
@@ -2515,7 +2515,7 @@ export class GoogleAdsManager {
   // Update campaign bidding strategy (and/or target CPA / target ROAS).
   // If `strategy` is omitted, the current strategy is preserved and only the target is updated.
   //
-  // Magnitude-ceiling guard (2026-07-31, Forcepoint session origin — see
+  // Magnitude-ceiling guard (2026-07-31, client session origin — see
   // biddingUpdate.ts): blocks a >20% target delta or a target-based ->
   // untargeted "loosening" change unless the caller passes
   // confirm_large_change: true. A companion gate exists in a different repo
@@ -4044,7 +4044,7 @@ export class GoogleAdsManager {
    * a different resource).
    *
    * IMPORTANT: an Ad resource can be linked into more than one ad_group_ad
-   * (confirmed live: some Neon CRM ads are shared between a base campaign
+   * (confirmed live: some client ads are shared between a base campaign
    * and an experiment-page campaign). AdService.update mutates the shared
    * Ad resource, so ONE call here changes every ad_group_ad that links it.
    * Both dry-run and confirm paths surface every affected link so a caller

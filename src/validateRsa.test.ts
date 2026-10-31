@@ -243,12 +243,12 @@ describe("validateRsa", () => {
     });
 
     it("renders mixed location + customizer fields as combined default text", () => {
-      // Exact production string that the live Varonis ad serves and that the
+      // Exact production string that the live competitor-conquest ad serves and that the
       // old (literal-counting) validator wrongly rejected at 102/90.
       const prod =
         "{LOCATION(City):See Your Data}, {LOCATION(State):in Your State}" +
-        " - Forcepoint® Official Site - {CUSTOMIZER.Intent_a30:Varoni s}";
-      // Rendered: "See Your Data, in Your State - Forcepoint® Official Site - Varoni s"
+        " - AcmeSecure® Official Site - {CUSTOMIZER.Intent_a30:Rival Co}";
+      // Rendered: "See Your Data, in Your State - AcmeSecure® Official Site - Rival Co"
       expect(effectiveTextLength(prod)).toBe(67);
       expect(effectiveTextLength(prod)).toBeLessThan(prod.length); // never the literal length
     });
@@ -273,12 +273,12 @@ describe("validateRsa", () => {
 
   describe("location insertion in ad fields", () => {
     it("accepts a description whose literal exceeds 90 but rendered defaults fit", () => {
-      // The production Varonis description: literal 102, rendered 67 ≤ 90.
+      // The production competitor-conquest description: literal 102, rendered 67 ≤ 90.
       const result = validateRsa({
         ...BASE_VALID_AD,
         descriptions: [
           "{LOCATION(City):See Your Data}, {LOCATION(State):in Your State}" +
-            " - Forcepoint® Official Site - {CUSTOMIZER.Intent_a30:Varoni s}",
+            " - AcmeSecure® Official Site - {CUSTOMIZER.Intent_a30:Rival Co}",
           "Description 2",
         ],
       });
@@ -373,7 +373,7 @@ describe("validateRsa", () => {
 
     it("returns false for plain text and countable insertions", () => {
       const negatives = [
-        "Forcepoint DSPM",
+        "AcmeSecure DSPM",
         "{KeyWord:default}",
         "{CUSTOMIZER.Name:default}",
         "{LOCATION(City):See Your Data}",

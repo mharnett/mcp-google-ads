@@ -4,7 +4,7 @@
  * Ad-group asset links had no MCP path: link_asset_to_campaign is
  * campaign-only, link_asset_to_customer is account-only, and
  * replace_sitelink_url re-links every attachment of the old asset. The
- * 2026-10-07 Forcepoint brand-sitelink change went through a one-off Python
+ * 2026-10-07 client brand-sitelink change went through a one-off Python
  * script instead. These tests pin the replacement tool's contract.
  *
  * The rule worth encoding: once an ad group has ANY enabled ad-group
@@ -34,7 +34,7 @@ const TOOL = "google_ads_link_asset_to_ad_group";
 function state(over: Partial<AdGroupAssetState> = {}): AdGroupAssetState {
   return {
     ad_group_id: "185247350836",
-    ad_group_name: "Forcepoint - Forcepoint",
+    ad_group_name: "Acme - Acme",
     campaign_name: "Brand - NAM",
     enabled_asset_ids: [],
     ...over,
@@ -94,7 +94,7 @@ describe("assessAdGroupAssetCoverage", () => {
     expect(a.resulting_enabled_count).toBe(1);
     expect(a.warning).toMatch(/fewer than 4/);
     expect(a.warning).toMatch(/campaign-level sitelinks/);
-    expect(a.warning).toMatch(/Forcepoint - Forcepoint/);
+    expect(a.warning).toMatch(/Acme - Acme/);
   });
 
   it("3 existing + 1 new = 4: no warning", () => {
@@ -136,7 +136,7 @@ describe("runLinkAssetToAdGroup", () => {
       .mockResolvedValueOnce(before)
       .mockResolvedValueOnce(after);
     const link = vi.fn().mockResolvedValue({
-      resource_names: ["customers/4948252953/adGroupAssets/185247350836~999~SITELINK"],
+      resource_names: ["customers/9876543210/adGroupAssets/185247350836~999~SITELINK"],
     });
     return { getState, link, now: () => new Date(2026, 9, 23) };
   }
@@ -144,12 +144,12 @@ describe("runLinkAssetToAdGroup", () => {
   it("dry run reads state, lists the ad group by name, never links", async () => {
     const d = deps([state()]);
     const out: any = await runLinkAssetToAdGroup(
-      { customer_id: "4948252953", asset_id: "999", ad_group_ids: ["185247350836"], field_type: "SITELINK", confirm: false },
+      { customer_id: "9876543210", asset_id: "999", ad_group_ids: ["185247350836"], field_type: "SITELINK", confirm: false },
       d,
     );
     expect(d.link).not.toHaveBeenCalled();
     expect(out.dry_run).toBe(true);
-    expect(out.ad_groups[0].ad_group_name).toBe("Forcepoint - Forcepoint");
+    expect(out.ad_groups[0].ad_group_name).toBe("Acme - Acme");
     expect(out.ad_groups[0].resulting_enabled_count).toBe(1);
     expect(out.warnings).toHaveLength(1);
     expect(out.pause_path).toMatch(/google_ads_pause_asset_links/);
@@ -161,7 +161,7 @@ describe("runLinkAssetToAdGroup", () => {
       [state({ enabled_asset_ids: ["999"] }), state({ ad_group_id: "2", ad_group_name: "Other", enabled_asset_ids: ["999", "1", "2", "3"] })],
     );
     const out: any = await runLinkAssetToAdGroup(
-      { customer_id: "4948252953", asset_id: "999", ad_group_ids: ["185247350836", "2"], field_type: "SITELINK", confirm: true },
+      { customer_id: "9876543210", asset_id: "999", ad_group_ids: ["185247350836", "2"], field_type: "SITELINK", confirm: true },
       d,
     );
     expect(d.link).toHaveBeenCalledTimes(1);

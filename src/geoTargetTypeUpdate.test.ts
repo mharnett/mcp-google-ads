@@ -5,8 +5,8 @@ import {
   POSITIVE_GEO_TARGET_TYPE,
 } from "./geoTargetTypeUpdate.js";
 
-const RN = "customers/4948252953/campaigns/22923427830";
-const RN2 = "customers/4948252953/campaigns/22923427831";
+const RN = "customers/9876543210/campaigns/22923427830";
+const RN2 = "customers/9876543210/campaigns/22923427831";
 
 describe("buildGeoTargetTypeCampaignUpdate — anchors", () => {
   it("maps PRESENCE to enum 7", () => {

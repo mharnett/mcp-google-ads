@@ -93,7 +93,7 @@ function printHelp(): void {
       "",
       "Usage:",
       "  npx mcp-google-ads-auth",
-      "  npx mcp-google-ads-auth --customer-id 374-196-1572",
+      "  npx mcp-google-ads-auth --customer-id 123-456-7890",
       "",
       "Options:",
       "  --customer-id <id>   Skip the account picker and use this customer ID directly",

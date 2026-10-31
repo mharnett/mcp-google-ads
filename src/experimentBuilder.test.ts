@@ -85,8 +85,8 @@ describe("buildExperimentPayload", () => {
 });
 
 describe("buildControlArmPayload", () => {
-  const expRN = "customers/4948252953/experiments/111";
-  const baseCampaignRN = "customers/4948252953/campaigns/22923427830";
+  const expRN = "customers/9876543210/experiments/111";
+  const baseCampaignRN = "customers/9876543210/campaigns/22923427830";
 
   it("sets control=true and assigns campaigns to base campaign", () => {
     const arm = buildControlArmPayload(expRN, baseCampaignRN, 50);
@@ -107,7 +107,7 @@ describe("buildControlArmPayload", () => {
 });
 
 describe("buildTreatmentArmPayload", () => {
-  const expRN = "customers/4948252953/experiments/111";
+  const expRN = "customers/9876543210/experiments/111";
 
   it("sets control=false and empty campaigns (Google auto-creates)", () => {
     const arm = buildTreatmentArmPayload(expRN, 50);
@@ -130,7 +130,7 @@ describe("buildTreatmentArmPayload", () => {
 
 describe("experimentIdFromResourceName", () => {
   it("extracts numeric id from resource name", () => {
-    expect(experimentIdFromResourceName("customers/4948252953/experiments/98765")).toBe("98765");
+    expect(experimentIdFromResourceName("customers/9876543210/experiments/98765")).toBe("98765");
   });
 
   it("returns empty string for empty input", () => {
@@ -140,7 +140,7 @@ describe("experimentIdFromResourceName", () => {
 
 describe("campaignIdFromResourceName", () => {
   it("extracts numeric id from campaign resource name", () => {
-    expect(campaignIdFromResourceName("customers/4948252953/campaigns/22923427830")).toBe("22923427830");
+    expect(campaignIdFromResourceName("customers/9876543210/campaigns/22923427830")).toBe("22923427830");
   });
 });
 

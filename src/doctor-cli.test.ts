@@ -86,9 +86,9 @@ describe("runDoctor — diagnostic check sequence", () => {
       JSON.stringify({
         version: 1,
         refresh_token: "1//xxxx",
-        customer_id: "2326253482",
+        customer_id: "5556667777",
         customer_name: "Drak Marketing MCC",
-        mcc_customer_id: "2326253482",
+        mcc_customer_id: "5556667777",
       }),
     );
     const result = await runDoctor({ configPath: cfgPath, credentialsPath: credsPath });
@@ -103,9 +103,9 @@ describe("runDoctor — diagnostic check sequence", () => {
       JSON.stringify({
         version: 1,
         refresh_token: "1//xxxx",
-        customer_id: "7458517309",
-        customer_name: "Flowspace",
-        mcc_customer_id: "2326253482",
+        customer_id: "1112223333",
+        customer_name: "Acme Corp",
+        mcc_customer_id: "1234567890",
       }),
     );
     const result = await runDoctor({ configPath: cfgPath, credentialsPath: credsPath });

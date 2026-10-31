@@ -1,12 +1,12 @@
 // Demand Gen asset-automation policy, read from the client's own policy file.
 //
 // Origin 2026-10-05: the MCP hardcoded OFF for auto-video and adaptive layouts
-// on every client, while the Forcepoint Python builders and the daily audit
+// on every client, while a client's Python builders and the daily audit
 // read google_ads/config/platform_policy.yaml. Two sources of truth for one
 // setting. This module makes the MCP read the same file.
 //
 // Rules, mirrored from the Python side (google_ads/shared/dg_asset_automation.py
-// in the forcepoint repo) -- the cases below are deliberately the same cases:
+// in the client repo) -- the cases below are deliberately the same cases:
 //   * A client with NO policy file keeps the historical default: both OFF.
 //     (Mark, 2026-10-05: "leave it default off".)
 //   * A policy file that exists but is malformed is an error, never a default.
@@ -125,11 +125,13 @@ describe("resolveDgPolicy", () => {
     expect(() => resolveDgPolicy(dir)).toThrow(PolicyError);
   });
 
-  const FORCEPOINT = "/Users/mark/claude-code/clients/forcepoint";
-  it.skipIf(!existsSync(join(FORCEPOINT, POLICY_RELATIVE_PATH)))(
-    "parses the real Forcepoint policy file the Python side reads (local only)",
+  // Local only: point MCP_GOOGLE_ADS_REAL_POLICY_DIR at a client folder whose
+  // real policy file (all OFF) the Python side reads.
+  const REAL_CLIENT_DIR = process.env.MCP_GOOGLE_ADS_REAL_POLICY_DIR ?? "";
+  it.skipIf(!REAL_CLIENT_DIR || !existsSync(join(REAL_CLIENT_DIR, POLICY_RELATIVE_PATH)))(
+    "parses a real client policy file the Python side reads (local only)",
     () => {
-      expect(resolveDgPolicy(FORCEPOINT)).toMatchObject({ source: "policy-file", desired: OFF_OFF });
+      expect(resolveDgPolicy(REAL_CLIENT_DIR)).toMatchObject({ source: "policy-file", desired: OFF_OFF });
     }
   );
 });

@@ -2,7 +2,7 @@
 
 **Status:** Backlog
 **Priority:** Medium — blocks programmatic renames; UI workaround is one click per resource
-**Discovered:** 2026-04-22 during Survey Measure DG launch
+**Discovered:** 2026-04-22 during a client DG launch
 
 ## Problem
 

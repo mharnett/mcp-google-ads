@@ -6,7 +6,7 @@
 
 * keyword labelling: google_ads_pause_keywords now auto-applies today's claude-MM-DD-YY label (plus optional `labels`), best-effort like google_ads_enable_keywords, so a label failure never fails a landed pause. google_ads_apply_label accepts `criterion_resource_names` to label existing keywords; every name must belong to customer_id or nothing is labelled.
 
-* add google_ads_link_asset_to_ad_group: links an existing SITELINK / CALLOUT / STRUCTURED_SNIPPET (or, with explicit_lead_form_request, LEAD_FORM) asset to ad groups. Dry-run by default; reads each ad group first and reports its name, campaign, current and resulting enabled link count; warns when a sitelink link would leave an ad group under 4 ad-group sitelinks (the first ad-group sitelink switches off campaign-level sitelinks there); skips ad groups that already have the asset; reads back after confirm; returns a claude-MM-DD-YY audit_label since ad-group links carry no label field. Pause a link by passing its returned adGroupAssets resource name to google_ads_pause_asset_links. Replaces the one-off Forcepoint script apply_brand_sitelinks_exact_2026_10_07.py.
+* add google_ads_link_asset_to_ad_group: links an existing SITELINK / CALLOUT / STRUCTURED_SNIPPET (or, with explicit_lead_form_request, LEAD_FORM) asset to ad groups. Dry-run by default; reads each ad group first and reports its name, campaign, current and resulting enabled link count; warns when a sitelink link would leave an ad group under 4 ad-group sitelinks (the first ad-group sitelink switches off campaign-level sitelinks there); skips ad groups that already have the asset; reads back after confirm; returns a claude-MM-DD-YY audit_label since ad-group links carry no label field. Pause a link by passing its returned adGroupAssets resource name to google_ads_pause_asset_links. Replaces a one-off client script.
 
 ## [1.12.0](https://github.com/mharnett/mcp-google-ads/compare/v1.11.0...v1.12.0) (2026-10-29)
 
@@ -46,7 +46,7 @@
 * **assets:** add customer-level callout/structured-snippet/link tools ([#32](https://github.com/mharnett/mcp-google-ads/issues/32)) ([0edef8c](https://github.com/mharnett/mcp-google-ads/commit/0edef8c5dc09efb8617d84a12df3ec7c8f84ec8e))
 * **scripts:** add git-history secret scanner for credential-hygiene audit ([#36](https://github.com/mharnett/mcp-google-ads/issues/36)) ([0d8be28](https://github.com/mharnett/mcp-google-ads/commit/0d8be28117dc3c3d55eec2ec574ec92e39ae47ac))
 * **scripts:** add pass/fail verdict helper for privatize-or-scrub decision ([#39](https://github.com/mharnett/mcp-google-ads/issues/39)) ([d04c106](https://github.com/mharnett/mcp-google-ads/commit/d04c10613ec72cc313d846e9d672083901df1618))
-* **scripts:** add verdict helper for Forcepoint asset-refresh Acceptance check ([#41](https://github.com/mharnett/mcp-google-ads/issues/41)) ([d60e02d](https://github.com/mharnett/mcp-google-ads/commit/d60e02dca9d7744c3ef1a938c51c5aac5f64ed2b))
+* **scripts:** add verdict helper for a client asset-refresh Acceptance check ([#41](https://github.com/mharnett/mcp-google-ads/issues/41)) ([d60e02d](https://github.com/mharnett/mcp-google-ads/commit/d60e02dca9d7744c3ef1a938c51c5aac5f64ed2b))
 
 
 ### Bug Fixes
@@ -271,8 +271,8 @@ _(v1.4.3 was a stale pre-existing git tag; bumped past it.)_
   leaves plus a "pick an MCC" entry for each MCC with enumerated children;
   selecting an MCC opens a second picker showing only its leaf clients.
   Previously the one-flat-list picker let users pick an MCC terminally, which
-  most tools can't operate on — we hit this in production (user picked the
-  Flowspace MCC 232-625-3482 instead of the child 745-851-7309).
+  most tools can't operate on — we hit this in production (user picked a
+  client's MCC instead of its child account).
 - **Single-account auto-select now refuses MCCs.** If the only accessible
   account is a Manager, the CLI errors out with a clear message instead of
   silently picking the wrong thing.

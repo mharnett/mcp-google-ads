@@ -1,6 +1,6 @@
 # Allow replacing the existing Audience criterion on an ad group
 
-**Found:** 2026-05-11 (Forcepoint Demand Gen audience refresh)
+**Found:** 2026-05-11 (client Demand Gen audience refresh)
 **Severity:** Medium — blocks audience updates on any DG ad group that already has an Audience criterion (which is every DG ad group, since the UI auto-attaches one at create time).
 
 ## Symptom
@@ -12,7 +12,7 @@ Audience segment attachment is not allowed when use audience grouped bit is set 
 (field: operations.create.audience.audience; code: {"criterion_error":"ONE_AUDIENCE_ALLOWED_PER_AD_GROUP"})
 ```
 
-Reproduced across 10 parallel calls on 26 distinct Forcepoint DG ad groups (customer 4948252953) — every call hit the same error. The tool description acknowledges the limit ("each ad group can only have one Audience criterion ... the call will fail for ad groups that already have one"), but doesn't offer a path to replace.
+Reproduced across 10 parallel calls on 26 distinct DG ad groups in one client account — every call hit the same error. The tool description acknowledges the limit ("each ad group can only have one Audience criterion ... the call will fail for ad groups that already have one"), but doesn't offer a path to replace.
 
 ## Why this matters
 

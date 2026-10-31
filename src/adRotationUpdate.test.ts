@@ -5,7 +5,7 @@ import {
   AD_SERVING_OPTIMIZATION_STATUS_ENUM_TO_NAME,
 } from "./adRotationUpdate.js";
 
-const RN = "customers/4948252953/campaigns/22923427830";
+const RN = "customers/9876543210/campaigns/22923427830";
 
 describe("buildAdRotationCampaignUpdate — anchors", () => {
   it("maps ROTATE to enum 4 (self-reverts to OPTIMIZE after 90 days per Google)", () => {

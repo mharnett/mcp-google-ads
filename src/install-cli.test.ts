@@ -99,9 +99,9 @@ describe("installIntoConfig — Claude Desktop config merging", () => {
   });
 
   it("accepts a --customer-id arg and bakes it into args", () => {
-    installIntoConfig({ configPath: cfg, customerId: "745-851-7309" });
+    installIntoConfig({ configPath: cfg, customerId: "111-222-3333" });
     const parsed = JSON.parse(readFileSync(cfg, "utf8"));
     const env = parsed.mcpServers["google-ads"].env || {};
-    expect(env.GOOGLE_ADS_CUSTOMER_ID).toBe("7458517309");
+    expect(env.GOOGLE_ADS_CUSTOMER_ID).toBe("1112223333");
   });
 });

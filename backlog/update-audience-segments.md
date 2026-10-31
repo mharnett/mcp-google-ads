@@ -1,6 +1,6 @@
 # Add `update_audience` tool (modify segments on an existing Audience resource)
 
-**Found:** 2026-05-11 (Forcepoint DG audience refresh)
+**Found:** 2026-05-11 (client DG audience refresh)
 **Severity:** Medium — forces UI-only work for any Audience-resource refinement.
 
 ## Symptom
@@ -16,7 +16,7 @@ This is fragile and not scriptable. It also blocks the workaround pattern for th
 
 ## Concrete blocked use case
 
-Forcepoint Audience 320456709 (`Top Searchers and Interests- No Primer Exclusions`) is attached to 5 DG ad groups (NAM Safeguard + 4× DSPM Gartner TOFU). We want to add `DSPM Xsell LaL` (9375751901) and `XSell | DSPM |Any` (9374794078) as segments — a 30-second change via API, currently a manual UI re-entry.
+A client Audience is attached to 5 DG ad groups. We want to add two more user-list segments (a lookalike and a cross-sell list) — a 30-second change via API, currently a manual UI re-entry.
 
 ## Fix direction
 
