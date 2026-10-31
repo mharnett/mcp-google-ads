@@ -64,9 +64,9 @@ describe("readStoredCredentials / writeStoredCredentials", () => {
     const creds: StoredCredentials = {
       version: CREDENTIALS_FILE_VERSION,
       refresh_token: "1//0-test-refresh-token-xxxxx",
-      customer_id: "3741961572",
+      customer_id: "1234567890",
       customer_name: "Drak Marketing",
-      mcc_customer_id: "6761396070",
+      mcc_customer_id: "9998887777",
       obtained_at: new Date().toISOString(),
       scopes: ["https://www.googleapis.com/auth/adwords"],
     };
@@ -166,9 +166,9 @@ describe("resolveCredentials priority chain", () => {
     process.env.GOOGLE_ADS_CLIENT_SECRET = "x".repeat(30);
     process.env.GOOGLE_ADS_DEVELOPER_TOKEN = "x".repeat(30);
     process.env.GOOGLE_ADS_REFRESH_TOKEN = "x".repeat(30);
-    process.env.GOOGLE_ADS_CUSTOMER_ID = "374-196-1572";
+    process.env.GOOGLE_ADS_CUSTOMER_ID = "123-456-7890";
     const resolved = resolveCredentials(freshPath());
-    expect(resolved.customer_id).toBe("374-196-1572");
+    expect(resolved.customer_id).toBe("123-456-7890");
     const validated = validateResolvedCredentials(resolved);
     expect(validated.valid).toBe(true);
   });

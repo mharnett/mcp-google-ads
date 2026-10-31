@@ -1,6 +1,6 @@
 // Demand Gen asset-automation policy, read from the client's own policy file
 // at <client folder>/google_ads/config/platform_policy.yaml -- the same file the
-// client's Python DG builders and its daily audit read (forcepoint repo:
+// client's Python DG builders and its daily audit read (client repo:
 // google_ads/shared/dg_asset_automation.py). Behaviour mirrors that module:
 //
 //   * No policy file (or no client folder) -> default-off for both types, the

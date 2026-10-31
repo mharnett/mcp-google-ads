@@ -62,10 +62,10 @@ describe("buildCampaignCreatePayload — DEMAND_GEN channel", () => {
     // masked `request_error: UNKNOWN` on operations.create.location, and the flag
     // is IMMUTABLE after creation — the campaign can only be rebuilt, never fixed.
     //
-    // That is the exact configuration behind the 2026-07-16 Forcepoint geo leak:
+    // That is the exact configuration behind the 2026-07-16 client geo leak:
     // $37,187 of $42,044 (88.4%) spent in countries the campaigns never targeted,
     // reporting a plausible $137 CPA throughout. Reproduced 2026-08-13 building the
-    // Q3 retargeting flight — campaign 24140358400 had to be removed.
+    // Q3 retargeting flight — the campaign had to be removed.
     const plan = buildCampaignCreatePayload({
       name: "DG Upgraded Targeting",
       budget_amount_micros: 5_000_000,
@@ -235,7 +235,7 @@ describe("buildCampaignCreatePayload — geo_target_type_setting always PRESENCE
 
 // Lead form rule (2026-10-07). Lives beside the network_settings defaults in
 // campaignBuilder.ts: a Google-hosted lead form is never created or attached
-// unless the user explicitly asked for one. Origin: Forcepoint, a lead form
+// unless the user explicitly asked for one. Origin: a client, a lead form
 // on 22 Search campaigns from 10 July, 555 junk submits, none imported.
 import {
   LEAD_FORMS_REQUIRE_EXPLICIT_REQUEST,

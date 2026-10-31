@@ -15,7 +15,7 @@ export function buildAdGroupAdResourceName(
 
 // The Ad resource itself (as opposed to the adGroupAd link) is
 // `customers/{cid}/ads/{adId}` -- no adGroupId component. An Ad can be
-// linked into MORE THAN ONE ad_group_ad (confirmed live on the Neon CRM
+// linked into MORE THAN ONE ad_group_ad (confirmed live on a client
 // account), so this resource name is what AdService.MutateAds needs to
 // edit the ad's content in place; it is NOT the same resource as
 // buildAdGroupAdResourceName above.

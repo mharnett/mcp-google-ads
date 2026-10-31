@@ -12,8 +12,8 @@ export GOOGLE_ADS_CLIENT_ID=$(keychain_get "GOOGLE_ADS_CLIENT_ID" "google-ads-mc
 export GOOGLE_ADS_CLIENT_SECRET=$(keychain_get "GOOGLE_ADS_CLIENT_SECRET" "google-ads-mcp" 2>/dev/null)
 # Write and read-only branches select a different Keychain ITEM, and an item is
 # (service, account) — not account alone. The write credential is
-# ads-automation@drakmarketing.com, a STANDARD-role user on the DrakMarketing
-# MCC that is deliberately NOT mark@'s admin login; its token was already
+# the automation service account, a STANDARD-role user on the agency
+# MCC that is deliberately NOT the human admin login; its token was already
 # stored under its own service name, so both halves vary here.
 if [ "$GOOGLE_ADS_MCP_WRITE" = "true" ]; then
   GOOGLE_ADS_REFRESH_TOKEN_SERVICE=GOOGLE_ADS_REFRESH_TOKEN_AUTOMATION

@@ -6,9 +6,9 @@ video management IS feasible and is now shipped** as `google_ads_update_video_ad
 
 ## 2026-07-18 finding: ad-level `video_responsive_ad.videos` updates ARE allowed
 
-Verified live on Forcepoint (customer 494-825-2953): `AdService`-style update via
+Verified live on a client account: `AdService`-style update via
 GoogleAdsService mutate, entity `ad` (`customers/X/ads/Y`), field mask
-`video_responsive_ad.videos`, succeeded against all 5 Safeguard AI YouTube reach ads —
+`video_responsive_ad.videos`, succeeded against all 5 of the account's YouTube reach ads —
 in-place edit (same ad IDs), 3 → 5 videos each. YouTube video asset creation via
 `AssetService` also works. Campaign-level mutates (pause, targeting, frequency caps,
 bidding) remain MUTATE_NOT_ALLOWED. Constraint: source videos must be Public or Unlisted;
@@ -52,8 +52,8 @@ deterministically and hand it back to the operator to paste into Google Ads → 
 - **Testable in TS** (this is the value vs. a static script): shape tests asserting the emitted
   script contains the right campaign names, geo IDs, audience IDs, video IDs, DRY_RUN scaffold,
   and N campaigns. Template versioned so a Scripts-API change is a one-file fix.
-- **Prior art:** a hand-written instance of exactly this script lives in the Forcepoint repo at
-  `google_ads/scripts/youtube_reach_populate.ads.js` (5 Safeguard AI TOFU reach campaigns).
+- **Prior art:** a hand-written instance of exactly this script lives in a client repo
+  (5 TOFU reach campaigns).
   Generalize that into the template.
 
 ### Open questions before building

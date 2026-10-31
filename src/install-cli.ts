@@ -105,7 +105,7 @@ function printHelp(): void {
       "",
       "Usage:",
       "  npx mcp-google-ads-install",
-      "  npx mcp-google-ads-install --customer-id 745-851-7309",
+      "  npx mcp-google-ads-install --customer-id 111-222-3333",
       "",
       "Options:",
       "  --customer-id <id>   Pin the customer ID in the config (skips auth picker later)",

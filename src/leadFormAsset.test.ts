@@ -7,13 +7,13 @@ import {
 function baseInput(overrides: Partial<LeadFormInput> = {}): LeadFormInput {
   return {
     name: "RDR Lead Form",
-    business_name: "Neon One",
+    business_name: "Acme Corp",
     call_to_action: "DOWNLOAD",
     call_to_action_description: "Get the free report",
     headline: "Recurring Donor Report 2026",
     description: "Free benchmarks across 100k+ nonprofits.",
-    privacy_policy_url: "https://neonone.com/privacy/",
-    final_urls: ["https://neonone.com/recurring-donor-report-2026/"],
+    privacy_policy_url: "https://example.com/privacy/",
+    final_urls: ["https://example.com/recurring-donor-report-2026/"],
     post_submit_headline: "Thanks — check email",
     post_submit_description: "Your copy of the report is on its way.",
     post_submit_call_to_action: "VISIT_SITE",
@@ -55,14 +55,14 @@ describe("validateLeadFormInput", () => {
 
   it("rejects non-https privacy_policy_url", () => {
     const r = validateLeadFormInput(
-      baseInput({ privacy_policy_url: "http://neonone.com/privacy" })
+      baseInput({ privacy_policy_url: "http://example.com/privacy" })
     );
     expect(r.valid).toBe(false);
     expect(r.errors.some((e) => /privacy_policy_url must be a valid https/.test(e))).toBe(true);
   });
 
   it("rejects malformed privacy_policy_url", () => {
-    const r = validateLeadFormInput(baseInput({ privacy_policy_url: "neonone.com" }));
+    const r = validateLeadFormInput(baseInput({ privacy_policy_url: "example.com" }));
     expect(r.valid).toBe(false);
   });
 
@@ -156,7 +156,7 @@ describe("validateLeadFormInput", () => {
 
   it("rejects non-https final_urls", () => {
     const r = validateLeadFormInput(
-      baseInput({ final_urls: ["http://neonone.com/report"] })
+      baseInput({ final_urls: ["http://example.com/report"] })
     );
     expect(r.valid).toBe(false);
     expect(r.errors.some((e) => /final_urls.*https/i.test(e))).toBe(true);

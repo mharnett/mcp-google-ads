@@ -10,7 +10,7 @@ import {
   isStrategyLooseningChange,
 } from "./biddingUpdate.js";
 
-const RN = "customers/4948252953/campaigns/22989093772";
+const RN = "customers/9876543210/campaigns/22989093772";
 
 // The bidding-payload oneof fields we care about (excludes resource_name).
 const BIDDING_KEYS = [
@@ -142,7 +142,7 @@ describe("BIDDING_TYPE_ENUM_TO_NAME", () => {
 describe("wouldDetachPortfolioStrategy", () => {
   it("returns true for a populated portfolio strategy resource name", () => {
     expect(
-      wouldDetachPortfolioStrategy("customers/4948252953/biddingStrategies/111")
+      wouldDetachPortfolioStrategy("customers/9876543210/biddingStrategies/111")
     ).toBe(true);
   });
 
@@ -164,20 +164,20 @@ describe("PortfolioDetachBlocked", () => {
     const err = new PortfolioDetachBlocked(
       "22989093772",
       "Brand — Search",
-      "customers/4948252953/biddingStrategies/111"
+      "customers/9876543210/biddingStrategies/111"
     );
     expect(err).toBeInstanceOf(Error);
     expect(err.campaignId).toBe("22989093772");
     expect(err.campaignName).toBe("Brand — Search");
     expect(err.portfolioStrategyResource).toBe(
-      "customers/4948252953/biddingStrategies/111"
+      "customers/9876543210/biddingStrategies/111"
     );
-    expect(err.message).toContain("customers/4948252953/biddingStrategies/111");
+    expect(err.message).toContain("customers/9876543210/biddingStrategies/111");
     expect(err.message).toContain("google_ads_detach_portfolio_bid_strategy");
   });
 });
 
-// Origin: 2026-07-31 Forcepoint session — 4 live campaigns' target CPA was
+// Origin: 2026-07-31 client session — 4 live campaigns' target CPA was
 // changed via updateCampaignBidding with no guard at all (a companion
 // magnitude-ceiling gate exists in a DIFFERENT repo, automation/quality-
 // control's gads_apply.py, DEFAULT_MAGNITUDE_CEILING_PCT=20.0, but has zero

@@ -47,7 +47,7 @@ export function buildAdGroupCreatePayload(input: AdGroupCreateInput): AdGroupCre
 
   // DG safety gate: Optimized Targeting OFF on every DG ad group at creation.
   // Google's default is ON and routinely expands beyond the audiences we attach.
-  // Mirror of Forcepoint script-side rule in create_insider_risk_demand_gen.py.
+  // Mirrors the same rule in a client's script-side DG builder.
   if (isDemandGen) {
     payload.optimized_targeting_enabled = false;
   }

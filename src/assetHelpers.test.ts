@@ -338,7 +338,7 @@ describe("buildReplaceSitelinkDryRun", () => {
 });
 
 describe("partitionAssetLinksByParentStatus", () => {
-  // Regression guard for the 2026-08-11 Forcepoint sitelink-QA fix: Google Ads
+  // Regression guard for the 2026-08-11 client sitelink-QA fix: Google Ads
   // rejects campaign_asset/ad_group_asset mutate ops (create AND remove) whose
   // parent campaign/ad group is REMOVED -- OPERATION_NOT_PERMITTED_FOR_REMOVED_RESOURCE
   // -- even when the link's own status is still ENABLED. replaceSitelinkUrl must

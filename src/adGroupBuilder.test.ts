@@ -34,7 +34,7 @@ describe("buildAdGroupCreatePayload", () => {
 
   it("DG ad group has Optimized Targeting explicitly disabled at creation", () => {
     // Google's default is optimized_targeting_enabled = true, which expands
-    // beyond attached audiences. Forcepoint policy is OFF on every DG ad group.
+    // beyond attached audiences. Our policy is OFF on every DG ad group.
     const payload = buildAdGroupCreatePayload({
       customer_id_clean: "1234567890",
       name: "DG AG",

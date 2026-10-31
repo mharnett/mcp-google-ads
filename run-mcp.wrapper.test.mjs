@@ -206,31 +206,24 @@ describe.skipIf(!IS_LOCAL_DEV_MACHINE)(
 // looks identical to a permissions problem on the account. The JOIN test below
 // is what holds that invariant for whichever clients exist.
 //
-// Informian (Tracers + IRBsearch) was the first such client and is gone: they
-// declined on 2026-10-09 and were archived to ~/clients-archive/informian. The
-// four tests that asserted its export are removed with the export itself, and
-// this guard replaces them — two of those four would otherwise have kept
-// passing vacuously once the feature was deleted.
-//
-// Flowspace followed. Its VBB restatements job was decommissioned 2026-09-15,
-// Google Ads access to customer 745-851-7309 was removed, and every run from
-// 2026-09-04 had been failing USER_PERMISSION_DENIED. No flowspace client
-// remains in config.json either, so nothing could route to that token.
+// Every client that once needed its own token has since been decommissioned
+// (access removed, jobs retired), and their exports were deleted. This guard
+// keeps a stale per-client export from coming back: any
+// `export GOOGLE_ADS_REFRESH_TOKEN_<NAME>=` line must be listed in
+// ALLOWED_PER_CLIENT_TOKEN_EXPORTS. Adding a new per-client token is a
+// deliberate two-place change: the export in run-mcp.sh and its name here.
 
-const DECOMMISSIONED_CLIENT_ENVS = [
-  "GOOGLE_ADS_REFRESH_TOKEN_INFORMIAN",
-  "GOOGLE_ADS_REFRESH_TOKEN_FLOWSPACE",
-];
+const ALLOWED_PER_CLIENT_TOKEN_EXPORTS = [];
 
-describe("run-mcp.sh decommissioned per-client tokens", () => {
+describe("run-mcp.sh per-client tokens", () => {
   // Reading the script rather than spawning it: absence of an export is not
   // observable from the environment of a process that never set it.
   const script = readFileSync(SCRIPT, "utf8");
 
-  it.each(DECOMMISSIONED_CLIENT_ENVS)("no longer exports %s", (envVar) => {
-    expect(script).not.toContain(envVar);
+  it("exports no per-client refresh token outside the allowlist", () => {
+    const exported = [...script.matchAll(/^\s*export\s+(GOOGLE_ADS_REFRESH_TOKEN_[A-Z0-9_]+)=/gm)].map((m) => m[1]);
+    expect(exported.filter((v) => !ALLOWED_PER_CLIENT_TOKEN_EXPORTS.includes(v))).toEqual([]);
   });
-
 });
 
 // ============================================

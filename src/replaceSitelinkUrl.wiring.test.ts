@@ -1,5 +1,5 @@
 /**
- * Regression test for the 2026-08-11 Forcepoint sitelink-QA fix.
+ * Regression test for the 2026-08-11 client sitelink-QA fix.
  *
  * BUG: `replaceSitelinkUrl` migrated every ENABLED campaign_asset/ad_group_asset
  * link of the old sitelink asset to the new one, without checking whether the
@@ -9,8 +9,8 @@
  * when the link's own status is still ENABLED (a real, observed account state:
  * a campaign removed years ago can leave old ENABLED sitelink links behind,
  * permanently frozen). One such link in the batch failed the WHOLE call, not
- * just that link -- confirmed live against Forcepoint assets 280051853776 and
- * 128386238593, both of which errored on the very first attempt.
+ * just that link -- confirmed live against two client sitelink assets, both of
+ * which errored on the very first attempt.
  *
  * This is a WIRING bug: partitionAssetLinksByParentStatus (assetHelpers.ts) is
  * unit tested in isolation and correct; the defect is that replaceSitelinkUrl
@@ -31,7 +31,7 @@ import { describe, expect, it, beforeEach } from "vitest";
 import { GoogleAdsManager } from "./index.js";
 
 const CID = "1234567890";
-const OLD_ASSET_ID = "280051853776";
+const OLD_ASSET_ID = "100000000001";
 const OLD_ASSET_RN = `customers/${CID}/assets/${OLD_ASSET_ID}`;
 const NEW_ASSET_RN = `customers/${CID}/assets/999888777`;
 
@@ -77,7 +77,7 @@ function makeFakeCustomer() {
           asset: {
             id: Number(OLD_ASSET_ID),
             type: 13, // SITELINK
-            final_urls: ["https://www.forcepoint.com/lp/forcepoint-data-risk-assessment"],
+            final_urls: ["https://www.example.com/lp/data-risk-assessment"],
             sitelink_asset: {
               link_text: "Free Data Risk Assessment",
               description1: "Get a free risk assessment",
@@ -200,7 +200,7 @@ describe("replaceSitelinkUrl -- REMOVED-parent link handling", () => {
   it("migrates the live campaign/ad-group links without ever touching the REMOVED-parent ones", async () => {
     const result = await mgr.replaceSitelinkUrl(CID, {
       old_asset_id: OLD_ASSET_ID,
-      new_final_urls: ["https://www.forcepoint.com/forcepoint-data-risk-assessment"],
+      new_final_urls: ["https://www.example.com/data-risk-assessment"],
     });
 
     // The REMOVED-parent links must never reach a mutate call -- if they did,

@@ -19,9 +19,9 @@
 // {
 //   "version": 1,
 //   "refresh_token": "1//0...",
-//   "customer_id": "3741961572",
+//   "customer_id": "1234567890",
 //   "customer_name": "Drak Marketing",
-//   "mcc_customer_id": "6761396070" | null,
+//   "mcc_customer_id": "9998887777" | null,
 //   "obtained_at": "2026-04-12T...",
 //   "scopes": ["https://www.googleapis.com/auth/adwords"]
 // }

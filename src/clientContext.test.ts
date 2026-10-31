@@ -4,7 +4,7 @@
  * Before this change, getClientFromWorkingDir returned a bare
  * `ClientConfig | null`: the first client whose folder/key matched the cwd
  * "won", silently hiding every other equally-plausible client sharing that
- * folder (e.g. multiple per-account keys all living under clients/imvu).
+ * folder (e.g. multiple per-account keys all living under clients/acme).
  * A caller acting on that single client could mutate the wrong Google Ads
  * account with no indication another candidate existed.
  *
@@ -19,35 +19,35 @@ import { getClientFromWorkingDir } from "./index.js";
 const FIXTURE_CONFIG = {
   google_ads: { mcc_customer_id: "123-456-7890" },
   clients: {
-    "imvu-android": {
-      customer_id: "551-956-7152",
-      name: "IMVU Android",
-      folder: "/Users/mark/claude-code/clients/imvu",
+    "acme-android": {
+      customer_id: "100-000-0001",
+      name: "Acme Android",
+      folder: "/home/user/work/clients/acme",
     },
-    "imvu-desktop": {
-      customer_id: "732-432-3950",
-      name: "IMVU Desktop 2023",
-      folder: "/Users/mark/claude-code/clients/imvu",
+    "acme-desktop": {
+      customer_id: "100-000-0002",
+      name: "Acme Desktop 2023",
+      folder: "/home/user/work/clients/acme",
     },
-    "imvu-android-2025": {
-      customer_id: "326-861-4219",
-      name: "IMVU Android 2025",
-      folder: "/Users/mark/claude-code/clients/imvu",
+    "acme-android-2025": {
+      customer_id: "100-000-0003",
+      name: "Acme Android 2025",
+      folder: "/home/user/work/clients/acme",
     },
-    "bona-na": {
-      customer_id: "848-678-4588",
-      name: "Bona Pro North America",
-      folder: "/Users/mark/claude-code/clients/bona",
+    "globex-na": {
+      customer_id: "200-000-0001",
+      name: "Globex North America",
+      folder: "/home/user/work/clients/globex",
     },
-    "bona-intl": {
-      customer_id: "761-663-7654",
-      name: "Bona | International Professional",
-      folder: "/Users/mark/claude-code/clients/bona",
+    "globex-intl": {
+      customer_id: "200-000-0002",
+      name: "Globex | International",
+      folder: "/home/user/work/clients/globex",
     },
-    forcepoint: {
-      customer_id: "494-825-2953",
-      name: "Forcepoint",
-      folder: "/Users/mark/claude-code/clients/forcepoint",
+    initech: {
+      customer_id: "300-000-0001",
+      name: "Initech",
+      folder: "/home/user/work/clients/initech",
     },
   },
   defaults: {
@@ -58,45 +58,45 @@ const FIXTURE_CONFIG = {
 } as any;
 
 describe("getClientFromWorkingDir", () => {
-  it("returns several-matches with all 3 candidates for a cwd shared by multiple IMVU keys", () => {
-    const result = getClientFromWorkingDir(FIXTURE_CONFIG, "/Users/mark/claude-code/clients/imvu");
+  it("returns several-matches with all 3 candidates for a cwd shared by multiple Acme keys", () => {
+    const result = getClientFromWorkingDir(FIXTURE_CONFIG, "/home/user/work/clients/acme");
 
     expect(result.match).toBe("several");
     expect(result.client).toBeNull();
     expect(result.candidates).toHaveLength(3);
     expect(result.candidates.map((c) => [c.name, c.customer_id]).sort()).toEqual(
       [
-        ["IMVU Android", "551-956-7152"],
-        ["IMVU Desktop 2023", "732-432-3950"],
-        ["IMVU Android 2025", "326-861-4219"],
+        ["Acme Android", "100-000-0001"],
+        ["Acme Desktop 2023", "100-000-0002"],
+        ["Acme Android 2025", "100-000-0003"],
       ].sort()
     );
   });
 
-  it("returns several-matches with both candidates for a cwd shared by the Bona keys", () => {
-    const result = getClientFromWorkingDir(FIXTURE_CONFIG, "/Users/mark/claude-code/clients/bona");
+  it("returns several-matches with both candidates for a cwd shared by the Globex keys", () => {
+    const result = getClientFromWorkingDir(FIXTURE_CONFIG, "/home/user/work/clients/globex");
 
     expect(result.match).toBe("several");
     expect(result.candidates).toHaveLength(2);
     expect(result.candidates.map((c) => [c.name, c.customer_id]).sort()).toEqual(
       [
-        ["Bona Pro North America", "848-678-4588"],
-        ["Bona | International Professional", "761-663-7654"],
+        ["Globex North America", "200-000-0001"],
+        ["Globex | International", "200-000-0002"],
       ].sort()
     );
   });
 
   it("returns exactly-one match for a cwd matching a single client (unchanged behavior)", () => {
-    const result = getClientFromWorkingDir(FIXTURE_CONFIG, "/Users/mark/claude-code/clients/forcepoint");
+    const result = getClientFromWorkingDir(FIXTURE_CONFIG, "/home/user/work/clients/initech");
 
     expect(result.match).toBe("one");
     expect(result.client).not.toBeNull();
-    expect(result.client?.name).toBe("Forcepoint");
-    expect(result.client?.customer_id).toBe("494-825-2953");
+    expect(result.client?.name).toBe("Initech");
+    expect(result.client?.customer_id).toBe("300-000-0001");
   });
 
   it("returns no-match for a cwd matching no configured client", () => {
-    const result = getClientFromWorkingDir(FIXTURE_CONFIG, "/Users/mark/claude-code");
+    const result = getClientFromWorkingDir(FIXTURE_CONFIG, "/home/user/work");
 
     expect(result.match).toBe("none");
     expect(result.client).toBeNull();
@@ -113,14 +113,14 @@ describe("getClientFromWorkingDir", () => {
       ...FIXTURE_CONFIG,
       clients: {
         ...FIXTURE_CONFIG.clients,
-        "imvu-legacy": {
+        "acme-legacy": {
           customer_id: "111-111-1111",
-          name: "IMVU Legacy",
+          name: "Acme Legacy",
           folder: "/some/unrelated/path",
         },
-        "imvu-legacy-2": {
+        "acme-legacy-2": {
           customer_id: "222-222-2222",
-          name: "IMVU Legacy Two",
+          name: "Acme Legacy Two",
           folder: "/another/unrelated/path",
         },
       },
@@ -128,12 +128,12 @@ describe("getClientFromWorkingDir", () => {
 
     const result = getClientFromWorkingDir(
       fallbackConfig,
-      "/Users/mark/claude-code/workspaces/imvu-legacy-2-workspace"
+      "/home/user/work/workspaces/acme-legacy-2-workspace"
     );
 
     expect(result.match).toBe("several");
     expect(result.candidates.map((c) => c.name).sort()).toEqual(
-      ["IMVU Legacy", "IMVU Legacy Two"].sort()
+      ["Acme Legacy", "Acme Legacy Two"].sort()
     );
   });
 });

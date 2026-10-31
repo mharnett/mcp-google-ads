@@ -1202,7 +1202,7 @@ export const tools: Tool[] = [
         customer_id: { type: "string" },
         ad_resource_name: {
           type: "string",
-          description: "Full resource name (e.g. customers/7158566222/adGroupAds/200360442360~814405338431) or numeric ad ID (814405338431). If numeric ID, the tool resolves it to the full name.",
+          description: "Full resource name (e.g. customers/1234567890/adGroupAds/111111111111~222222222222) or numeric ad ID (222222222222). If numeric ID, the tool resolves it to the full name.",
         },
         headlines: {
           type: "array",
@@ -1535,7 +1535,7 @@ export const tools: Tool[] = [
         },
         new_final_url: {
           type: "string",
-          description: "The new final URL to set on all ads (e.g. 'https://www.forcepoint.com/form/dlp-free-trial').",
+          description: "The new final URL to set on all ads (e.g. 'https://www.example.com/form/free-trial').",
         },
         execute: {
           type: "boolean",
