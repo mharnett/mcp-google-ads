@@ -68,7 +68,7 @@ REFACTOR: none.
 ### Cycle 8e — isDemandGenAdGroup accepts parent-campaign signal [hotfix 2026-04-17]
 RED: 5 tests for new pure helper `isDemandGenAdGroup(row)`. Reason for red:
 the function didn't exist. Discovered during live DG ad creation on
-Survey Measure — UI-created DG campaigns auto-generated ad groups whose
+A client — UI-created DG campaigns auto-generated ad groups whose
 ad_group.type returns undefined from google-ads-api v23 (because proto
 value 21 isn't in the lib's enum map), causing the old type-only guard
 to reject valid DG ad groups.
@@ -113,7 +113,7 @@ RED: `budget is dedicated (not shared)` — field was undefined; Google Ads
 API defaults to explicitly_shared=true when omitted, which makes auto-
 bidding strategies (MAXIMIZE_CONVERSIONS, TARGET_CPA, etc.) reject with
 "Bidding strategy type is incompatible with shared budget". Discovered
-during live DG campaign creation attempt for Survey Measure — 4 orphan
+during live DG campaign creation attempt for a client — 4 orphan
 shared budgets created before the fix.
 GREEN: added `explicitly_shared: false` to the budget payload in
 `campaignBuilder.ts` (+8 LOC incl comment). Updated back-compat test to
