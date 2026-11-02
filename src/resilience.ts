@@ -74,7 +74,55 @@ function truncateArraysRecursively(obj: any, depth: number = 0): boolean {
   return truncated;
 }
 
-export function safeResponse<T>(data: T, context: string): T {
+/**
+ * Shape returned in place of a top-level array that had to be cut to fit.
+ *
+ * A bare array has nowhere to carry a marker, so before this wrapper existed a
+ * truncated GAQL result came back as an ordinary-looking, shorter array -- and
+ * any total summed from it was understated with no warning.
+ */
+export interface TruncatedRows<R = unknown> {
+  rows: R[];
+  truncated: true;
+  original_count: number;
+  returned_count: number;
+}
+
+export function isTruncatedRows(value: unknown): value is TruncatedRows {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    (value as any).truncated === true &&
+    Array.isArray((value as any).rows) &&
+    typeof (value as any).original_count === "number"
+  );
+}
+
+/** Rows of a safeResponse result, whether it came back bare or wrapped. */
+export function rowsOf<R>(value: R[] | TruncatedRows<R>): R[] {
+  return Array.isArray(value) ? value : value.rows;
+}
+
+export function safeResponse<T>(data: T[], context: string): T[] | TruncatedRows<T>;
+export function safeResponse<T>(data: T, context: string): T;
+export function safeResponse(data: unknown, context: string): unknown {
+  if (Array.isArray(data)) {
+    if (Buffer.byteLength(JSON.stringify(data), "utf-8") <= MAX_RESPONSE_SIZE) return data;
+    const wrapper: TruncatedRows = {
+      rows: JSON.parse(JSON.stringify(data)),
+      truncated: true,
+      original_count: data.length,
+      returned_count: data.length,
+    };
+    const shrunk = shrinkToFit(wrapper, context) as TruncatedRows;
+    shrunk.returned_count = shrunk.rows.length;
+    return shrunk;
+  }
+  return shrinkToFit(data, context);
+}
+
+function shrinkToFit<T>(data: T, context: string): T {
   let current = data;
   for (let pass = 0; pass < 10; pass++) {
     const jsonStr = JSON.stringify(current);

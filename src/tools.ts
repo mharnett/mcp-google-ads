@@ -18,7 +18,7 @@ export const tools: Tool[] = [
   },
   {
     name: "google_ads_list_campaigns",
-    description: "List all campaigns for the current client account",
+    description: "List all campaigns for the current client account Returns an array of rows. If the result is too large for one response it is cut and returned as { rows, truncated: true, original_count, returned_count } instead: that result is PARTIAL, so counts or totals computed from it are understated. Narrow the date range or filters and re-run until truncated is absent.",
     inputSchema: {
       additionalProperties: false,
       type: "object",
@@ -32,7 +32,7 @@ export const tools: Tool[] = [
   },
   {
     name: "google_ads_list_ad_groups",
-    description: "List ad groups, optionally filtered by campaign",
+    description: "List ad groups, optionally filtered by campaign Returns an array of rows. If the result is too large for one response it is cut and returned as { rows, truncated: true, original_count, returned_count } instead: that result is PARTIAL, so counts or totals computed from it are understated. Narrow the date range or filters and re-run until truncated is absent.",
     inputSchema: {
       additionalProperties: false,
       type: "object",
@@ -634,7 +634,7 @@ export const tools: Tool[] = [
   // ============================================
   {
     name: "google_ads_keyword_performance",
-    description: "Get keyword performance report with metrics including impressions, clicks, cost, conversions, quality score components (quality score, expected CTR, ad relevance, landing page experience), and impression share metrics. Includes paused and removed keywords that had activity in the date range (status column labels them) — historical metrics are never filtered by current status.",
+    description: "Get keyword performance report with metrics including impressions, clicks, cost, conversions, quality score components (quality score, expected CTR, ad relevance, landing page experience), and impression share metrics. Includes paused and removed keywords that had activity in the date range (status column labels them) — historical metrics are never filtered by current status. Returns an array of rows. If the result is too large for one response it is cut and returned as { rows, truncated: true, original_count, returned_count } instead: that result is PARTIAL, so counts or totals computed from it are understated. Narrow the date range or filters and re-run until truncated is absent.",
     inputSchema: {
       additionalProperties: false,
       type: "object",
@@ -651,7 +651,7 @@ export const tools: Tool[] = [
   },
   {
     name: "google_ads_keyword_performance_by_conversion",
-    description: "Get keyword performance broken down by conversion action. Shows which keywords drive which conversion types (e.g., form fills, MQLs, etc.). Includes paused and removed keywords that had activity in the date range (status column labels them) — historical metrics are never filtered by current status.",
+    description: "Get keyword performance broken down by conversion action. Shows which keywords drive which conversion types (e.g., form fills, MQLs, etc.). Includes paused and removed keywords that had activity in the date range (status column labels them) — historical metrics are never filtered by current status. Returns an array of rows. If the result is too large for one response it is cut and returned as { rows, truncated: true, original_count, returned_count } instead: that result is PARTIAL, so counts or totals computed from it are understated. Narrow the date range or filters and re-run until truncated is absent.",
     inputSchema: {
       additionalProperties: false,
       type: "object",
@@ -668,7 +668,7 @@ export const tools: Tool[] = [
   },
   {
     name: "google_ads_search_term_report",
-    description: "Get search term report showing actual search queries that triggered ads, with the keyword they matched to.",
+    description: "Get search term report showing actual search queries that triggered ads, with the keyword they matched to. Returns an array of rows. If the result is too large for one response it is cut and returned as { rows, truncated: true, original_count, returned_count } instead: that result is PARTIAL, so counts or totals computed from it are understated. Narrow the date range or filters and re-run until truncated is absent.",
     inputSchema: {
       additionalProperties: false,
       type: "object",
@@ -686,7 +686,7 @@ export const tools: Tool[] = [
   },
   {
     name: "google_ads_search_term_report_by_conversion",
-    description: "Get search term report broken down by conversion action. Shows which search queries drive which conversion types.",
+    description: "Get search term report broken down by conversion action. Shows which search queries drive which conversion types. Returns an array of rows. If the result is too large for one response it is cut and returned as { rows, truncated: true, original_count, returned_count } instead: that result is PARTIAL, so counts or totals computed from it are understated. Narrow the date range or filters and re-run until truncated is absent.",
     inputSchema: {
       additionalProperties: false,
       type: "object",
@@ -704,7 +704,7 @@ export const tools: Tool[] = [
   },
   {
     name: "google_ads_ad_performance",
-    description: "Get ad performance report with metrics, ad copy (headlines/descriptions), final URLs, and ad strength rating. Includes paused and removed ads that had activity in the date range (status column labels them) — historical metrics are never filtered by current status.",
+    description: "Get ad performance report with metrics, ad copy (headlines/descriptions), final URLs, and ad strength rating. Includes paused and removed ads that had activity in the date range (status column labels them) — historical metrics are never filtered by current status. Returns an array of rows. If the result is too large for one response it is cut and returned as { rows, truncated: true, original_count, returned_count } instead: that result is PARTIAL, so counts or totals computed from it are understated. Narrow the date range or filters and re-run until truncated is absent.",
     inputSchema: {
       additionalProperties: false,
       type: "object",
@@ -720,7 +720,7 @@ export const tools: Tool[] = [
   },
   {
     name: "google_ads_ad_performance_by_conversion",
-    description: "Get ad performance broken down by conversion action. Shows which ads drive which conversion types. Includes paused and removed ads that had activity in the date range (status column labels them) — historical metrics are never filtered by current status.",
+    description: "Get ad performance broken down by conversion action. Shows which ads drive which conversion types. Includes paused and removed ads that had activity in the date range (status column labels them) — historical metrics are never filtered by current status. Returns an array of rows. If the result is too large for one response it is cut and returned as { rows, truncated: true, original_count, returned_count } instead: that result is PARTIAL, so counts or totals computed from it are understated. Narrow the date range or filters and re-run until truncated is absent.",
     inputSchema: {
       additionalProperties: false,
       type: "object",
@@ -736,7 +736,7 @@ export const tools: Tool[] = [
   },
   {
     name: "google_ads_list_conversion_actions",
-    description: "List all available conversion actions (e.g., form fills, MQLs, etc.) to understand what conversion tracking is set up.",
+    description: "List all available conversion actions (e.g., form fills, MQLs, etc.) to understand what conversion tracking is set up. Returns an array of rows. If the result is too large for one response it is cut and returned as { rows, truncated: true, original_count, returned_count } instead: that result is PARTIAL, so counts or totals computed from it are understated. Narrow the date range or filters and re-run until truncated is absent.",
     inputSchema: {
       additionalProperties: false,
       type: "object",
@@ -764,7 +764,7 @@ export const tools: Tool[] = [
   },
   {
     name: "google_ads_search_term_insight_terms",
-    description: "Drill into a specific search term category to see the individual search terms within it. Requires an insight_id from google_ads_search_term_insights.",
+    description: "Drill into a specific search term category to see the individual search terms within it. Requires an insight_id from google_ads_search_term_insights. Returns an array of rows. If the result is too large for one response it is cut and returned as { rows, truncated: true, original_count, returned_count } instead: that result is PARTIAL, so counts or totals computed from it are understated. Narrow the date range or filters and re-run until truncated is absent.",
     inputSchema: {
       additionalProperties: false,
       type: "object",
@@ -912,7 +912,7 @@ export const tools: Tool[] = [
   },
   {
     name: "google_ads_get_campaign_diagnostics",
-    description: "Diagnose why a campaign is not spending or serving. Returns primary_status, primary_status_reasons, serving_status, budget, bidding strategy, and last-7-days metrics in a single call. Use this as the first step when a campaign has unexpectedly low spend or impressions. Includes paused and removed campaigns that had activity in the date range (status column labels them) — historical metrics are never filtered by current status.",
+    description: "Diagnose why a campaign is not spending or serving. Returns primary_status, primary_status_reasons, serving_status, budget, bidding strategy, and last-7-days metrics in a single call. Use this as the first step when a campaign has unexpectedly low spend or impressions. Includes paused and removed campaigns that had activity in the date range (status column labels them) — historical metrics are never filtered by current status. Returns an array of rows. If the result is too large for one response it is cut and returned as { rows, truncated: true, original_count, returned_count } instead: that result is PARTIAL, so counts or totals computed from it are understated. Narrow the date range or filters and re-run until truncated is absent.",
     inputSchema: {
       additionalProperties: false,
       type: "object",
@@ -928,7 +928,7 @@ export const tools: Tool[] = [
   },
   {
     name: "google_ads_get_ad_strength",
-    description: "Get the ad strength rating (POOR, AVERAGE, GOOD, EXCELLENT) for RSAs in a campaign or ad group, along with headline/description counts. Ad strength below GOOD suppresses delivery. Use this to identify ads that need more creative assets.",
+    description: "Get the ad strength rating (POOR, AVERAGE, GOOD, EXCELLENT) for RSAs in a campaign or ad group, along with headline/description counts. Ad strength below GOOD suppresses delivery. Use this to identify ads that need more creative assets. Returns an array of rows. If the result is too large for one response it is cut and returned as { rows, truncated: true, original_count, returned_count } instead: that result is PARTIAL, so counts or totals computed from it are understated. Narrow the date range or filters and re-run until truncated is absent.",
     inputSchema: {
       additionalProperties: false,
       type: "object",
@@ -949,7 +949,7 @@ export const tools: Tool[] = [
   },
   {
     name: "google_ads_gaql_query",
-    description: "Execute a raw GAQL (Google Ads Query Language) query. Use this for custom reports or accessing any Google Ads API resource not covered by other tools. See https://developers.google.com/google-ads/api/docs/query/overview for GAQL syntax.",
+    description: "Execute a raw GAQL (Google Ads Query Language) query. Use this for custom reports or accessing any Google Ads API resource not covered by other tools. See https://developers.google.com/google-ads/api/docs/query/overview for GAQL syntax. Returns an array of rows. If the result is too large for one response it is cut and returned as { rows, truncated: true, original_count, returned_count } instead: that result is PARTIAL (only returned_count of original_count rows), so never treat it as complete or sum totals from it. Narrow the query (fewer fields, a tighter WHERE or date range, or a LIMIT) and re-run until truncated is absent.",
     inputSchema: {
       additionalProperties: false,
       type: "object",

@@ -377,4 +377,39 @@ describe("Tool Schema Contract", () => {
       expect(tool!.description!.toLowerCase()).toContain("existing");
     });
   });
+  describe("truncation contract for array-returning tools", () => {
+    const ARRAY_TOOLS = [
+      "google_ads_list_campaigns",
+      "google_ads_list_ad_groups",
+      "google_ads_keyword_performance",
+      "google_ads_keyword_performance_by_conversion",
+      "google_ads_search_term_report",
+      "google_ads_search_term_report_by_conversion",
+      "google_ads_ad_performance",
+      "google_ads_ad_performance_by_conversion",
+      "google_ads_list_conversion_actions",
+      "google_ads_search_term_insight_terms",
+      "google_ads_get_campaign_diagnostics",
+      "google_ads_get_ad_strength",
+      "google_ads_gaql_query",
+    ];
+
+    it("every array-returning tool documents the truncated wrapper shape", () => {
+      for (const name of ARRAY_TOOLS) {
+        const tool = tools.find((t) => t.name === name);
+        expect(tool, name).toBeDefined();
+        const d = tool!.description!;
+        expect(d, name).toMatch(/truncated: true/);
+        expect(d, name).toMatch(/original_count/);
+        expect(d, name).toMatch(/returned_count/);
+        expect(d, name).toMatch(/partial/i);
+      }
+    });
+
+    it("gaql_query says a truncated result is partial and the query should be narrowed", () => {
+      const d = tools.find((t) => t.name === "google_ads_gaql_query")!.description!;
+      expect(d).toMatch(/partial/i);
+      expect(d).toMatch(/narrow/i);
+    });
+  });
 });
