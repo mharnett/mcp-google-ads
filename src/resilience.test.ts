@@ -9,22 +9,36 @@ describe("Resilience", () => {
       expect(result).toEqual(data);
     });
 
-    it("should truncate large arrays", () => {
+    it("should return a small top-level array unchanged (still a bare array)", () => {
+      const small = [{ id: 1 }, { id: 2 }];
+      const result = safeResponse(small, "test");
+      expect(Array.isArray(result)).toBe(true);
+      expect(result).toEqual(small);
+    });
+
+    it("should wrap a truncated top-level array (>200KB) with a truncation marker and counts", () => {
       const largeArray = Array.from({ length: 10000 }, (_, i) => ({
         id: i,
         name: `item-${i}`,
         description: "x".repeat(100),
       }));
-      const result = safeResponse(largeArray, "test");
-      expect(Array.isArray(result)).toBe(true);
-      // Truncation halves each pass; result must be strictly smaller AND
-      // the serialized form must fit under the documented 200KB cap.
-      const resultArr = result as any[];
-      expect(resultArr.length).toBeLessThan(largeArray.length);
-      expect(resultArr.length).toBeGreaterThan(0);
-      expect(Buffer.byteLength(JSON.stringify(resultArr), "utf-8")).toBeLessThanOrEqual(200_000);
+      expect(Buffer.byteLength(JSON.stringify(largeArray), "utf-8")).toBeGreaterThan(200_000);
+      const result = safeResponse(largeArray, "test") as any;
+      // A bare array has nowhere to carry a marker, so a cut array must come
+      // back wrapped -- otherwise a partial GAQL result looks complete.
+      expect(Array.isArray(result)).toBe(false);
+      expect(Object.keys(result).sort()).toEqual(["original_count", "returned_count", "rows", "truncated"]);
+      expect(result.truncated).toBe(true);
+      expect(result.original_count).toBe(10000);
+      expect(Array.isArray(result.rows)).toBe(true);
+      expect(result.returned_count).toBe(result.rows.length);
+      expect(result.returned_count).toBeLessThan(result.original_count);
+      expect(result.returned_count).toBeGreaterThan(0);
+      expect(Buffer.byteLength(JSON.stringify(result), "utf-8")).toBeLessThanOrEqual(200_000);
       // Truncation keeps the first N entries (slice from 0)
-      expect(resultArr[0].id).toBe(0);
+      expect(result.rows[0].id).toBe(0);
+      // Input is not mutated
+      expect(largeArray.length).toBe(10000);
     });
 
     it("should truncate large objects with items array", () => {
