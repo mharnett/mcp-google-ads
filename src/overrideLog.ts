@@ -9,6 +9,8 @@
 // Config:
 //   GOOGLE_ADS_MCP_OVERRIDE_LOG          JSONL path (default: <configDir>/overrides.jsonl)
 //   GOOGLE_ADS_MCP_OVERRIDE_WEBHOOK_URL  Slack-compatible incoming webhook ({"text": ...})
+//   GOOGLE_ADS_MCP_OVERRIDE_SLACK_TOKEN  Slack bot token; with _CHANNEL, posts via
+//   GOOGLE_ADS_MCP_OVERRIDE_SLACK_CHANNEL chat.postMessage instead of the webhook
 
 import { appendFile, mkdir } from "node:fs/promises";
 import path from "node:path";
@@ -20,6 +22,9 @@ export interface OverrideLogTarget {
   logPath?: string | null;
   /** Incoming-webhook URL. null disables posting; undefined reads the env var. */
   webhookUrl?: string | null;
+  /** Slack bot token + channel id. Both set -> chat.postMessage, webhook skipped. */
+  slackToken?: string | null;
+  slackChannel?: string | null;
   fetchImpl?: typeof fetch;
 }
 
@@ -43,14 +48,18 @@ export interface OverrideLogResult {
 export function resolveOverrideLogTarget(
   env: NodeJS.ProcessEnv = process.env,
   target: OverrideLogTarget = {}
-): { logPath: string | null; webhookUrl: string | null } {
+): { logPath: string | null; webhookUrl: string | null; slackToken: string | null; slackChannel: string | null } {
   const logPath =
     target.logPath !== undefined
       ? target.logPath
       : env.GOOGLE_ADS_MCP_OVERRIDE_LOG || path.join(configDir, "overrides.jsonl");
   const webhookUrl =
     target.webhookUrl !== undefined ? target.webhookUrl : env.GOOGLE_ADS_MCP_OVERRIDE_WEBHOOK_URL || null;
-  return { logPath, webhookUrl };
+  const slackToken =
+    target.slackToken !== undefined ? target.slackToken : env.GOOGLE_ADS_MCP_OVERRIDE_SLACK_TOKEN || null;
+  const slackChannel =
+    target.slackChannel !== undefined ? target.slackChannel : env.GOOGLE_ADS_MCP_OVERRIDE_SLACK_CHANNEL || null;
+  return { logPath, webhookUrl, slackToken, slackChannel };
 }
 
 export function formatOverrideLine(entry: OverrideEntry): string {
@@ -69,7 +78,7 @@ export async function recordOverride(
   target: OverrideLogTarget = {},
   now: Date = new Date()
 ): Promise<OverrideLogResult> {
-  const { logPath, webhookUrl } = resolveOverrideLogTarget(process.env, target);
+  const { logPath, webhookUrl, slackToken, slackChannel } = resolveOverrideLogTarget(process.env, target);
   const result: OverrideLogResult = { logged: false, log_path: logPath, posted: false };
 
   if (logPath) {
@@ -82,8 +91,23 @@ export async function recordOverride(
     }
   }
 
-  if (webhookUrl) {
-    const doFetch = target.fetchImpl ?? fetch;
+  const doFetch = target.fetchImpl ?? fetch;
+  if (slackToken && slackChannel) {
+    try {
+      const resp = await doFetch("https://slack.com/api/chat.postMessage", {
+        method: "POST",
+        headers: { "Content-Type": "application/json; charset=utf-8", Authorization: `Bearer ${slackToken}` },
+        body: JSON.stringify({ channel: slackChannel, text: formatOverrideLine(entry) }),
+        signal: AbortSignal.timeout(5000),
+      });
+      // Slack returns HTTP 200 with {ok:false,error} on API errors.
+      const data: any = await resp.json().catch(() => ({}));
+      if (resp.ok && data?.ok) result.posted = true;
+      else result.webhook_error = `slack chat.postMessage failed: ${data?.error ?? `HTTP ${resp.status}`}`;
+    } catch (e: any) {
+      result.webhook_error = String(e?.message ?? e);
+    }
+  } else if (webhookUrl) {
     try {
       const resp = await doFetch(webhookUrl, {
         method: "POST",

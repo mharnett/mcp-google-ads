@@ -24,9 +24,12 @@ else
 fi
 export GOOGLE_ADS_REFRESH_TOKEN=$(keychain_get "$GOOGLE_ADS_REFRESH_TOKEN_SERVICE" "$GOOGLE_ADS_REFRESH_TOKEN_ACCOUNT" 2>/dev/null)
 
-# Optional: post each confirm_large_change override to the Drak automation
-# Slack channel (see src/overrideLog.ts). Empty -> file log only, never fatal.
-export GOOGLE_ADS_MCP_OVERRIDE_WEBHOOK_URL=$(keychain_get "SLACK_WEBHOOK_DRAK_AUTOMATION" "drak-ops" 2>/dev/null)
+# Optional: post each confirm_large_change override to #drak-ops via the drak
+# bot (see src/overrideLog.ts). The SLACK_WEBHOOK_DRAK_AUTOMATION webhook DMs
+# Mark, so it is deliberately not used. Empty token -> file log only, never fatal.
+export GOOGLE_ADS_MCP_OVERRIDE_WEBHOOK_URL=""
+export GOOGLE_ADS_MCP_OVERRIDE_SLACK_TOKEN=$(keychain_get "drak-slack-bot-token" "mark" 2>/dev/null)
+export GOOGLE_ADS_MCP_OVERRIDE_SLACK_CHANNEL="C0B281CGPJQ"  # #drak-ops
 
 # Fail fast if any required Keychain lookup returned empty.
 # Per-client tokens above are deliberately NOT listed: they are optional, and a
