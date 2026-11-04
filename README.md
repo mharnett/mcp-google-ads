@@ -132,6 +132,7 @@ Alternatively, set credentials via environment variables (these override `config
 | `GOOGLE_ADS_MCP_WRITE` | No | Set to `true` to expose mutating tools (create/update/pause/enable/remove/apply). Default: read-only. |
 | `GOOGLE_ADS_MCP_OVERRIDE_LOG` | No | JSONL file that records every `confirm_large_change` override (timestamp, tool, entity, old -> new, reason). Default: `overrides.jsonl` in the per-user config directory. |
 | `GOOGLE_ADS_MCP_OVERRIDE_WEBHOOK_URL` | No | Slack-compatible incoming webhook; each override also posts one line here. A missing or failing webhook never fails the write. |
+| `GOOGLE_ADS_MCP_OVERRIDE_SLACK_TOKEN` / `GOOGLE_ADS_MCP_OVERRIDE_SLACK_CHANNEL` | No | Slack bot token + channel id; when both are set each override posts via `chat.postMessage` and the webhook is skipped. `run-mcp.sh` sets these to the drak bot and #drak-ops. |
 | `GOOGLE_ADS_MCP_ALWAYS_LOAD` | No | Comma-separated tool names to mark as always-loaded, e.g. `google_ads_get_client_context,google_ads_gaql_query`. Default: unset (no tool is marked). |
 
 ### Always-loaded tools

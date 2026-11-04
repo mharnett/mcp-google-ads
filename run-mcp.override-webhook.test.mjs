@@ -38,7 +38,7 @@ while [ $# -gt 0 ]; do
     *) shift;;
   esac
 done
-if [ "$service" = "SLACK_WEBHOOK_DRAK_AUTOMATION" ]; then
+if [ "$service" = "SLACK_WEBHOOK_DRAK_AUTOMATION" ] || [ "$service" = "drak-slack-bot-token" ]; then
   [ "$WEBHOOK_MISS" = "1" ] && exit 44
   echo "$service|$account"
 else
@@ -46,7 +46,7 @@ else
 fi
 `
   );
-  writeFileSync(path.join(binDir, "node"), `#!/bin/bash\necho "webhook=[$GOOGLE_ADS_MCP_OVERRIDE_WEBHOOK_URL]"\n`);
+  writeFileSync(path.join(binDir, "node"), `#!/bin/bash\necho "webhook=[$GOOGLE_ADS_MCP_OVERRIDE_WEBHOOK_URL] bot=[$GOOGLE_ADS_MCP_OVERRIDE_SLACK_TOKEN] channel=[$GOOGLE_ADS_MCP_OVERRIDE_SLACK_CHANNEL]"\n`);
   for (const f of ["python3", "security", "node"]) chmodSync(path.join(binDir, f), 0o755);
 });
 
@@ -57,19 +57,21 @@ afterAll(() => {
 function run(extraEnv = {}) {
   const env = { ...process.env, PATH: `${binDir}:${process.env.PATH}`, ...extraEnv };
   delete env.GOOGLE_ADS_MCP_OVERRIDE_WEBHOOK_URL;
+  delete env.GOOGLE_ADS_MCP_OVERRIDE_SLACK_TOKEN;
+  delete env.GOOGLE_ADS_MCP_OVERRIDE_SLACK_CHANNEL;
   return spawnSync("bash", [SCRIPT], { env, encoding: "utf8" });
 }
 
 describe("run-mcp.sh override webhook", () => {
-  it("exports the webhook from the SLACK_WEBHOOK_DRAK_AUTOMATION / drak-ops Keychain item", () => {
+  it("posts to #drak-ops via the drak bot, never the DM webhook", () => {
     const r = run();
     expect(r.status).toBe(0);
-    expect(r.stdout.trim()).toBe("webhook=[SLACK_WEBHOOK_DRAK_AUTOMATION|drak-ops]");
+    expect(r.stdout.trim()).toBe("webhook=[] bot=[drak-slack-bot-token|mark] channel=[C0B281CGPJQ]");
   });
 
-  it("a Keychain miss leaves the webhook empty and still launches the server", () => {
+  it("a Keychain miss leaves the bot credential empty and still launches the server", () => {
     const r = run({ WEBHOOK_MISS: "1" });
     expect(r.status).toBe(0);
-    expect(r.stdout.trim()).toBe("webhook=[]");
+    expect(r.stdout.trim()).toBe("webhook=[] bot=[] channel=[C0B281CGPJQ]");
   });
 });

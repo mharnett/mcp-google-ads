@@ -100,13 +100,66 @@ describe("recordOverride", () => {
   });
 });
 
+describe("recordOverride Slack channel post", () => {
+  it("posts via chat.postMessage to the channel with the bot token, and skips the webhook", async () => {
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    const res = await recordOverride(ENTRY, {
+      logPath: join(dir, "o.jsonl"),
+      webhookUrl: "https://hooks.example.test/dm",
+      slackToken: "fake-bot",
+      slackChannel: "C0B281CGPJQ",
+      fetchImpl: fetchImpl as any,
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchImpl.mock.calls[0] as any[];
+    expect(url).toBe("https://slack.com/api/chat.postMessage");
+    expect(init.headers.Authorization).toBe("Bearer fake-bot");
+    const body = JSON.parse(init.body);
+    expect(body).toEqual({ channel: "C0B281CGPJQ", text: formatOverrideLine(ENTRY) });
+    expect(res.posted).toBe(true);
+  });
+
+  it("treats a 200 with ok:false as a failure, never throws", async () => {
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ ok: false, error: "not_in_channel" }), { status: 200 }));
+    const res = await recordOverride(ENTRY, {
+      logPath: join(dir, "o.jsonl"),
+      webhookUrl: null,
+      slackToken: "fake-bot",
+      slackChannel: "C0B281CGPJQ",
+      fetchImpl: fetchImpl as any,
+    });
+    expect(res.posted).toBe(false);
+    expect(res.webhook_error).toContain("not_in_channel");
+    expect(res.logged).toBe(true);
+  });
+
+  it("a token without a channel falls back to the webhook", async () => {
+    const fetchImpl = vi.fn(async () => new Response("ok", { status: 200 }));
+    await recordOverride(ENTRY, {
+      logPath: join(dir, "o.jsonl"),
+      webhookUrl: "https://hooks.example.test/abc",
+      slackToken: "fake-bot",
+      slackChannel: null,
+      fetchImpl: fetchImpl as any,
+    });
+    expect((fetchImpl.mock.calls[0] as any[])[0]).toBe("https://hooks.example.test/abc");
+  });
+});
+
 describe("resolveOverrideLogTarget", () => {
   it("reads the log path and webhook from env, defaulting the path under the config dir", () => {
     const t = resolveOverrideLogTarget({
       GOOGLE_ADS_MCP_OVERRIDE_LOG: "/x/o.jsonl",
       GOOGLE_ADS_MCP_OVERRIDE_WEBHOOK_URL: "https://hooks.example.test/a",
     } as any);
-    expect(t).toEqual({ logPath: "/x/o.jsonl", webhookUrl: "https://hooks.example.test/a" });
+    expect(t).toEqual({ logPath: "/x/o.jsonl", webhookUrl: "https://hooks.example.test/a", slackToken: null, slackChannel: null });
+
+    const s = resolveOverrideLogTarget({
+      GOOGLE_ADS_MCP_OVERRIDE_SLACK_TOKEN: "fake-a",
+      GOOGLE_ADS_MCP_OVERRIDE_SLACK_CHANNEL: "C0B281CGPJQ",
+    } as any);
+    expect(s.slackToken).toBe("fake-a");
+    expect(s.slackChannel).toBe("C0B281CGPJQ");
 
     const d = resolveOverrideLogTarget({} as any);
     expect(d.webhookUrl).toBeNull();
@@ -118,7 +171,7 @@ describe("resolveOverrideLogTarget", () => {
       logPath: null,
       webhookUrl: null,
     });
-    expect(t).toEqual({ logPath: null, webhookUrl: null });
+    expect(t).toEqual({ logPath: null, webhookUrl: null, slackToken: null, slackChannel: null });
   });
 });
 
