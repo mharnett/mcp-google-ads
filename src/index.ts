@@ -3962,9 +3962,12 @@ export class GoogleAdsManager {
       .filter(a => a.ad_group_id !== cleanAgId)
       .map(a => ({ ad_id: a.ad_id, ad_group: a.ad_group_name, campaign: a.campaign_name, status: a.status }));
 
-    // RSA type enum = 15. Other ad types (e.g. video responsive, 30) really
-    // do reject final_urls updates -- refuse rather than half-apply.
-    const nonRsa = found.filter(a => a.ad_type !== 15);
+    // Editable in place: RSA (15) and Demand Gen multi-asset (40) -- the
+    // latter's creative is immutable but final_urls lives on the Ad and goes
+    // through AdService like an RSA. Video (30) really does reject final_urls
+    // updates -- refuse rather than half-apply.
+    const EDITABLE_TYPES = new Set<number | string>([15, "RESPONSIVE_SEARCH_AD", 40, "DEMAND_GEN_MULTI_ASSET_AD"]);
+    const nonRsa = found.filter(a => !EDITABLE_TYPES.has(a.ad_type));
     const foundIds = new Set(found.map(a => a.ad_id));
     const missing = cleanAdIds.filter(id => !foundIds.has(id));
 
@@ -4000,7 +4003,7 @@ export class GoogleAdsManager {
     }
     if (nonRsa.length > 0) {
       throw new Error(
-        `Refusing to apply: ${nonRsa.length} ad(s) are not RESPONSIVE_SEARCH_AD; their final_urls cannot be edited via the API. Ad IDs: ${nonRsa.map(a => a.ad_id).join(", ")}`
+        `Refusing to apply: ${nonRsa.length} ad(s) are not RESPONSIVE_SEARCH_AD or DEMAND_GEN_MULTI_ASSET_AD; their final_urls cannot be edited via the API. Ad IDs: ${nonRsa.map(a => a.ad_id).join(", ")}`
       );
     }
 
