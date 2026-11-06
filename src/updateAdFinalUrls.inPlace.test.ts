@@ -22,6 +22,7 @@ const AD_GROUP_ID = "999";
 const AD_A_ID = "111"; // ENABLED RSA
 const AD_B_ID = "222"; // PAUSED RSA
 const VIDEO_ID = "333"; // non-RSA
+const DG_ID = "444"; // Demand Gen multi-asset (type 40)
 const NEW_URL = "https://example.com/new-page";
 
 function row(adId: string, type: number, status: number) {
@@ -40,7 +41,7 @@ function makeFakeCustomer() {
   const adUpdates: any[] = [];
   const adGroupAdCreates: any[] = [];
   const adGroupAdUpdates: any[] = [];
-  const rows = [row(AD_A_ID, 15, 2), row(AD_B_ID, 15, 3), row(VIDEO_ID, 30, 2)];
+  const rows = [row(AD_A_ID, 15, 2), row(AD_B_ID, 15, 3), row(VIDEO_ID, 30, 2), row(DG_ID, 40, 2)];
 
   const customer = {
     async query(gaql: string) {
@@ -127,6 +128,23 @@ describe("updateAdFinalUrls -- in-place via AdService", () => {
     await expect(
       mgr.updateAdFinalUrls(CID, AD_GROUP_ID, [AD_A_ID, VIDEO_ID], NEW_URL, true)
     ).rejects.toThrow(/not RESPONSIVE_SEARCH_AD/);
+    expect(fake.adUpdates).toEqual([]);
+  });
+
+  it("updates Demand Gen multi-asset (type 40) final_urls in place", async () => {
+    const result: any = await mgr.updateAdFinalUrls(CID, AD_GROUP_ID, [DG_ID], NEW_URL, true);
+
+    expect(fake.adUpdates).toEqual([
+      { resource_name: `customers/${CID}/ads/${DG_ID}`, final_urls: [NEW_URL] },
+    ]);
+    expect(result.updated_ad_ids).toEqual([DG_ID]);
+    expect(fake.adGroupAdCreates).toEqual([]);
+  });
+
+  it("still refuses video when mixed with a Demand Gen ad", async () => {
+    await expect(
+      mgr.updateAdFinalUrls(CID, AD_GROUP_ID, [DG_ID, VIDEO_ID], NEW_URL, true)
+    ).rejects.toThrow(/333/);
     expect(fake.adUpdates).toEqual([]);
   });
 });
