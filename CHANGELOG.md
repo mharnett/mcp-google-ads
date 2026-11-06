@@ -8,6 +8,20 @@
 
 * add google_ads_link_asset_to_ad_group: links an existing SITELINK / CALLOUT / STRUCTURED_SNIPPET (or, with explicit_lead_form_request, LEAD_FORM) asset to ad groups. Dry-run by default; reads each ad group first and reports its name, campaign, current and resulting enabled link count; warns when a sitelink link would leave an ad group under 4 ad-group sitelinks (the first ad-group sitelink switches off campaign-level sitelinks there); skips ad groups that already have the asset; reads back after confirm; returns a claude-MM-DD-YY audit_label since ad-group links carry no label field. Pause a link by passing its returned adGroupAssets resource name to google_ads_pause_asset_links. Replaces a one-off client script.
 
+## [1.13.0](https://github.com/mharnett/mcp-google-ads/compare/v1.12.1...v1.13.0) (2026-11-06)
+
+
+### Features
+
+* **update_ad_final_urls:** accept Demand Gen multi-asset ads ([#84](https://github.com/mharnett/mcp-google-ads/issues/84)) ([d72e5ec](https://github.com/mharnett/mcp-google-ads/commit/d72e5ecafc80a7a46defc42dc33594568dbf13f3))
+
+
+### Bug Fixes
+
+* mark truncated top-level arrays in safeResponse ([#81](https://github.com/mharnett/mcp-google-ads/issues/81)) ([cab425f](https://github.com/mharnett/mcp-google-ads/commit/cab425fb8dfdbed390f495c7e637df13ef7640e0))
+* post large-change override alerts to #drak-ops, not DM ([#83](https://github.com/mharnett/mcp-google-ads/issues/83)) ([d18c246](https://github.com/mharnett/mcp-google-ads/commit/d18c2469a133d0ff04e0b05970c1eb9f807a76cb))
+* post large-change override alerts to #drak-ops, not Mark's DM ([d18c246](https://github.com/mharnett/mcp-google-ads/commit/d18c2469a133d0ff04e0b05970c1eb9f807a76cb))
+
 ## [1.12.1](https://github.com/mharnett/mcp-google-ads/compare/v1.12.0...v1.12.1) (2026-10-31)
 
 
