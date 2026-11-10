@@ -1947,4 +1947,20 @@ export const tools: Tool[] = [
       required: ["campaign_ids"],
     },
   },
+  {
+    name: "google_ads_update_recommendation_subscriptions",
+    description: "Turn Recommendations > Auto-apply on (status ENABLED) or off (status PAUSED) for one or more recommendation types on the account, e.g. RESPONSIVE_SEARCH_AD (\"Responsive search ad\") and RESPONSIVE_SEARCH_AD_IMPROVE_AD_STRENGTH (\"Improve responsive search ad strength\"). Reads current subscriptions first: pausing a type with no subscription is a no-op, enabling one creates it. Account-level settings carry no label. DRY-RUN BY DEFAULT: omit `confirm` or pass `confirm: false` to see the plan. Read current state with google_ads_gaql_query on recommendation_subscription.",
+    inputSchema: {
+      additionalProperties: false,
+      type: "object",
+      properties: {
+        customer_id: { type: "string" },
+        recommendation_types: { type: "array", items: { type: "string", description: "RecommendationType enum name, e.g. RESPONSIVE_SEARCH_AD." }, description: "Recommendation types to change." },
+        status: { type: "string", enum: ["ENABLED", "PAUSED"], description: "PAUSED = untick auto-apply; ENABLED = tick it." },
+        expected_old: { type: "string", enum: ["ENABLED", "PAUSED"], description: "Status every listed existing subscription currently has; refused on mismatch with no write. Optional." },
+        confirm: { type: "boolean", description: "Must be true to apply. Omit or false for dry-run preview." },
+      },
+      required: ["recommendation_types", "status"],
+    },
+  },
 ];

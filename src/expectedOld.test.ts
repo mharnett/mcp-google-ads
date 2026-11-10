@@ -128,6 +128,7 @@ function makeFake(router: Router) {
     adGroupAssets: { create: rec("adGroupAssets.create"), remove: rec("adGroupAssets.remove") },
     customerAssets: { create: rec("customerAssets.create"), remove: rec("customerAssets.remove") },
     mutateResources: rec("mutateResources"),
+    recommendationSubscriptions: { update: rec("recommendationSubscriptions.update"), create: rec("recommendationSubscriptions.create") },
   };
   return { customer, writes };
 }
@@ -669,5 +670,47 @@ describe("updateCampaignNetworkSettings", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0][1]).toEqual([`customers/${CID}/campaigns/111`]);
     expect(calls[0][2]).toBe("campaign");
+  });
+});
+
+describe("updateRecommendationSubscriptions", () => {
+  const subs: Router = () => [
+    { recommendation_subscription: { type: 18, status: 2 } },
+    { recommendation_subscription: { type: "RESPONSIVE_SEARCH_AD_IMPROVE_AD_STRENGTH", status: "ENABLED" } },
+  ];
+  const TYPES = ["RESPONSIVE_SEARCH_AD", "RESPONSIVE_SEARCH_AD_IMPROVE_AD_STRENGTH"];
+
+  it("dry run reads state, returns the plan and writes nothing", async () => {
+    const { customer, writes } = makeFake(subs);
+    const r: any = await makeManager(customer).updateRecommendationSubscriptions(CID, TYPES, "PAUSED", { dry_run: true });
+    expect(r.dry_run).toBe(true);
+    expect(r.plan.updates).toHaveLength(2);
+    expect(writes).toHaveLength(0);
+  });
+
+  it("untick writes status PAUSED on both type-keyed resource names", async () => {
+    const { customer, writes } = makeFake(subs);
+    await makeManager(customer).updateRecommendationSubscriptions(CID, TYPES, "PAUSED");
+    expect(writes).toHaveLength(1);
+    expect(writes[0].via).toBe("recommendationSubscriptions.update");
+    expect(writes[0].ops.map((o: any) => [o.resource_name, o.status])).toEqual([
+      [`customers/${CID}/recommendationSubscriptions/18`, 3],
+      [`customers/${CID}/recommendationSubscriptions/23`, 3],
+    ]);
+  });
+
+  it("expected_old mismatch refuses and writes nothing", async () => {
+    const { customer, writes } = makeFake(subs);
+    await expectMismatch(
+      makeManager(customer).updateRecommendationSubscriptions(CID, TYPES, "PAUSED", { expected_old: "PAUSED" }),
+      writes
+    );
+  });
+
+  it("nothing to change -> no write", async () => {
+    const { customer, writes } = makeFake(() => []);
+    const r: any = await makeManager(customer).updateRecommendationSubscriptions(CID, TYPES, "PAUSED");
+    expect(writes).toHaveLength(0);
+    expect(r.plan.noops).toHaveLength(2);
   });
 });
