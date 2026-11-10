@@ -82,6 +82,7 @@ describe("Tool Schema Contract", () => {
     "google_ads_update_campaign_ad_rotation",
     "google_ads_update_campaign_geo_target_type",
     "google_ads_update_campaign_network_settings",
+    "google_ads_update_recommendation_subscriptions",
   ];
 
   it("exports the expected number of tools", () => {

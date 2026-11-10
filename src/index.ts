@@ -38,6 +38,7 @@ import { evaluateBudgetChange, formatDollarsFromMicros, assertExpectedOld, idOf,
 import { recordOverride, type OverrideLogTarget } from "./overrideLog.js";
 import { buildAdRotationCampaignUpdate, AD_SERVING_OPTIMIZATION_STATUS, AD_SERVING_OPTIMIZATION_STATUS_ENUM_TO_NAME } from "./adRotationUpdate.js";
 import { buildGeoTargetTypeCampaignUpdates, POSITIVE_GEO_TARGET_TYPE } from "./geoTargetTypeUpdate.js";
+import { planRecommendationSubscriptionChanges, recommendationTypeEnum, type SubscriptionStatus } from "./recommendationSubscriptionUpdate.js";
 import { buildNetworkSettingsCampaignUpdates, type NetworkSettingsInput } from "./networkSettingsUpdate.js";
 import { validateRsa } from "./validateRsa.js";
 import {
@@ -2914,6 +2915,55 @@ export class GoogleAdsManager {
       applied: settings,
       label_applied: label ?? null,
     };
+  }
+
+  // Turn Recommendations > Auto-apply on (ENABLED) or off (PAUSED) per recommendation
+  // type. Account-level; subscriptions carry no label surface. Reads current state
+  // first; creates a missing subscription only when enabling.
+  async updateRecommendationSubscriptions(
+    customerId: string,
+    types: string[],
+    status: SubscriptionStatus,
+    opts: { expected_old?: SubscriptionStatus; dry_run?: boolean } = {}
+  ) {
+    const customer = this.getCustomer(customerId);
+    const cleanId = customerId.replace(/-/g, "");
+    types.forEach((t) => recommendationTypeEnum(t)); // validate before any read
+
+    const rows = await withResilience(
+      () =>
+        customer.query(`
+          SELECT recommendation_subscription.type, recommendation_subscription.status
+          FROM recommendation_subscription
+        `),
+      "updateRecommendationSubscriptions.read"
+    );
+    const typeNames = (enums as any).RecommendationType;
+    const statusName = (v: any): string => (typeof v === "number" ? (v === 2 ? "ENABLED" : v === 3 ? "PAUSED" : `UNKNOWN(${v})`) : String(v));
+    const existing = new Map<number, string>();
+    for (const r of rows as any[]) {
+      const rt = r.recommendation_subscription?.type;
+      const num = typeof rt === "number" ? rt : typeNames?.[rt];
+      if (typeof num === "number") existing.set(num, statusName(r.recommendation_subscription?.status));
+    }
+
+    if (opts.expected_old !== undefined) {
+      const fields: ExpectedOldField[] = types
+        .filter((t) => existing.has(recommendationTypeEnum(t)))
+        .map((t) => ({ field: `${t}.status`, expected: opts.expected_old, current: existing.get(recommendationTypeEnum(t)), kind: "exact" as const }));
+      assertExpectedOld("google_ads_update_recommendation_subscriptions", `${fields.length} subscription(s)`, fields);
+    }
+
+    const plan = planRecommendationSubscriptionChanges(cleanId, types, status, existing);
+    if (opts.dry_run) return { dry_run: true, plan };
+
+    if (plan.updates.length > 0) {
+      await withResilience(() => customer.recommendationSubscriptions.update(plan.updates as any), "updateRecommendationSubscriptions.update");
+    }
+    if (plan.creates.length > 0) {
+      await withResilience(() => customer.recommendationSubscriptions.create(plan.creates as any), "updateRecommendationSubscriptions.create");
+    }
+    return { plan };
   }
 
   async updateAssetUrls(customerId: string, updates: Array<{ asset_id: string; final_urls: string[]; expected_old?: string[] }>) {
@@ -6336,6 +6386,20 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           expected_old: args?.expected_old as NetworkSettingsInput | undefined,
         });
         return { content: [{ type: "text", text: JSON.stringify({ success: true, ...networkResult }, null, 2) }] };
+      }
+
+      case "google_ads_update_recommendation_subscriptions": {
+        const customerId = args?.customer_id as string || "";
+        const types = args?.recommendation_types as string[];
+        const status = args?.status as SubscriptionStatus;
+        if (!types || types.length === 0 || !status) {
+          return { content: [{ type: "text", text: JSON.stringify({ error: "recommendation_types and status are required." }, null, 2) }] };
+        }
+        const subResult = await getAdsManager().updateRecommendationSubscriptions(customerId, types, status, {
+          expected_old: args?.expected_old as SubscriptionStatus | undefined,
+          dry_run: !args?.confirm,
+        });
+        return { content: [{ type: "text", text: JSON.stringify({ success: !args?.confirm ? undefined : true, ...subResult, message: args?.confirm ? undefined : "Pass confirm: true to apply." }, null, 2) }] };
       }
 
       case "google_ads_link_asset_to_campaign": {

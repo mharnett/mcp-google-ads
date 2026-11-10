@@ -66,6 +66,7 @@ export const WRITE_TOOLS: ReadonlySet<string> = new Set([
   "google_ads_update_campaign_selective_optimization",
   "google_ads_update_campaign_geo_target_type",
   "google_ads_update_campaign_network_settings",
+  "google_ads_update_recommendation_subscriptions",
 ]);
 
 const gate = createWriteGate({
