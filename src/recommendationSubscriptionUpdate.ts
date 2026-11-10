@@ -1,6 +1,8 @@
 // Pure planner for recommendation subscription (Recommendations > Auto-apply)
 // mutations. A subscription is keyed by recommendation type: its resource name
-// is customers/{cid}/recommendationSubscriptions/{RecommendationType enum}.
+// is customers/{cid}/recommendationSubscriptions/{RecommendationType NAME}
+// (e.g. .../RESPONSIVE_SEARCH_AD), confirmed by GAQL on Forcepoint - NAM 2026-11-09;
+// the numeric enum value is NOT accepted as the key.
 // "Untick" in the UI = status PAUSED; "tick" = ENABLED.
 import { enums } from "google-ads-api";
 
@@ -41,7 +43,7 @@ export function planRecommendationSubscriptionChanges(
       plan.noops.push({ type: name, reason: `already ${status}` });
     } else {
       plan.updates.push({
-        resource_name: `customers/${customerIdClean}/recommendationSubscriptions/${t}`,
+        resource_name: `customers/${customerIdClean}/recommendationSubscriptions/${name}`,
         status: STATUS_ENUM[status],
       });
     }
