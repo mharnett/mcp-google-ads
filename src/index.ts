@@ -38,6 +38,7 @@ import { evaluateBudgetChange, formatDollarsFromMicros, assertExpectedOld, idOf,
 import { recordOverride, type OverrideLogTarget } from "./overrideLog.js";
 import { buildAdRotationCampaignUpdate, AD_SERVING_OPTIMIZATION_STATUS, AD_SERVING_OPTIMIZATION_STATUS_ENUM_TO_NAME } from "./adRotationUpdate.js";
 import { buildGeoTargetTypeCampaignUpdates, POSITIVE_GEO_TARGET_TYPE } from "./geoTargetTypeUpdate.js";
+import { buildNetworkSettingsCampaignUpdates, type NetworkSettingsInput } from "./networkSettingsUpdate.js";
 import { validateRsa } from "./validateRsa.js";
 import {
   validateRemoveInput,
@@ -2834,6 +2835,83 @@ export class GoogleAdsManager {
     return {
       campaign_ids: campaignIds,
       mode,
+      label_applied: label ?? null,
+    };
+  }
+
+  // Set campaign network_settings.target_search_network (search partners) and/or
+  // target_content_network (Display Network) on SEARCH campaigns. Writes only the
+  // leaves given; the whole message is never sent (it would wipe
+  // target_google_search). Refuses non-SEARCH campaigns, applies the auto
+  // claude-MM-DD-YY campaign label, and any extra `label`.
+  async updateCampaignNetworkSettings(
+    customerId: string,
+    campaignIds: string[],
+    settings: NetworkSettingsInput,
+    label?: string,
+    opts: { expected_old?: NetworkSettingsInput } = {}
+  ) {
+    const customer = this.getCustomer(customerId);
+    const cleanId = customerId.replace(/-/g, "");
+    const resourceNames = campaignIds.map((id) => `customers/${cleanId}/campaigns/${sanitizeNumericId(id)}`);
+    // Validate the payload before any read or write.
+    const operations = buildNetworkSettingsCampaignUpdates(resourceNames, settings);
+
+    const wanted = new Set(campaignIds.map((id) => sanitizeNumericId(id)));
+    const rows = await withResilience(
+      () =>
+        customer.query(`
+          SELECT campaign.id, campaign.name, campaign.advertising_channel_type,
+                 campaign.network_settings.target_search_network,
+                 campaign.network_settings.target_content_network
+          FROM campaign
+          WHERE campaign.id IN (${[...wanted].join(",")})
+        `),
+      "updateCampaignNetworkSettings.read"
+    );
+    const found = (rows as any[]).filter((r) => wanted.has(String(r.campaign?.id)));
+    const missing = [...wanted].filter((id) => !found.some((r) => String(r.campaign?.id) === id));
+    if (missing.length > 0) {
+      throw new Error(`Campaign ID(s) not found in customer ${customerId}: ${missing.join(", ")}`);
+    }
+    const notSearch = found.filter((r) => {
+      const t = r.campaign?.advertising_channel_type;
+      return !(t === 2 || t === "SEARCH");
+    });
+    if (notSearch.length > 0) {
+      throw new Error(
+        `google_ads_update_campaign_network_settings only supports SEARCH campaigns. Not SEARCH: ` +
+          notSearch.map((r) => `"${r.campaign?.name}" (id ${r.campaign?.id}, type ${r.campaign?.advertising_channel_type})`).join(", ")
+      );
+    }
+
+    if (opts.expected_old !== undefined) {
+      const fields: ExpectedOldField[] = [];
+      for (const r of found) {
+        const ns = r.campaign?.network_settings ?? {};
+        const nm = `"${r.campaign?.name}" (id ${r.campaign?.id})`;
+        const eo = opts.expected_old;
+        if (eo.search_partners !== undefined) {
+          fields.push({ field: `${nm}.search_partners`, expected: String(eo.search_partners), current: String(!!ns.target_search_network), kind: "exact" });
+        }
+        if (eo.display_network !== undefined) {
+          fields.push({ field: `${nm}.display_network`, expected: String(eo.display_network), current: String(!!ns.target_content_network), kind: "exact" });
+        }
+      }
+      assertExpectedOld("google_ads_update_campaign_network_settings", `${found.length} campaign(s)`, fields);
+    }
+
+    await withResilience(
+      () => customer.campaigns.update(operations),
+      "updateCampaignNetworkSettings.update"
+    );
+
+    await this.autoLabelCreated(customerId, resourceNames, "campaign");
+    await this.applyCustomLabels(customerId, resourceNames, "campaign", label ? [label] : undefined);
+
+    return {
+      campaign_ids: campaignIds,
+      applied: settings,
       label_applied: label ?? null,
     };
   }
@@ -6219,6 +6297,45 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           expected_old: args?.expected_old as string | undefined,
         });
         return { content: [{ type: "text", text: JSON.stringify({ success: true, ...geoTargetTypeResult }, null, 2) }] };
+      }
+
+      case "google_ads_update_campaign_network_settings": {
+        const customerId = args?.customer_id as string || "";
+        const campaignIds = args?.campaign_ids as string[];
+        const label = args?.label as string | undefined;
+        const settings: NetworkSettingsInput = {
+          search_partners: args?.search_partners as boolean | undefined,
+          display_network: args?.display_network as boolean | undefined,
+        };
+
+        if (!campaignIds || campaignIds.length === 0) {
+          return { content: [{ type: "text", text: JSON.stringify({ error: "campaign_ids is required." }, null, 2) }] };
+        }
+        if (settings.search_partners === undefined && settings.display_network === undefined) {
+          return { content: [{ type: "text", text: JSON.stringify({ error: "At least one of search_partners or display_network is required." }, null, 2) }] };
+        }
+
+        if (!args?.confirm) {
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({
+                dry_run: true,
+                action: "update_campaign_network_settings",
+                campaign_ids: campaignIds,
+                search_partners: settings.search_partners ?? null,
+                display_network: settings.display_network ?? null,
+                label: label ?? null,
+                message: "Pass confirm: true to apply. Refuses non-SEARCH campaigns; applies today's claude-MM-DD-YY label.",
+              }, null, 2),
+            }],
+          };
+        }
+
+        const networkResult = await getAdsManager().updateCampaignNetworkSettings(customerId, campaignIds, settings, label, {
+          expected_old: args?.expected_old as NetworkSettingsInput | undefined,
+        });
+        return { content: [{ type: "text", text: JSON.stringify({ success: true, ...networkResult }, null, 2) }] };
       }
 
       case "google_ads_link_asset_to_campaign": {

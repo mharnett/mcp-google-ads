@@ -184,12 +184,17 @@ describe("buildCampaignCreatePayload — DEMAND_GEN channel", () => {
     expect(plan.campaign.audience_setting).toEqual({ use_audience_grouped: true });
   });
 
-  it("SEARCH does NOT set network_settings (back-compat — unchanged behavior)", () => {
+  it("SEARCH sets network_settings explicitly: Google Search only, partners and Display OFF", () => {
     const plan = buildCampaignCreatePayload({
       name: "Search Campaign",
       budget_amount_micros: 10_000_000,
     });
-    expect(plan.campaign.network_settings).toBeUndefined();
+    expect(plan.campaign.network_settings).toEqual({
+      target_google_search: true,
+      target_search_network: false,
+      target_content_network: false,
+      target_partner_search_network: false,
+    });
   });
 });
 
