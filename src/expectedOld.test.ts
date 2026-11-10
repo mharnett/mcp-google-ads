@@ -694,8 +694,8 @@ describe("updateRecommendationSubscriptions", () => {
     expect(writes).toHaveLength(1);
     expect(writes[0].via).toBe("recommendationSubscriptions.update");
     expect(writes[0].ops.map((o: any) => [o.resource_name, o.status])).toEqual([
-      [`customers/${CID}/recommendationSubscriptions/18`, 3],
-      [`customers/${CID}/recommendationSubscriptions/23`, 3],
+      [`customers/${CID}/recommendationSubscriptions/RESPONSIVE_SEARCH_AD`, 3],
+      [`customers/${CID}/recommendationSubscriptions/RESPONSIVE_SEARCH_AD_IMPROVE_AD_STRENGTH`, 3],
     ]);
   });
 

@@ -24,7 +24,7 @@ describe("planRecommendationSubscriptionChanges", () => {
     expect(plan.creates).toEqual([]);
     expect(plan.noops).toEqual([]);
     expect(plan.updates).toEqual([
-      { resource_name: `customers/${CID}/recommendationSubscriptions/18`, status: 3 },
+      { resource_name: `customers/${CID}/recommendationSubscriptions/RESPONSIVE_SEARCH_AD`, status: 3 },
     ]);
   });
 
@@ -48,7 +48,7 @@ describe("planRecommendationSubscriptionChanges", () => {
 
   it("existing PAUSED + ENABLED -> update", () => {
     const plan = planRecommendationSubscriptionChanges(CID, ["RESPONSIVE_SEARCH_AD"], "ENABLED", new Map([[18, "PAUSED"]]));
-    expect(plan.updates).toEqual([{ resource_name: `customers/${CID}/recommendationSubscriptions/18`, status: 2 }]);
+    expect(plan.updates).toEqual([{ resource_name: `customers/${CID}/recommendationSubscriptions/RESPONSIVE_SEARCH_AD`, status: 2 }]);
   });
 
   it("rejects an empty type list and a bad status", () => {
