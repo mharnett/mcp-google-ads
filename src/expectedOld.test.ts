@@ -610,3 +610,64 @@ describe("normalizers forward expected_old", () => {
     expect(n.expected_old).toEqual(["https://a.example/old"]);
   });
 });
+
+describe("updateCampaignNetworkSettings", () => {
+  const row = (id: string, name: string, channel: any, partners: boolean, display: boolean) => ({
+    campaign: {
+      id,
+      name,
+      advertising_channel_type: channel,
+      network_settings: { target_search_network: partners, target_content_network: display },
+    },
+  });
+  const router: Router = () => [
+    row("111", "Safeguard Search", 2, true, true),
+    row("112", "Safeguard Search CA", 2, false, false),
+    row("113", "Explore DG", 14, false, false),
+  ];
+
+  it("refuses a non-SEARCH campaign, names it, and writes nothing", async () => {
+    const { customer, writes } = makeFake(router);
+    await expect(
+      makeManager(customer).updateCampaignNetworkSettings(CID, ["111", "113"], { display_network: false })
+    ).rejects.toThrow(/Explore DG/);
+    expect(writes).toHaveLength(0);
+  });
+
+  it("writes only the requested leaf, never the whole network_settings message", async () => {
+    const { customer, writes } = makeFake(router);
+    await makeManager(customer).updateCampaignNetworkSettings(CID, ["111"], { search_partners: false, display_network: false });
+    expect(writes).toHaveLength(1);
+    expect(writes[0].ops[0].network_settings).toEqual({ target_search_network: false, target_content_network: false });
+  });
+
+  it("expected_old mismatch refuses, names the campaign, and writes nothing", async () => {
+    const { customer, writes } = makeFake(router);
+    const err = await expectMismatch(
+      makeManager(customer).updateCampaignNetworkSettings(CID, ["111", "112"], { display_network: false }, undefined, {
+        expected_old: { display_network: true },
+      }),
+      writes
+    );
+    expect(err.message).toContain("Safeguard Search CA");
+  });
+
+  it("expected_old match writes", async () => {
+    const { customer, writes } = makeFake(router);
+    await makeManager(customer).updateCampaignNetworkSettings(CID, ["111"], { search_partners: false }, undefined, {
+      expected_old: { search_partners: true },
+    });
+    expect(writes).toHaveLength(1);
+  });
+
+  it("applies the auto claude label to the campaigns", async () => {
+    const { customer } = makeFake(router);
+    const mgr = makeManager(customer);
+    const calls: any[] = [];
+    (mgr as any).autoLabelCreated = async (...a: any[]) => { calls.push(a); };
+    await mgr.updateCampaignNetworkSettings(CID, ["111"], { display_network: false });
+    expect(calls).toHaveLength(1);
+    expect(calls[0][1]).toEqual([`customers/${CID}/campaigns/111`]);
+    expect(calls[0][2]).toBe("campaign");
+  });
+});

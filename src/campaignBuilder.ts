@@ -120,16 +120,17 @@ export function buildCampaignCreatePayload(input: CampaignCreateInput): Campaign
   // surfaces (YouTube, Discover, Gmail). target_content_network must be false —
   // the API rejects DEMAND_GEN with content_network=true as of Apr 2026.
   // audience_setting.use_audience_grouped=true is required for all DG campaigns.
-  // SEARCH path retains the historical behavior of omitting these settings.
+  // SEARCH sets the same four flags explicitly (below): omitting them lets the API
+  // default search partners and the Display Network ON (META Safeguard AI, 2026-09-18).
   // Every channel: no lead form unless explicitly requested
   // (LEAD_FORMS_REQUIRE_EXPLICIT_REQUEST, defined above this function).
+  campaign.network_settings = {
+    target_google_search: true,
+    target_search_network: false,
+    target_content_network: false,
+    target_partner_search_network: false,
+  };
   if (channelType === "DEMAND_GEN") {
-    campaign.network_settings = {
-      target_google_search: true,
-      target_search_network: false,
-      target_content_network: false,
-      target_partner_search_network: false,
-    };
     campaign.audience_setting = { use_audience_grouped: true };
     // Lead forms are never attached by default: see LEAD_FORMS_REQUIRE_EXPLICIT_REQUEST.
     // Google defaults upgraded_targeting to TRUE, which routes location/language

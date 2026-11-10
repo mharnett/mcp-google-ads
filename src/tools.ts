@@ -1917,4 +1917,34 @@ export const tools: Tool[] = [
       required: ["campaign_ids", "mode"],
     },
   },
+  {
+    name: "google_ads_update_campaign_network_settings",
+    description: "Turn search partners (network_settings.target_search_network) and/or the Display Network (network_settings.target_content_network) on or off for one or more SEARCH campaigns. Only the settings you pass are changed; Google Search targeting is never touched. Refuses non-SEARCH campaigns. Applies today's claude-MM-DD-YY label to every campaign automatically; `label` adds one more. DRY-RUN BY DEFAULT: omit `confirm` or pass `confirm: false` to preview.",
+    inputSchema: {
+      additionalProperties: false,
+      type: "object",
+      properties: {
+        customer_id: { type: "string" },
+        campaign_ids: {
+          type: "array",
+          items: { type: "string", description: "Numeric ID of a SEARCH campaign to update." },
+          description: "SEARCH campaign IDs to apply the same settings to.",
+        },
+        search_partners: { type: "boolean", description: "true/false for target_search_network (search partners). Omit to leave unchanged." },
+        display_network: { type: "boolean", description: "true/false for target_content_network (Display Network). Omit to leave unchanged." },
+        expected_old: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            search_partners: { type: "boolean" },
+            display_network: { type: "boolean" },
+          },
+          description: "Values every listed campaign currently has; refused if any differs. Optional; on mismatch the tool returns current vs expected and makes no write.",
+        },
+        label: { type: "string", description: "Optional extra label applied to every campaign, beyond the automatic claude-MM-DD-YY label. Created if missing." },
+        confirm: { type: "boolean", description: "Must be true to apply. Omit or false for dry-run preview." },
+      },
+      required: ["campaign_ids"],
+    },
+  },
 ];

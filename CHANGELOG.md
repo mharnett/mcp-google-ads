@@ -4,6 +4,8 @@
 
 ### Features
 
+* SEARCH campaigns now create with search partners and the Display Network OFF (previously omitted, so Google's defaults turned both on). Add google_ads_update_campaign_network_settings: sets `search_partners` and/or `display_network` on SEARCH campaigns, writing only those leaf fields. Dry-run by default, optional `expected_old`, refuses non-SEARCH campaigns, auto-applies the claude-MM-DD-YY campaign label.
+
 * keyword labelling: google_ads_pause_keywords now auto-applies today's claude-MM-DD-YY label (plus optional `labels`), best-effort like google_ads_enable_keywords, so a label failure never fails a landed pause. google_ads_apply_label accepts `criterion_resource_names` to label existing keywords; every name must belong to customer_id or nothing is labelled.
 
 * add google_ads_link_asset_to_ad_group: links an existing SITELINK / CALLOUT / STRUCTURED_SNIPPET (or, with explicit_lead_form_request, LEAD_FORM) asset to ad groups. Dry-run by default; reads each ad group first and reports its name, campaign, current and resulting enabled link count; warns when a sitelink link would leave an ad group under 4 ad-group sitelinks (the first ad-group sitelink switches off campaign-level sitelinks there); skips ad groups that already have the asset; reads back after confirm; returns a claude-MM-DD-YY audit_label since ad-group links carry no label field. Pause a link by passing its returned adGroupAssets resource name to google_ads_pause_asset_links. Replaces a one-off client script.
