@@ -1311,7 +1311,7 @@ export const tools: Tool[] = [
   },
   {
     name: "google_ads_create_lead_form_asset",
-    description: "Create a LeadFormAsset (Google Demand Gen / Discovery / Search lead form). Validates required fields, enum membership, and Google's character limits before hitting the API. NEVER use unless the user explicitly asked for a lead form: requires explicit_lead_form_request=true. After creation, use google_ads_link_asset_to_campaign with field_type=LEAD_FORM (also requires explicit_lead_form_request=true) to attach it to a campaign. v1 supports standard fields only (FULL_NAME, EMAIL, WORK_EMAIL, PHONE_NUMBER, COMPANY_NAME, JOB_TITLE, etc.); custom questions, qualifying questions, and CRM delivery_methods (webhook) are NOT yet supported — leads must be downloaded from Google Ads UI as CSV until delivery_methods ships. Auto-labels the created asset. Returns {asset_id, resource_name, name}.",
+    description: "Create a LeadFormAsset (Google Demand Gen / Discovery / Search lead form). Validates required fields, enum membership, and Google's character limits before hitting the API. NEVER use unless the user explicitly asked for a lead form: requires explicit_lead_form_request=true. After creation, use google_ads_link_asset_to_campaign with field_type=LEAD_FORM (also requires explicit_lead_form_request=true) to attach it to a campaign. Supports standard fields (incl. FIRST_NAME/LAST_NAME), Google's predefined qualifying questions (COMPANY_SIZE, JOB_DEPARTMENT, JOB_ROLE, PURCHASE_TIMELINE, ...), custom questions (single choice, or free text when answers are omitted) and an optional webhook delivery method (create-only; the secret is never echoed). Lead form assets cannot be edited after creation, so run with validate_only=true first. Auto-labels the created asset. Returns {asset_id, resource_name, name, qualifying_questions, custom_questions, webhook_configured}.",
     inputSchema: {
       additionalProperties: false,
       type: "object",
@@ -1357,13 +1357,54 @@ export const tools: Tool[] = [
           type: "array",
           items: {
             type: "string",
-            enum: ["FULL_NAME", "EMAIL", "PHONE_NUMBER", "POSTAL_CODE", "STREET_ADDRESS", "CITY", "REGION", "COUNTRY", "WORK_EMAIL", "COMPANY_NAME", "WORK_PHONE", "JOB_TITLE"],
+            enum: ["FULL_NAME", "EMAIL", "PHONE_NUMBER", "POSTAL_CODE", "STREET_ADDRESS", "CITY", "REGION", "COUNTRY", "WORK_EMAIL", "COMPANY_NAME", "WORK_PHONE", "JOB_TITLE", "FIRST_NAME", "LAST_NAME"],
           },
           description: "Standard fields collected from the user. Must include EMAIL or WORK_EMAIL.",
         },
         background_image_asset_id: {
           type: "string",
           description: "Optional. Numeric asset_id of a previously-uploaded image asset to use as the form background. Use google_ads_create_image_asset to create one first.",
+        },
+        qualifying_questions: {
+          type: "array",
+          description: "Optional. Google predefined qualifying questions, appended after `fields`. Each may carry 2-12 single-choice answers; omit answers for Google's default format.",
+          items: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              type: { type: "string", enum: ["COMPANY_SIZE", "ANNUAL_SALES", "YEARS_IN_BUSINESS", "JOB_DEPARTMENT", "JOB_ROLE", "JOB_INDUSTRY", "PURCHASE_TIMELINE"] },
+              answers: { type: "array", items: { type: "string" } },
+            },
+            required: ["type"],
+          },
+        },
+        custom_questions: {
+          type: "array",
+          description: "Optional. Custom questions with your own text. Give 2-12 answers for single choice; omit answers for a free-text question.",
+          items: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              text: { type: "string" },
+              answers: { type: "array", items: { type: "string" } },
+            },
+            required: ["text"],
+          },
+        },
+        webhook: {
+          type: "object",
+          additionalProperties: false,
+          description: "Optional CRM webhook delivery, set at creation only. google_secret is the key the receiver checks; it is never returned. For HubSpot, prefer enabling lead syncing in HubSpot, which writes its own URL and key.",
+          properties: {
+            url: { type: "string", description: "https:// webhook URL." },
+            google_secret: { type: "string", description: "Webhook key shared with the receiver." },
+            payload_schema_version: { type: "number", description: "Defaults to 1." },
+          },
+          required: ["url", "google_secret"],
+        },
+        validate_only: {
+          type: "boolean",
+          description: "If true, Google validates the create without making the asset. Use before every real create.",
         },
       },
       required: [

@@ -193,7 +193,7 @@ export const WRITE_TOOL_GUARDS: Readonly<Record<string, WriteToolGuardSpec>> = {
   google_ads_update_video_ad_videos: {},
   google_ads_update_responsive_search_ad_text: { no_ceiling_reason: PIN_ORDINAL },
   google_ads_create_image_asset: {},
-  google_ads_create_lead_form_asset: {},
+  google_ads_create_lead_form_asset: { no_ceiling_reason: "webhook.payload_schema_version is a schema id, not a spend or bid amount" },
   google_ads_enable_items: {},
   google_ads_pause_items: {},
   google_ads_pause_keywords: {},

@@ -278,6 +278,12 @@ describe("Tool Schema Contract", () => {
       expect(schema.properties.call_to_action?.enum).toContain("DOWNLOAD");
       expect(schema.properties.post_submit_call_to_action?.enum).toContain("VISIT_SITE");
       expect(schema.properties.fields?.items?.enum).toContain("WORK_EMAIL");
+      expect(schema.properties.fields?.items?.enum).toContain("FIRST_NAME");
+      expect(schema.properties.fields?.items?.enum).toContain("LAST_NAME");
+      expect(schema.properties.qualifying_questions?.items?.properties?.type?.enum).toContain("COMPANY_SIZE");
+      expect(schema.properties.custom_questions?.items?.required).toEqual(["text"]);
+      expect(schema.properties.webhook?.required).toEqual(["url", "google_secret"]);
+      expect(schema.properties.validate_only?.type).toBe("boolean");
     });
 
     it("create_image_asset requires name and accepts file_path or base64_data", () => {
