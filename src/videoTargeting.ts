@@ -195,11 +195,13 @@ export function buildLookalikeUserList(customerId: string, input: LookalikeInput
   for (const c of countries) {
     if (!/^[A-Z]{2}$/.test(c)) throw new Error(`Country code must be ISO 3166-1 alpha-2, got "${c}".`);
   }
-  const cid = customerId.replace(/-/g, "");
+  // customerId is kept in the signature for parity with the other builders; v24
+  // takes bare int64 seed ids (seed_user_list_ids), not userList resource names.
+  void customerId;
   return {
     name,
     lookalike_user_list: {
-      seed_user_lists: input.seed_user_list_ids.map((id) => `customers/${cid}/userLists/${id}`),
+      seed_user_list_ids: input.seed_user_list_ids.map((id) => Number(id)),
       expansion_level: level,
       country_codes: countries,
     },

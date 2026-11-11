@@ -146,7 +146,9 @@ describe("buildLookalikeUserList", () => {
     expect(u).toEqual({
       name: "NAM Strong Fit LaL Narrow",
       lookalike_user_list: {
-        seed_user_lists: [`customers/${CID}/userLists/9374900393`],
+        // v24 LookalikeUserListInfo.seed_user_list_ids is int64[]; an unknown key
+        // (e.g. seed_user_lists) is dropped by the client and Google sees zero seeds.
+        seed_user_list_ids: [9374900393],
         expansion_level: 2,
         country_codes: ["US", "CA"],
       },
