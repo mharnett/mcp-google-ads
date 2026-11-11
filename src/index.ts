@@ -40,6 +40,21 @@ import { buildAdRotationCampaignUpdate, AD_SERVING_OPTIMIZATION_STATUS, AD_SERVI
 import { buildGeoTargetTypeCampaignUpdates, POSITIVE_GEO_TARGET_TYPE } from "./geoTargetTypeUpdate.js";
 import { planRecommendationSubscriptionChanges, recommendationTypeEnum, type SubscriptionStatus } from "./recommendationSubscriptionUpdate.js";
 import { buildNetworkSettingsCampaignUpdates, type NetworkSettingsInput } from "./networkSettingsUpdate.js";
+import {
+  resolveLanguageCodes,
+  planLanguageChanges,
+  normalizeChannelId,
+  buildYouTubeChannelExclusions,
+  buildAdGroupTargetingCriteria,
+  buildCustomAudience,
+  buildLookalikeUserList,
+  buildVideoInventoryUpdate,
+  type ExistingLanguageCriterion,
+  type AdGroupTargetingInput,
+  type CustomAudienceInput,
+  type LookalikeInput,
+  type VideoInventoryInput,
+} from "./videoTargeting.js";
 import { validateRsa } from "./validateRsa.js";
 import {
   validateRemoveInput,
@@ -2914,6 +2929,307 @@ export class GoogleAdsManager {
       campaign_ids: campaignIds,
       applied: settings,
       label_applied: label ?? null,
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Video / YouTube targeting (builders in videoTargeting.ts). Every method
+  // takes { dry_run, validate_only }: dry_run reads only and returns the plan;
+  // validate_only sends the mutate with validate_only set (Google checks it,
+  // nothing changes). Mutates are all-or-nothing (no partial_failure).
+  // ---------------------------------------------------------------------------
+
+  private async readCampaignNames(customerId: string, campaignIds: string[]) {
+    const customer = this.getCustomer(customerId);
+    const ids = [...new Set(campaignIds.map((id) => sanitizeNumericId(id)))];
+    const rows = await withResilience(
+      () => customer.query(`
+        SELECT campaign.id, campaign.name, campaign.advertising_channel_type, campaign.status
+        FROM campaign WHERE campaign.id IN (${ids.join(",")})`),
+      "videoTargeting.readCampaigns"
+    );
+    const byId = new Map<string, any>((rows as any[]).map((r) => [String(r.campaign?.id), r.campaign]));
+    const missing = ids.filter((id) => !byId.has(id));
+    if (missing.length) throw new Error(`Campaign ID(s) not found in customer ${customerId}: ${missing.join(", ")}`);
+    return { ids, byId };
+  }
+
+  async setCampaignLanguages(
+    customerId: string,
+    campaignIds: string[],
+    languages: string[],
+    opts: { expected_old?: string[]; dry_run?: boolean; validate_only?: boolean } = {}
+  ) {
+    const customer = this.getCustomer(customerId);
+    const cleanId = customerId.replace(/-/g, "");
+    const wanted = resolveLanguageCodes(languages);
+    const { ids, byId } = await this.readCampaignNames(customerId, campaignIds);
+    const rows = await withResilience(
+      () => customer.query(`
+        SELECT campaign.id, campaign_criterion.resource_name, campaign_criterion.language.language_constant
+        FROM campaign_criterion
+        WHERE campaign_criterion.type = 'LANGUAGE' AND campaign.id IN (${ids.join(",")})`),
+      "setCampaignLanguages.read"
+    );
+    const existingBy = new Map<string, ExistingLanguageCriterion[]>();
+    for (const r of rows as any[]) {
+      const id = String(r.campaign?.id);
+      const list = existingBy.get(id) ?? [];
+      list.push({ resource_name: r.campaign_criterion?.resource_name, language_constant: r.campaign_criterion?.language?.language_constant });
+      existingBy.set(id, list);
+    }
+    if (opts.expected_old !== undefined) {
+      const expected = [...resolveLanguageCodes(opts.expected_old)].sort().join(",");
+      const fields: ExpectedOldField[] = ids.map((id) => ({
+        field: `"${byId.get(id)?.name}" (id ${id}).languages`,
+        expected,
+        current: (existingBy.get(id) ?? []).map((e) => e.language_constant).sort().join(",") || "(all languages)",
+        kind: "exact" as const,
+      }));
+      assertExpectedOld("google_ads_set_campaign_languages", `${ids.length} campaign(s)`, fields);
+    }
+    const plans = ids.map((id) => ({
+      id,
+      name: byId.get(id)?.name,
+      current: (existingBy.get(id) ?? []).map((e) => e.language_constant),
+      ...planLanguageChanges(`customers/${cleanId}/campaigns/${id}`, existingBy.get(id) ?? [], wanted),
+    }));
+    const summary = plans.map((p) => ({
+      campaign: `${p.name} (id ${p.id})`,
+      current: p.current.length ? p.current : ["(all languages)"],
+      add: p.create.map((c) => c.language.language_constant),
+      remove_criteria: p.remove,
+    }));
+    if (opts.dry_run) return { dry_run: true, target: wanted, plans: summary };
+
+    const creates = plans.flatMap((p) => p.create);
+    const removes = plans.flatMap((p) => p.remove);
+    const mo = { validate_only: !!opts.validate_only, partial_failure: false };
+    // Create before remove so a campaign never passes through "no languages" (= all).
+    if (creates.length) await withResilience(() => (customer.campaignCriteria as any).create(creates, mo), "setCampaignLanguages.create");
+    if (removes.length) await withResilience(() => (customer.campaignCriteria as any).remove(removes, mo), "setCampaignLanguages.remove");
+    if (opts.validate_only) return { validate_only: true, passed: true, target: wanted, plans: summary };
+
+    const changed = plans.filter((p) => p.create.length || p.remove.length).map((p) => `customers/${cleanId}/campaigns/${p.id}`);
+    const label = await this.autoLabelCreated(customerId, changed, "campaign");
+    const after = await withResilience(
+      () => customer.query(`
+        SELECT campaign.id, campaign_criterion.language.language_constant FROM campaign_criterion
+        WHERE campaign_criterion.type = 'LANGUAGE' AND campaign.id IN (${ids.join(",")})`),
+      "setCampaignLanguages.readBack"
+    );
+    const readBack: Record<string, string[]> = {};
+    for (const r of after as any[]) {
+      const k = `${byId.get(String(r.campaign?.id))?.name} (id ${r.campaign?.id})`;
+      (readBack[k] ??= []).push(r.campaign_criterion?.language?.language_constant);
+    }
+    return { target: wanted, plans: summary, label_applied: label, read_back: readBack };
+  }
+
+  async addYouTubeChannelExclusions(
+    customerId: string,
+    level: "account" | "campaign",
+    channelIds: string[],
+    campaignIds: string[] = [],
+    opts: { dry_run?: boolean; validate_only?: boolean } = {}
+  ) {
+    const customer = this.getCustomer(customerId);
+    const cleanId = customerId.replace(/-/g, "");
+    channelIds.forEach((c) => normalizeChannelId(c)); // validate before any read
+    const mo = { validate_only: !!opts.validate_only, partial_failure: false };
+
+    if (level === "account") {
+      const rows = await withResilience(
+        () => customer.query(`
+          SELECT customer_negative_criterion.youtube_channel.channel_id FROM customer_negative_criterion
+          WHERE customer_negative_criterion.type = 'YOUTUBE_CHANNEL'`),
+        "addYouTubeChannelExclusions.readAccount"
+      );
+      const existing = (rows as any[]).map((r) => r.customer_negative_criterion?.youtube_channel?.channel_id).filter(Boolean);
+      const ops = buildYouTubeChannelExclusions({ level: "account" }, channelIds, existing);
+      const plan = { level, add: ops.map((o) => o.youtube_channel.channel_id), already_excluded: channelIds.length - ops.length };
+      if (opts.dry_run) return { dry_run: true, ...plan };
+      if (ops.length) await withResilience(() => (customer as any).customerNegativeCriteria.create(ops, mo), "addYouTubeChannelExclusions.createAccount");
+      return { ...(opts.validate_only ? { validate_only: true, passed: true } : {}), ...plan, label_applied: null };
+    }
+
+    if (!campaignIds.length) throw new Error("level \"campaign\" requires campaign_ids.");
+    const { ids, byId } = await this.readCampaignNames(customerId, campaignIds);
+    const rows = await withResilience(
+      () => customer.query(`
+        SELECT campaign.id, campaign_criterion.youtube_channel.channel_id FROM campaign_criterion
+        WHERE campaign_criterion.type = 'YOUTUBE_CHANNEL' AND campaign_criterion.negative = TRUE
+          AND campaign.id IN (${ids.join(",")})`),
+      "addYouTubeChannelExclusions.readCampaign"
+    );
+    const existingBy = new Map<string, string[]>();
+    for (const r of rows as any[]) {
+      const id = String(r.campaign?.id);
+      existingBy.set(id, [...(existingBy.get(id) ?? []), r.campaign_criterion?.youtube_channel?.channel_id]);
+    }
+    const perCampaign = ids.map((id) => ({
+      id,
+      ops: buildYouTubeChannelExclusions({ level: "campaign", campaign: `customers/${cleanId}/campaigns/${id}` }, channelIds, existingBy.get(id) ?? []),
+    }));
+    const plan = {
+      level,
+      campaigns: perCampaign.map((p) => ({ campaign: `${byId.get(p.id)?.name} (id ${p.id})`, add: p.ops.map((o) => o.youtube_channel.channel_id) })),
+    };
+    if (opts.dry_run) return { dry_run: true, ...plan };
+    const ops = perCampaign.flatMap((p) => p.ops);
+    if (ops.length) await withResilience(() => (customer.campaignCriteria as any).create(ops, mo), "addYouTubeChannelExclusions.createCampaign");
+    if (opts.validate_only) return { validate_only: true, passed: true, ...plan };
+    const changed = perCampaign.filter((p) => p.ops.length).map((p) => `customers/${cleanId}/campaigns/${p.id}`);
+    const label = await this.autoLabelCreated(customerId, changed, "campaign");
+    return { ...plan, label_applied: label };
+  }
+
+  async addAdGroupTargeting(
+    customerId: string,
+    adGroupIds: string[],
+    input: AdGroupTargetingInput,
+    opts: { dry_run?: boolean; validate_only?: boolean } = {}
+  ) {
+    const customer = this.getCustomer(customerId);
+    const cleanId = customerId.replace(/-/g, "");
+    const ids = [...new Set(adGroupIds.map((id) => sanitizeNumericId(id)))];
+    buildAdGroupTargetingCriteria(`customers/${cleanId}/adGroups/0`, cleanId, input); // validate before any read
+    const agRows = await withResilience(
+      () => customer.query(`
+        SELECT ad_group.id, ad_group.name, campaign.name, campaign.advertising_channel_type
+        FROM ad_group WHERE ad_group.id IN (${ids.join(",")})`),
+      "addAdGroupTargeting.readAdGroups"
+    );
+    const agBy = new Map<string, any>((agRows as any[]).map((r) => [String(r.ad_group?.id), r]));
+    const missing = ids.filter((id) => !agBy.has(id));
+    if (missing.length) throw new Error(`Ad group ID(s) not found in customer ${customerId}: ${missing.join(", ")}`);
+    const crit = await withResilience(
+      () => customer.query(`
+        SELECT ad_group.id, ad_group_criterion.topic.topic_constant, ad_group_criterion.custom_audience.custom_audience
+        FROM ad_group_criterion
+        WHERE ad_group.id IN (${ids.join(",")}) AND ad_group_criterion.type IN ('TOPIC', 'CUSTOM_AUDIENCE')
+          AND ad_group_criterion.status != 'REMOVED' AND ad_group_criterion.negative = FALSE`),
+      "addAdGroupTargeting.readCriteria"
+    );
+    const have = new Set<string>();
+    for (const r of crit as any[]) {
+      const id = String(r.ad_group?.id);
+      if (r.ad_group_criterion?.topic?.topic_constant) have.add(`${id}|${r.ad_group_criterion.topic.topic_constant}`);
+      if (r.ad_group_criterion?.custom_audience?.custom_audience) have.add(`${id}|${r.ad_group_criterion.custom_audience.custom_audience}`);
+    }
+    const perAg = ids.map((id) => {
+      const all = buildAdGroupTargetingCriteria(`customers/${cleanId}/adGroups/${id}`, cleanId, input);
+      const ops = all.filter((o) => !have.has(`${id}|${o.topic?.topic_constant ?? o.custom_audience?.custom_audience}`));
+      return { id, ops, skipped: all.length - ops.length };
+    });
+    const plan = perAg.map((p) => ({
+      ad_group: `${agBy.get(p.id)?.ad_group?.name} (id ${p.id}) in ${agBy.get(p.id)?.campaign?.name}`,
+      add: p.ops.map((o) => o.topic?.topic_constant ?? o.custom_audience?.custom_audience),
+      already_present: p.skipped,
+    }));
+    if (opts.dry_run) return { dry_run: true, plans: plan };
+    const ops = perAg.flatMap((p) => p.ops);
+    const mo = { validate_only: !!opts.validate_only, partial_failure: false };
+    let created: string[] = [];
+    if (ops.length) {
+      const res = await withResilience(() => (customer.adGroupCriteria as any).create(ops, mo), "addAdGroupTargeting.create");
+      created = ((res as any)?.results ?? []).map((r: any) => r.resource_name).filter(Boolean);
+    }
+    if (opts.validate_only) return { validate_only: true, passed: true, plans: plan };
+    const label = await this.autoLabelCreated(customerId, created, "keyword");
+    return { plans: plan, created_criteria: created, label_applied: label };
+  }
+
+  async createCustomAudience(
+    customerId: string,
+    input: CustomAudienceInput,
+    opts: { dry_run?: boolean; validate_only?: boolean } = {}
+  ) {
+    const customer = this.getCustomer(customerId);
+    const payload = buildCustomAudience(input);
+    if (opts.dry_run) return { dry_run: true, payload };
+    const res = await withResilience(
+      () => (customer as any).customAudiences.create([payload], { validate_only: !!opts.validate_only, partial_failure: false }),
+      "createCustomAudience.create"
+    );
+    if (opts.validate_only) return { validate_only: true, passed: true, payload };
+    const rn = (res as any)?.results?.[0]?.resource_name ?? null;
+    return { resource_name: rn, custom_audience_id: rn ? rn.split("/").pop() : null, name: payload.name, members: payload.members.length };
+  }
+
+  async createLookalikeUserList(
+    customerId: string,
+    input: LookalikeInput,
+    opts: { dry_run?: boolean; validate_only?: boolean } = {}
+  ) {
+    const customer = this.getCustomer(customerId);
+    const payload = buildLookalikeUserList(customerId, input);
+    if (opts.dry_run) return { dry_run: true, payload };
+    const res = await withResilience(
+      () => (customer as any).userLists.create([payload], { validate_only: !!opts.validate_only, partial_failure: false }),
+      "createLookalikeUserList.create"
+    );
+    if (opts.validate_only) return { validate_only: true, passed: true, payload };
+    const rn = (res as any)?.results?.[0]?.resource_name ?? null;
+    let readBack: any = null;
+    if (rn) {
+      const id = sanitizeNumericId(rn.split("/").pop());
+      const rows = await withResilience(
+        () => customer.query(`
+          SELECT user_list.id, user_list.name, user_list.lookalike_user_list.expansion_level,
+                 user_list.lookalike_user_list.country_codes, user_list.size_for_display
+          FROM user_list WHERE user_list.id = ${id}`),
+        "createLookalikeUserList.readBack"
+      );
+      readBack = (rows as any[])[0]?.user_list ?? null;
+    }
+    return {
+      resource_name: rn,
+      user_list_id: rn ? rn.split("/").pop() : null,
+      requested_expansion_level: input.expansion_level,
+      read_back: readBack,
+      note: "Size populates over ~24–48h; compare it with the source list before swapping it in.",
+    };
+  }
+
+  async updateVideoInventory(
+    customerId: string,
+    campaignIds: string[],
+    input: VideoInventoryInput,
+    opts: { dry_run?: boolean; validate_only?: boolean } = {}
+  ) {
+    const customer = this.getCustomer(customerId);
+    const cleanId = customerId.replace(/-/g, "");
+    const { ids, byId } = await this.readCampaignNames(customerId, campaignIds);
+    const notVideo = ids.filter((id) => {
+      const t = byId.get(id)?.advertising_channel_type;
+      return !(t === 6 || t === "VIDEO");
+    });
+    if (notVideo.length) {
+      throw new Error(`google_ads_update_video_inventory only supports VIDEO campaigns. Not VIDEO: ${notVideo.map((id) => `"${byId.get(id)?.name}" (id ${id})`).join(", ")}`);
+    }
+    const resourceNames = ids.map((id) => `customers/${cleanId}/campaigns/${id}`);
+    const operations = resourceNames.map((rn) => buildVideoInventoryUpdate(rn, input));
+    const plan = { campaigns: ids.map((id) => `${byId.get(id)?.name} (id ${id})`), set: operations[0].video_campaign_settings.video_ad_inventory_control };
+    if (opts.dry_run) return { dry_run: true, ...plan };
+    await withResilience(
+      () => (customer.campaigns as any).update(operations, { validate_only: !!opts.validate_only, partial_failure: false }),
+      "updateVideoInventory.update"
+    );
+    if (opts.validate_only) return { validate_only: true, passed: true, ...plan };
+    const label = await this.autoLabelCreated(customerId, resourceNames, "campaign");
+    const after = await withResilience(
+      () => customer.query(`
+        SELECT campaign.id, campaign.name, campaign.video_campaign_settings.video_ad_inventory_control.allow_shorts,
+               campaign.video_campaign_settings.video_ad_inventory_control.allow_in_feed,
+               campaign.video_campaign_settings.video_ad_inventory_control.allow_in_stream
+        FROM campaign WHERE campaign.id IN (${ids.join(",")})`),
+      "updateVideoInventory.readBack"
+    );
+    return {
+      ...plan,
+      label_applied: label,
+      read_back: (after as any[]).map((r) => ({ campaign: `${r.campaign?.name} (id ${r.campaign?.id})`, ...r.campaign?.video_campaign_settings?.video_ad_inventory_control })),
     };
   }
 
@@ -6386,6 +6702,102 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           expected_old: args?.expected_old as NetworkSettingsInput | undefined,
         });
         return { content: [{ type: "text", text: JSON.stringify({ success: true, ...networkResult }, null, 2) }] };
+      }
+
+      // Video targeting tools. Mode: validate_only → Google validates, nothing
+      // changes; else no confirm → dry-run plan (reads only); confirm → apply.
+      case "google_ads_set_campaign_languages": {
+        const customerId = args?.customer_id as string || "";
+        const campaignIds = args?.campaign_ids as string[];
+        const languages = args?.languages as string[];
+        if (!campaignIds?.length || !languages?.length) {
+          return { content: [{ type: "text", text: JSON.stringify({ error: "campaign_ids and languages are required." }, null, 2) }] };
+        }
+        const r = await getAdsManager().setCampaignLanguages(customerId, campaignIds, languages, {
+          expected_old: args?.expected_old as string[] | undefined,
+          validate_only: args?.validate_only === true,
+          dry_run: args?.validate_only !== true && !args?.confirm,
+        });
+        return { content: [{ type: "text", text: JSON.stringify({ success: true, ...r, ...(r as any).dry_run ? { message: "Pass confirm: true to apply, or validate_only: true to have Google check it without changing anything." } : {} }, null, 2) }] };
+      }
+
+      case "google_ads_add_youtube_channel_exclusions": {
+        const customerId = args?.customer_id as string || "";
+        const level = (args?.level as "account" | "campaign") || "account";
+        const channelIds = args?.channel_ids as string[];
+        if (!channelIds?.length) {
+          return { content: [{ type: "text", text: JSON.stringify({ error: "channel_ids is required." }, null, 2) }] };
+        }
+        if (level !== "account" && level !== "campaign") {
+          return { content: [{ type: "text", text: JSON.stringify({ error: "level must be \"account\" or \"campaign\"." }, null, 2) }] };
+        }
+        const r = await getAdsManager().addYouTubeChannelExclusions(customerId, level, channelIds, (args?.campaign_ids as string[]) ?? [], {
+          validate_only: args?.validate_only === true,
+          dry_run: args?.validate_only !== true && !args?.confirm,
+        });
+        return { content: [{ type: "text", text: JSON.stringify({ success: true, ...r }, null, 2) }] };
+      }
+
+      case "google_ads_add_ad_group_targeting": {
+        const customerId = args?.customer_id as string || "";
+        const adGroupIds = args?.ad_group_ids as string[];
+        if (!adGroupIds?.length) {
+          return { content: [{ type: "text", text: JSON.stringify({ error: "ad_group_ids is required." }, null, 2) }] };
+        }
+        const r = await getAdsManager().addAdGroupTargeting(customerId, adGroupIds, {
+          topic_ids: args?.topic_ids as string[] | undefined,
+          custom_audience_ids: args?.custom_audience_ids as string[] | undefined,
+        }, {
+          validate_only: args?.validate_only === true,
+          dry_run: args?.validate_only !== true && !args?.confirm,
+        });
+        return { content: [{ type: "text", text: JSON.stringify({ success: true, ...r }, null, 2) }] };
+      }
+
+      case "google_ads_create_custom_audience": {
+        const customerId = args?.customer_id as string || "";
+        const r = await getAdsManager().createCustomAudience(customerId, {
+          name: args?.name as string,
+          type: args?.type as CustomAudienceInput["type"],
+          keywords: args?.keywords as string[] | undefined,
+          urls: args?.urls as string[] | undefined,
+          description: args?.description as string | undefined,
+        }, {
+          validate_only: args?.validate_only === true,
+          dry_run: args?.validate_only !== true && !args?.confirm,
+        });
+        return { content: [{ type: "text", text: JSON.stringify({ success: true, ...r }, null, 2) }] };
+      }
+
+      case "google_ads_create_lookalike_user_list": {
+        const customerId = args?.customer_id as string || "";
+        const r = await getAdsManager().createLookalikeUserList(customerId, {
+          name: args?.name as string,
+          seed_user_list_ids: args?.seed_user_list_ids as string[],
+          expansion_level: args?.expansion_level as LookalikeInput["expansion_level"],
+          country_codes: args?.country_codes as string[],
+        }, {
+          validate_only: args?.validate_only === true,
+          dry_run: args?.validate_only !== true && !args?.confirm,
+        });
+        return { content: [{ type: "text", text: JSON.stringify({ success: true, ...r }, null, 2) }] };
+      }
+
+      case "google_ads_update_video_inventory": {
+        const customerId = args?.customer_id as string || "";
+        const campaignIds = args?.campaign_ids as string[];
+        if (!campaignIds?.length) {
+          return { content: [{ type: "text", text: JSON.stringify({ error: "campaign_ids is required." }, null, 2) }] };
+        }
+        const r = await getAdsManager().updateVideoInventory(customerId, campaignIds, {
+          allow_shorts: args?.allow_shorts as boolean | undefined,
+          allow_in_feed: args?.allow_in_feed as boolean | undefined,
+          allow_in_stream: args?.allow_in_stream as boolean | undefined,
+        }, {
+          validate_only: args?.validate_only === true,
+          dry_run: args?.validate_only !== true && !args?.confirm,
+        });
+        return { content: [{ type: "text", text: JSON.stringify({ success: true, ...r }, null, 2) }] };
       }
 
       case "google_ads_update_recommendation_subscriptions": {
