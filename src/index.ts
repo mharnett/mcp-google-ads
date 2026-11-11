@@ -117,6 +117,8 @@ import {
 } from "./imageAsset.js";
 import {
   validateLeadFormInput,
+  buildLeadFormAssetPayload,
+  summarizeLeadFormResult,
   type LeadFormInput,
 } from "./leadFormAsset.js";
 import {
@@ -1122,7 +1124,7 @@ export class GoogleAdsManager {
   // Create a LeadFormAsset. v1: standard fields only. No delivery_methods —
   // leads land in Google Ads UI and must be exported as CSV (or routed via
   // Zapier) until a v2 ships with webhook support.
-  async createLeadFormAsset(customerId: string, input: LeadFormInput) {
+  async createLeadFormAsset(customerId: string, input: LeadFormInput, opts: { validate_only?: boolean } = {}) {
     const validation = validateLeadFormInput(input);
     if (!validation.valid) {
       throw new Error("LeadForm validation failed:\n" + validation.errors.join("\n"));
@@ -1130,105 +1132,36 @@ export class GoogleAdsManager {
 
     const customer = this.getCustomer(customerId);
     const cleanId = customerId.replace(/-/g, "");
-
-    const ctaMap: Record<string, any> = {
-      LEARN_MORE: enums.LeadFormCallToActionType.LEARN_MORE,
-      GET_QUOTE: enums.LeadFormCallToActionType.GET_QUOTE,
-      APPLY_NOW: enums.LeadFormCallToActionType.APPLY_NOW,
-      SIGN_UP: enums.LeadFormCallToActionType.SIGN_UP,
-      CONTACT_US: enums.LeadFormCallToActionType.CONTACT_US,
-      SUBSCRIBE: enums.LeadFormCallToActionType.SUBSCRIBE,
-      DOWNLOAD: enums.LeadFormCallToActionType.DOWNLOAD,
-      BOOK_NOW: enums.LeadFormCallToActionType.BOOK_NOW,
-      GET_OFFER: enums.LeadFormCallToActionType.GET_OFFER,
-      REGISTER: enums.LeadFormCallToActionType.REGISTER,
-      GET_INFO: enums.LeadFormCallToActionType.GET_INFO,
-      REQUEST_DEMO: enums.LeadFormCallToActionType.REQUEST_DEMO,
-      JOIN_NOW: enums.LeadFormCallToActionType.JOIN_NOW,
-      GET_STARTED: enums.LeadFormCallToActionType.GET_STARTED,
-    };
-
-    const postCtaMap: Record<string, any> = {
-      VISIT_SITE: enums.LeadFormPostSubmitCallToActionType.VISIT_SITE,
-      DOWNLOAD: enums.LeadFormPostSubmitCallToActionType.DOWNLOAD,
-      LEARN_MORE: enums.LeadFormPostSubmitCallToActionType.LEARN_MORE,
-      SHOP_NOW: enums.LeadFormPostSubmitCallToActionType.SHOP_NOW,
-    };
-
-    const intentMap: Record<string, any> = {
-      LOW_INTENT: enums.LeadFormDesiredIntent.LOW_INTENT,
-      HIGH_INTENT: enums.LeadFormDesiredIntent.HIGH_INTENT,
-    };
-
-    const fieldTypeMap: Record<string, any> = {
-      FULL_NAME: enums.LeadFormFieldUserInputType.FULL_NAME,
-      EMAIL: enums.LeadFormFieldUserInputType.EMAIL,
-      PHONE_NUMBER: enums.LeadFormFieldUserInputType.PHONE_NUMBER,
-      POSTAL_CODE: enums.LeadFormFieldUserInputType.POSTAL_CODE,
-      STREET_ADDRESS: enums.LeadFormFieldUserInputType.STREET_ADDRESS,
-      CITY: enums.LeadFormFieldUserInputType.CITY,
-      REGION: enums.LeadFormFieldUserInputType.REGION,
-      COUNTRY: enums.LeadFormFieldUserInputType.COUNTRY,
-      WORK_EMAIL: enums.LeadFormFieldUserInputType.WORK_EMAIL,
-      COMPANY_NAME: enums.LeadFormFieldUserInputType.COMPANY_NAME,
-      WORK_PHONE: enums.LeadFormFieldUserInputType.WORK_PHONE,
-      JOB_TITLE: enums.LeadFormFieldUserInputType.JOB_TITLE,
-    };
-
-    const leadFormAsset: any = {
-      business_name: input.business_name,
-      call_to_action_type: ctaMap[input.call_to_action],
-      call_to_action_description: input.call_to_action_description,
-      headline: input.headline,
-      description: input.description,
-      privacy_policy_url: input.privacy_policy_url,
-      post_submit_headline: input.post_submit_headline,
-      post_submit_description: input.post_submit_description,
-      post_submit_call_to_action_type: postCtaMap[input.post_submit_call_to_action],
-      fields: input.fields.map((f) => ({ input_type: fieldTypeMap[f] })),
-    };
-
-    if (input.privacy_policy_text) {
-      leadFormAsset.privacy_policy_text = input.privacy_policy_text;
-    }
-    if (input.desired_intent) {
-      leadFormAsset.desired_intent = intentMap[input.desired_intent];
-    }
-    if (input.background_image_asset_id) {
-      leadFormAsset.background_image_asset =
-        `customers/${cleanId}/assets/${input.background_image_asset_id}`;
-    }
+    const leadFormAsset = buildLeadFormAssetPayload(input, cleanId);
 
     const result = await withResilience(
       () =>
-        customer.assets.create([
-          {
-            name: input.name,
-            type: enums.AssetType.LEAD_FORM,
-            final_urls: input.final_urls,
-            lead_form_asset: leadFormAsset,
-          } as any,
-        ]),
+        customer.assets.create(
+          [
+            {
+              name: input.name,
+              type: enums.AssetType.LEAD_FORM,
+              final_urls: input.final_urls,
+              lead_form_asset: leadFormAsset,
+            } as any,
+          ],
+          { validate_only: !!opts.validate_only, partial_failure: false } as any
+        ),
       "createLeadFormAsset"
     );
 
+    if (opts.validate_only) {
+      return { validate_only: true, passed: true, ...summarizeLeadFormResult(input, undefined) };
+    }
+
     const results = (result as any).results || [];
     const resourceName: string | undefined = results[0]?.resource_name;
-    const assetId = resourceName ? resourceName.split("/").pop() : undefined;
 
     if (resourceName) {
       await this.autoLabelCreated(customerId, [resourceName], "asset");
     }
 
-    return {
-      asset_id: assetId,
-      resource_name: resourceName,
-      name: input.name,
-      business_name: input.business_name,
-      fields: input.fields,
-      delivery_methods_warning:
-        "v1 of this tool does NOT configure delivery_methods. Leads will be visible in the Google Ads UI (Tools > Lead form submissions) and downloadable as CSV; they will NOT auto-sync to your CRM until a webhook/delivery_method is configured in the Google Ads UI or via a future MCP update.",
-    };
+    return summarizeLeadFormResult(input, resourceName);
   }
 
   // Create a responsive search ad (paused by default)
@@ -7246,7 +7179,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             desired_intent: args?.desired_intent as any,
             fields: args?.fields as any,
             background_image_asset_id: args?.background_image_asset_id as string | undefined,
-          });
+            qualifying_questions: args?.qualifying_questions as any,
+            custom_questions: args?.custom_questions as any,
+            webhook: args?.webhook as any,
+          }, { validate_only: args?.validate_only === true });
           return {
             content: [{
               type: "text",

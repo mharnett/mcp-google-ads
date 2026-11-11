@@ -168,3 +168,131 @@ describe("validateLeadFormInput", () => {
     expect(r.errors.some((e) => /description exceeds/.test(e))).toBe(true);
   });
 });
+
+// ---- v2: name fields, qualifying questions, custom questions, webhook ----
+import { buildLeadFormAssetPayload, summarizeLeadFormResult } from "./leadFormAsset.js";
+import { enums } from "google-ads-api";
+
+describe("validateLeadFormInput v2", () => {
+  it("accepts FIRST_NAME and LAST_NAME", () => {
+    const r = validateLeadFormInput(
+      baseInput({ fields: ["FIRST_NAME", "LAST_NAME", "WORK_EMAIL", "COMPANY_NAME", "JOB_TITLE"] })
+    );
+    expect(r.errors).toEqual([]);
+  });
+
+  it("accepts qualifying questions with 2-12 answers", () => {
+    const r = validateLeadFormInput(
+      baseInput({
+        qualifying_questions: [
+          { type: "COMPANY_SIZE", answers: ["<250", "250-499", "500-1,999", "2,000-9,999", "10,000+"] },
+          { type: "JOB_DEPARTMENT", answers: ["IT Security", "Other"] },
+        ],
+      })
+    );
+    expect(r.errors).toEqual([]);
+  });
+
+  it("accepts a qualifying question with no answer list", () => {
+    const r = validateLeadFormInput(baseInput({ qualifying_questions: [{ type: "JOB_ROLE" }] }));
+    expect(r.errors).toEqual([]);
+  });
+
+  it("rejects unknown qualifying type, duplicates, and bad answer counts", () => {
+    const r = validateLeadFormInput(
+      baseInput({
+        qualifying_questions: [
+          { type: "VEHICLE_MODEL" as any, answers: ["a", "b"] },
+          { type: "COMPANY_SIZE", answers: ["only one"] },
+          { type: "COMPANY_SIZE", answers: Array.from({ length: 13 }, (_, i) => `a${i}`) },
+          { type: "JOB_ROLE", answers: ["dup", "dup"] },
+        ],
+      })
+    );
+    expect(r.valid).toBe(false);
+    expect(r.errors.some((e) => /qualifying question type/i.test(e))).toBe(true);
+    expect(r.errors.some((e) => /Duplicate qualifying question: COMPANY_SIZE/.test(e))).toBe(true);
+    expect(r.errors.some((e) => /between 2 and 12 answers/.test(e))).toBe(true);
+    expect(r.errors.some((e) => /duplicate answer/i.test(e))).toBe(true);
+  });
+
+  it("requires custom questions to have text and 2-12 unique non-empty answers", () => {
+    const r = validateLeadFormInput(
+      baseInput({
+        custom_questions: [
+          { text: "", answers: ["Yes", "No"] },
+          { text: "Would a walkthrough help?", answers: ["Yes"] },
+          { text: "Solving for?", answers: ["AI", " "] },
+        ],
+      })
+    );
+    expect(r.valid).toBe(false);
+    expect(r.errors.some((e) => /custom question text is required/.test(e))).toBe(true);
+    expect(r.errors.some((e) => /between 2 and 12 answers/.test(e))).toBe(true);
+    expect(r.errors.some((e) => /empty answer/i.test(e))).toBe(true);
+  });
+
+  it("requires webhook url https and a google_secret", () => {
+    const r1 = validateLeadFormInput(baseInput({ webhook: { url: "http://x.com/h", google_secret: "k" } }));
+    expect(r1.errors.some((e) => /webhook.url must be a valid https/.test(e))).toBe(true);
+    const r2 = validateLeadFormInput(baseInput({ webhook: { url: "https://x.com/h", google_secret: "" } }));
+    expect(r2.errors.some((e) => /webhook.google_secret is required/.test(e))).toBe(true);
+    const r3 = validateLeadFormInput(baseInput({ webhook: { url: "https://x.com/h", google_secret: "k" } }));
+    expect(r3.errors).toEqual([]);
+  });
+});
+
+describe("buildLeadFormAssetPayload (shape)", () => {
+  const full = baseInput({
+    fields: ["FIRST_NAME", "LAST_NAME", "WORK_EMAIL"],
+    qualifying_questions: [{ type: "COMPANY_SIZE", answers: ["<250", "10,000+"] }, { type: "JOB_ROLE" }],
+    custom_questions: [{ text: "Would a walkthrough help?", answers: ["Yes", "Just the eBook"] }],
+    webhook: { url: "https://webhooks.example.com/lead", google_secret: "s3cret" },
+  });
+  const p = buildLeadFormAssetPayload(full, "1234567890");
+
+  it("maps standard and qualifying fields in order, answers only when given", () => {
+    expect(p.fields).toEqual([
+      { input_type: enums.LeadFormFieldUserInputType.FIRST_NAME },
+      { input_type: enums.LeadFormFieldUserInputType.LAST_NAME },
+      { input_type: enums.LeadFormFieldUserInputType.WORK_EMAIL },
+      { input_type: enums.LeadFormFieldUserInputType.COMPANY_SIZE, single_choice_answers: { answers: ["<250", "10,000+"] } },
+      { input_type: enums.LeadFormFieldUserInputType.JOB_ROLE },
+    ]);
+  });
+
+  it("maps custom questions", () => {
+    expect(p.custom_question_fields).toEqual([
+      { custom_question_text: "Would a walkthrough help?", single_choice_answers: { answers: ["Yes", "Just the eBook"] } },
+    ]);
+  });
+
+  it("maps webhook with schema version 1 by default", () => {
+    expect(p.delivery_methods).toEqual([
+      { webhook: { advertiser_webhook_url: "https://webhooks.example.com/lead", google_secret: "s3cret", payload_schema_version: 1 } },
+    ]);
+  });
+
+  it("omits optional blocks when not given", () => {
+    const bare = buildLeadFormAssetPayload(baseInput(), "1");
+    expect(bare.custom_question_fields).toBeUndefined();
+    expect(bare.delivery_methods).toBeUndefined();
+  });
+
+  it("result summary never echoes the webhook secret", () => {
+    const s = summarizeLeadFormResult(full, "customers/1/assets/9");
+    expect(JSON.stringify(s)).not.toContain("s3cret");
+    expect(s.webhook_configured).toBe(true);
+    expect(s.asset_id).toBe("9");
+  });
+});
+
+describe("free-text custom question", () => {
+  it("validates and builds with no single_choice_answers", () => {
+    const input = baseInput({ custom_questions: [{ text: "Anything else we should know?" }] });
+    expect(validateLeadFormInput(input).errors).toEqual([]);
+    expect(buildLeadFormAssetPayload(input, "1").custom_question_fields).toEqual([
+      { custom_question_text: "Anything else we should know?" },
+    ]);
+  });
+});
