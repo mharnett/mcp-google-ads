@@ -1,6 +1,6 @@
 # MCP Google Ads Server
 
-An MCP (Model Context Protocol) server for the Google Ads API with built-in safeguards for review before changes go live. Production-proven with MCC (Manager Account) support, 36 tools for campaign management, reporting, and optimization. v1.2.0 adds Demand Gen campaign creation end-to-end.
+An MCP (Model Context Protocol) server for the Google Ads API with built-in safeguards for review before changes go live. Production-proven with MCC (Manager Account) support, 85 tools for campaign management, reporting, and optimization. v1.2.0 adds Demand Gen campaign creation end-to-end.
 
 ## Features
 
