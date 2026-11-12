@@ -259,6 +259,12 @@ export function validateLeadFormInput(input: LeadFormInput): LeadFormValidationR
     }
   }
 
+  if (input.qualifying_questions?.length && input.custom_questions?.length) {
+    errors.push(
+      "qualifying_questions cannot be combined with custom_questions on one form (Google: LEAD_FORM_LEGACY_QUALIFYING_QUESTIONS_DISALLOWED). Use custom_questions for all of them."
+    );
+  }
+
   if (input.webhook) {
     if (!input.webhook.url || !isHttpsUrl(input.webhook.url)) {
       errors.push("webhook.url must be a valid https:// URL");

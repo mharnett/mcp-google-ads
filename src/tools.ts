@@ -1367,7 +1367,7 @@ export const tools: Tool[] = [
         },
         qualifying_questions: {
           type: "array",
-          description: "Optional. Google predefined qualifying questions, appended after `fields`. Each may carry 2-12 single-choice answers; omit answers for Google's default format.",
+          description: "Optional. Google predefined qualifying questions, appended after `fields`. Cannot be combined with custom_questions (Google refuses the mix). Each may carry 2-12 single-choice answers; omit answers for Google's default format.",
           items: {
             type: "object",
             additionalProperties: false,
@@ -1380,7 +1380,7 @@ export const tools: Tool[] = [
         },
         custom_questions: {
           type: "array",
-          description: "Optional. Custom questions with your own text. Give 2-12 answers for single choice; omit answers for a free-text question.",
+          description: "Optional. Custom questions. Through the API, the text must match one of Google's preset custom-question texts exactly (e.g. 'What kind of vehicle do you have?'); text written from scratch is refused with INVALID_VALUE on custom_question_text, so write those in the Google Ads UI. Give 2-12 answers for single choice; omit answers for free text. Always run validate_only first.",
           items: {
             type: "object",
             additionalProperties: false,

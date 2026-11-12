@@ -296,3 +296,16 @@ describe("free-text custom question", () => {
     ]);
   });
 });
+
+describe("qualifying + custom question mix", () => {
+  it("rejects predefined qualifying questions combined with custom questions (Google: LEAD_FORM_LEGACY_QUALIFYING_QUESTIONS_DISALLOWED)", () => {
+    const r = validateLeadFormInput(
+      baseInput({
+        qualifying_questions: [{ type: "COMPANY_SIZE", answers: ["<250", "10,000+"] }],
+        custom_questions: [{ text: "Would a walkthrough help?", answers: ["Yes", "No"] }],
+      })
+    );
+    expect(r.valid).toBe(false);
+    expect(r.errors.some((e) => /cannot be combined with custom_questions/.test(e))).toBe(true);
+  });
+});
