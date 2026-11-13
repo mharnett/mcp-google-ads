@@ -34,8 +34,8 @@ describe("buildCampaignCreatePayload — back-compat gate", () => {
     // No criteria (no geo / language targeting supplied)
     expect(plan.criteria).toEqual([]);
     // No start/end date
-    expect(plan.campaign.start_date).toBeUndefined();
-    expect(plan.campaign.end_date).toBeUndefined();
+    expect(plan.campaign.start_date_time).toBeUndefined();
+    expect(plan.campaign.end_date_time).toBeUndefined();
   });
 });
 
@@ -129,7 +129,7 @@ describe("buildCampaignCreatePayload — DEMAND_GEN channel", () => {
     ]);
   });
 
-  it("passes start_date and end_date through when provided (YYYY-MM-DD format)", () => {
+  it("maps start_date and end_date (YYYY-MM-DD) to the v24 start_date_time and end_date_time fields", () => {
     const plan = buildCampaignCreatePayload({
       name: "DG scheduled",
       budget_amount_micros: 1_000_000,
@@ -138,8 +138,12 @@ describe("buildCampaignCreatePayload — DEMAND_GEN channel", () => {
       end_date: "2026-06-30",
     });
 
-    expect(plan.campaign.start_date).toBe("2026-05-01");
-    expect(plan.campaign.end_date).toBe("2026-06-30");
+    expect(plan.campaign.start_date_time).toBe("2026-05-01 00:00:00");
+    expect(plan.campaign.end_date_time).toBe("2026-06-30 23:59:59");
+    // The legacy keys do not exist on the v24 Campaign resource and are
+    // dropped by the encoder, so they must not be emitted.
+    expect(plan.campaign).not.toHaveProperty("start_date");
+    expect(plan.campaign).not.toHaveProperty("end_date");
   });
 
   it("TARGET_CPA without target_cpa throws a clear error", () => {
