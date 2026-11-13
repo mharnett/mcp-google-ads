@@ -12,6 +12,32 @@
 
 * add google_ads_link_asset_to_ad_group: links an existing SITELINK / CALLOUT / STRUCTURED_SNIPPET (or, with explicit_lead_form_request, LEAD_FORM) asset to ad groups. Dry-run by default; reads each ad group first and reports its name, campaign, current and resulting enabled link count; warns when a sitelink link would leave an ad group under 4 ad-group sitelinks (the first ad-group sitelink switches off campaign-level sitelinks there); skips ad groups that already have the asset; reads back after confirm; returns a claude-MM-DD-YY audit_label since ad-group links carry no label field. Pause a link by passing its returned adGroupAssets resource name to google_ads_pause_asset_links. Replaces a one-off client script.
 
+## [1.13.0](https://github.com/mharnett/mcp-google-ads/compare/v1.12.1...v1.13.0) (2026-11-13)
+
+
+### Features
+
+* add update_recommendation_subscriptions tool (auto-apply on/off) ([#86](https://github.com/mharnett/mcp-google-ads/issues/86)) ([9afea21](https://github.com/mharnett/mcp-google-ads/commit/9afea21793579d0652055e03345129379b616846))
+* explicit SEARCH network settings and update_campaign_network_settings tool ([#85](https://github.com/mharnett/mcp-google-ads/issues/85)) ([b5625fc](https://github.com/mharnett/mcp-google-ads/commit/b5625fc900b2701ccd5799fb8deb6650a4967d1a))
+* google_ads_update_recommendation_subscriptions tool ([9afea21](https://github.com/mharnett/mcp-google-ads/commit/9afea21793579d0652055e03345129379b616846))
+* **lead-form:** qualifying questions, custom questions, webhook, validate_only ([#90](https://github.com/mharnett/mcp-google-ads/issues/90)) ([979647a](https://github.com/mharnett/mcp-google-ads/commit/979647ae6bd3861b718837622bb82f0116bf95fe))
+* **update_ad_final_urls:** accept Demand Gen multi-asset ads ([#84](https://github.com/mharnett/mcp-google-ads/issues/84)) ([d72e5ec](https://github.com/mharnett/mcp-google-ads/commit/d72e5ecafc80a7a46defc42dc33594568dbf13f3))
+* video targeting tools (languages, channel exclusions, topics/segments, custom audiences, lookalikes, inventory) ([#88](https://github.com/mharnett/mcp-google-ads/issues/88)) ([91dd43e](https://github.com/mharnett/mcp-google-ads/commit/91dd43e762d2f3af4839fb8153dd57dc32f5927a))
+
+
+### Bug Fixes
+
+* **bidding:** Max Clicks needs a CPC ceiling; refuse it on Demand Gen ([#95](https://github.com/mharnett/mcp-google-ads/issues/95)) ([550b627](https://github.com/mharnett/mcp-google-ads/commit/550b6272d934c1cc80c62fd1c22e7ad32e0aad2a))
+* **create_campaign:** send campaign start and end dates as start_date_time/end_date_time ([#93](https://github.com/mharnett/mcp-google-ads/issues/93)) ([ee00099](https://github.com/mharnett/mcp-google-ads/commit/ee00099d0a3abc059d57c023dfcad82452d7c173))
+* **create_campaign:** send start and end dates as start_date_time/end_date_time ([ee00099](https://github.com/mharnett/mcp-google-ads/commit/ee00099d0a3abc059d57c023dfcad82452d7c173))
+* **create_lookalike_user_list:** send seeds as seed_user_list_ids ([#89](https://github.com/mharnett/mcp-google-ads/issues/89)) ([62e7bb9](https://github.com/mharnett/mcp-google-ads/commit/62e7bb9b7112ecc17826f70be7c4540cea736068))
+* key recommendation subscription resource names by type name ([#87](https://github.com/mharnett/mcp-google-ads/issues/87)) ([efe0c59](https://github.com/mharnett/mcp-google-ads/commit/efe0c5967a5c25f1a00021054b25b641cc907d98))
+* key recommendation subscription resource names by type name, not enum number ([efe0c59](https://github.com/mharnett/mcp-google-ads/commit/efe0c5967a5c25f1a00021054b25b641cc907d98))
+* **lead-form:** refuse qualifying + custom question mix; document preset-text limit ([#91](https://github.com/mharnett/mcp-google-ads/issues/91)) ([34c6e2f](https://github.com/mharnett/mcp-google-ads/commit/34c6e2f8511242465e15f382dc446ff6f0112879))
+* mark truncated top-level arrays in safeResponse ([#81](https://github.com/mharnett/mcp-google-ads/issues/81)) ([cab425f](https://github.com/mharnett/mcp-google-ads/commit/cab425fb8dfdbed390f495c7e637df13ef7640e0))
+* post large-change override alerts to #drak-ops, not DM ([#83](https://github.com/mharnett/mcp-google-ads/issues/83)) ([d18c246](https://github.com/mharnett/mcp-google-ads/commit/d18c2469a133d0ff04e0b05970c1eb9f807a76cb))
+* post large-change override alerts to #drak-ops, not Mark's DM ([d18c246](https://github.com/mharnett/mcp-google-ads/commit/d18c2469a133d0ff04e0b05970c1eb9f807a76cb))
+
 ## [1.12.1](https://github.com/mharnett/mcp-google-ads/compare/v1.12.0...v1.12.1) (2026-10-31)
 
 
