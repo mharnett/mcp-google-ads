@@ -2,6 +2,59 @@
 
 An MCP (Model Context Protocol) server for the Google Ads API with built-in safeguards for review before changes go live. Production-proven with MCC (Manager Account) support, 85 tools for campaign management, reporting, and optimization. v1.2.0 adds Demand Gen campaign creation end-to-end.
 
+## Quick install
+
+Claude Code, one line (replace the placeholder values with your own; see [Setup](#setup) for how to get them):
+
+```bash
+claude mcp add --env GOOGLE_ADS_DEVELOPER_TOKEN=YOUR_DEVELOPER_TOKEN --env GOOGLE_ADS_CLIENT_ID=YOUR_CLIENT_ID --env GOOGLE_ADS_CLIENT_SECRET=YOUR_CLIENT_SECRET --env GOOGLE_ADS_REFRESH_TOKEN=YOUR_REFRESH_TOKEN --transport stdio mcp-google-ads -- npx -y mcp-google-ads
+```
+
+The server starts read-only. Set `GOOGLE_ADS_MCP_WRITE=true` to expose tools that change an account; new items are always created PAUSED.
+
+<details>
+<summary>Claude Desktop</summary>
+
+Add this to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS), then fully quit and restart Claude Desktop:
+
+```json
+{
+  "mcpServers": {
+    "mcp-google-ads": {
+      "command": "npx",
+      "args": ["-y", "mcp-google-ads"],
+      "env": {
+        "GOOGLE_ADS_DEVELOPER_TOKEN": "YOUR_DEVELOPER_TOKEN",
+        "GOOGLE_ADS_CLIENT_ID": "YOUR_CLIENT_ID",
+        "GOOGLE_ADS_CLIENT_SECRET": "YOUR_CLIENT_SECRET",
+        "GOOGLE_ADS_REFRESH_TOKEN": "YOUR_REFRESH_TOKEN"
+      }
+    }
+  }
+}
+```
+
+</details>
+
+<details>
+<summary>Codex CLI</summary>
+
+Add this to `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.mcp-google-ads]
+command = "npx"
+args = ["-y", "mcp-google-ads"]
+
+[mcp_servers.mcp-google-ads.env]
+GOOGLE_ADS_DEVELOPER_TOKEN = "YOUR_DEVELOPER_TOKEN"
+GOOGLE_ADS_CLIENT_ID = "YOUR_CLIENT_ID"
+GOOGLE_ADS_CLIENT_SECRET = "YOUR_CLIENT_SECRET"
+GOOGLE_ADS_REFRESH_TOKEN = "YOUR_REFRESH_TOKEN"
+```
+
+</details>
+
 ## Features
 
 - **MCC Support**: Works with Manager accounts and multiple client accounts
