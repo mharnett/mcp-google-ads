@@ -823,6 +823,7 @@ export const tools: Tool[] = [
         },
         target_cpa_dollars: { type: "number", description: "Target CPA in dollars. Applies to MAXIMIZE_CONVERSIONS (optional ceiling) or TARGET_CPA (required)." },
         target_roas: { type: "number", description: "Target ROAS as decimal (3.0 = 300%). Applies to MAXIMIZE_CONVERSION_VALUE or TARGET_ROAS." },
+        cpc_bid_ceiling_dollars: { type: "number", description: "Maximum CPC in dollars. REQUIRED (positive) when strategy is MAXIMIZE_CLICKS on Search/Display — the API rejects a Max Clicks switch with no ceiling or a 0 ceiling. MAXIMIZE_CLICKS is refused on Demand Gen campaigns (the API allows no working shape there; change it in the UI)." },
         confirm_large_change: { type: "boolean", description: "Required to be true, together with a non-empty reason, to proceed when the change exceeds the 20% magnitude ceiling or removes an existing target/target-based strategy entirely. Omit or false to get a blocking error describing the exact delta first." },
       },
       required: ["campaign_id"],

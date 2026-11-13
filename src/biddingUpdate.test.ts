@@ -8,6 +8,7 @@ import {
   computeMagnitudeDeltaPct,
   exceedsMagnitudeCeiling,
   isStrategyLooseningChange,
+  assertStrategySupportedForChannel,
 } from "./biddingUpdate.js";
 
 const RN = "customers/9876543210/campaigns/22989093772";
@@ -71,6 +72,25 @@ describe("buildBiddingCampaignUpdate — anchors", () => {
     expect(() => buildBiddingCampaignUpdate("TARGET_ROAS", { resourceName: RN })).toThrow();
   });
 
+  it("MAXIMIZE_CLICKS sends only target_spend.cpc_bid_ceiling_micros", () => {
+    // An empty target_spend {} makes the field mask "target_spend", which the
+    // API rejects with FIELD_HAS_SUBFIELDS; a 0 ceiling is rejected "Too low".
+    const u = buildBiddingCampaignUpdate("MAXIMIZE_CLICKS", {
+      resourceName: RN,
+      cpcBidCeilingMicros: 5_000_000,
+    });
+    expect(u.target_spend).toEqual({ cpc_bid_ceiling_micros: 5_000_000 });
+  });
+
+  it("MAXIMIZE_CLICKS requires a positive CPC ceiling", () => {
+    expect(() => buildBiddingCampaignUpdate("MAXIMIZE_CLICKS", { resourceName: RN })).toThrow(
+      /cpc_bid_ceiling_dollars/
+    );
+    expect(() =>
+      buildBiddingCampaignUpdate("MAXIMIZE_CLICKS", { resourceName: RN, cpcBidCeilingMicros: 0 })
+    ).toThrow(/cpc_bid_ceiling_dollars/);
+  });
+
   it("always includes the resource_name and rejects unknown strategies", () => {
     const u = buildBiddingCampaignUpdate("MAXIMIZE_CONVERSIONS", { resourceName: RN });
     expect(u.resource_name).toBe(RN);
@@ -88,6 +108,7 @@ describe("buildBiddingCampaignUpdate — shape invariant (no silent no-op)", () 
     ["MAXIMIZE_CONVERSION_VALUE", { resourceName: RN, targetRoas: 3 }],
     ["TARGET_CPA", { resourceName: RN, targetCpaMicros: 200_000_000 }],
     ["TARGET_ROAS", { resourceName: RN, targetRoas: 3 }],
+    ["MAXIMIZE_CLICKS", { resourceName: RN, cpcBidCeilingMicros: 1_000_000 }],
   ];
 
   it.each(cases)("%s sets exactly one non-empty bidding field", (strategy, opts) => {
@@ -123,7 +144,7 @@ describe("BIDDING_TYPE_ENUM_TO_NAME", () => {
   });
 
   it("every mapped name round-trips through buildBiddingCampaignUpdate without throwing (or is a documented target-required exception)", () => {
-    const targetRequired = new Set(["TARGET_CPA", "TARGET_ROAS"]);
+    const targetRequired = new Set(["TARGET_CPA", "TARGET_ROAS", "MAXIMIZE_CLICKS"]);
     for (const name of Object.values(BIDDING_TYPE_ENUM_TO_NAME)) {
       if (targetRequired.has(name)) {
         expect(() => buildBiddingCampaignUpdate(name, { resourceName: RN })).toThrow();
@@ -258,5 +279,22 @@ describe("isStrategyLooseningChange", () => {
     expect(
       isStrategyLooseningChange(undefined, undefined, "MANUAL_CPC", "MANUAL_CPC")
     ).toBe(false);
+  });
+});
+
+describe("assertStrategySupportedForChannel", () => {
+  // 2026-11-13: the API refused MAXIMIZE_CLICKS + cpc_bid_ceiling_micros on two
+  // Demand Gen campaigns (OPERATION_NOT_PERMITTED_FOR_CONTEXT); an empty
+  // target_spend {} fails FIELD_HAS_SUBFIELDS. No working shape is known.
+  it.each([14, "DEMAND_GEN"])("refuses MAXIMIZE_CLICKS on Demand Gen (%s) before any write", (ch) => {
+    expect(() => assertStrategySupportedForChannel("MAXIMIZE_CLICKS", ch)).toThrow(/Demand Gen/);
+  });
+
+  it("allows MAXIMIZE_CLICKS on Display (3)", () => {
+    expect(() => assertStrategySupportedForChannel("MAXIMIZE_CLICKS", 3)).not.toThrow();
+  });
+
+  it("allows TARGET_CPA on Demand Gen", () => {
+    expect(() => assertStrategySupportedForChannel("TARGET_CPA", 14)).not.toThrow();
   });
 });

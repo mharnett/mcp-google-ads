@@ -33,6 +33,7 @@ import {
   wouldDetachPortfolioStrategy, PortfolioDetachBlocked,
   computeMagnitudeDeltaPct, exceedsMagnitudeCeiling, isStrategyLooseningChange,
   DEFAULT_MAGNITUDE_CEILING_PCT,
+  assertStrategySupportedForChannel,
 } from "./biddingUpdate.js";
 import { evaluateBudgetChange, formatDollarsFromMicros, assertExpectedOld, idOf, ExpectedOldMismatch, MagnitudeCeilingBlocked, type ExpectedOldField } from "./writeGuards.js";
 import { recordOverride, type OverrideLogTarget } from "./overrideLog.js";
@@ -2476,6 +2477,7 @@ export class GoogleAdsManager {
     strategy?: "MAXIMIZE_CONVERSIONS" | "MAXIMIZE_CONVERSION_VALUE" | "TARGET_CPA" | "TARGET_ROAS" | "MANUAL_CPC" | "MAXIMIZE_CLICKS";
     target_cpa_dollars?: number;
     target_roas?: number;
+    cpc_bid_ceiling_dollars?: number;
     confirm_large_change?: boolean;
     reason?: string;
     expected_old?: { strategy?: string; target_cpa_dollars?: number | null; target_roas?: number | null };
@@ -2489,6 +2491,7 @@ export class GoogleAdsManager {
         customer.query(`
           SELECT campaign.id, campaign.name, campaign.bidding_strategy_type,
                  campaign.bidding_strategy,
+                 campaign.advertising_channel_type,
                  campaign.target_cpa.target_cpa_micros,
                  campaign.maximize_conversions.target_cpa_micros,
                  campaign.target_roas.target_roas,
@@ -2514,6 +2517,8 @@ export class GoogleAdsManager {
     const currentTypeEnum = current.campaign.bidding_strategy_type as number;
     const currentStrategy = BIDDING_TYPE_ENUM_TO_NAME[currentTypeEnum] || "UNKNOWN";
     const resolvedStrategy = updates.strategy || currentStrategy;
+
+    assertStrategySupportedForChannel(resolvedStrategy, current.campaign.advertising_channel_type as any);
 
     const targetCpaMicros = updates.target_cpa_dollars !== undefined
       ? Math.round(updates.target_cpa_dollars * 1_000_000)
@@ -2591,6 +2596,9 @@ export class GoogleAdsManager {
       resourceName: `customers/${cleanId}/campaigns/${campaignId}`,
       targetCpaMicros,
       targetRoas: updates.target_roas,
+      cpcBidCeilingMicros: updates.cpc_bid_ceiling_dollars !== undefined
+        ? Math.round(updates.cpc_bid_ceiling_dollars * 1_000_000)
+        : undefined,
     });
 
     await withResilience(
@@ -6323,6 +6331,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           strategy,
           target_cpa_dollars: targetCpaDollars,
           target_roas: targetRoas,
+          cpc_bid_ceiling_dollars: args?.cpc_bid_ceiling_dollars as number | undefined,
           confirm_large_change: confirmLargeChange,
           reason: args?.reason as string | undefined,
           expected_old: args?.expected_old as any,
