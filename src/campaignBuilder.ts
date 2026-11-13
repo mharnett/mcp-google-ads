@@ -73,6 +73,13 @@ export function assertLeadFormExplicitlyRequested(
   );
 }
 
+function requireIsoDate(value: string, field: "start_date" | "end_date"): string {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    throw new Error(`${field} must be YYYY-MM-DD, got "${value}"`);
+  }
+  return value;
+}
+
 export function buildCampaignCreatePayload(input: CampaignCreateInput): CampaignCreatePayload {
   const budget = {
     name: `${input.name} Budget`,
@@ -146,8 +153,17 @@ export function buildCampaignCreatePayload(input: CampaignCreateInput): Campaign
     campaign.demand_gen_campaign_settings = { upgraded_targeting: false };
   }
 
-  if (input.start_date) campaign.start_date = input.start_date;
-  if (input.end_date) campaign.end_date = input.end_date;
+  // Google Ads API v24 has no Campaign.start_date / end_date: the fields are
+  // start_date_time / end_date_time ("yyyy-MM-dd HH:mm:ss", customer time zone,
+  // 00:00:00 and 23:59:59 for whole days). The legacy keys are not an API
+  // error — the protobuf encoder drops unknown keys, so the campaign silently
+  // started on creation day and never ended.
+  if (input.start_date) {
+    campaign.start_date_time = `${requireIsoDate(input.start_date, "start_date")} 00:00:00`;
+  }
+  if (input.end_date) {
+    campaign.end_date_time = `${requireIsoDate(input.end_date, "end_date")} 23:59:59`;
+  }
 
   switch (strategy) {
     case "MANUAL_CPC":
