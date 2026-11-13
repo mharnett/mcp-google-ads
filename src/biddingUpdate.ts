@@ -99,17 +99,38 @@ export function isStrategyLooseningChange(
   return false;
 }
 
+/**
+ * Refuse strategy/channel pairs the API is known to reject, before any write.
+ * Demand Gen (channel 14): MAXIMIZE_CLICKS with cpc_bid_ceiling_micros returns
+ * OPERATION_NOT_PERMITTED_FOR_CONTEXT, and an empty target_spend {} returns
+ * FIELD_HAS_SUBFIELDS (both seen 2026-11-13). No working API shape is known.
+ */
+export function assertStrategySupportedForChannel(
+  strategy: string,
+  channelType: number | string | undefined
+): void {
+  const isDemandGen = channelType === 14 || channelType === "DEMAND_GEN";
+  if (strategy === "MAXIMIZE_CLICKS" && isDemandGen) {
+    throw new Error(
+      "MAXIMIZE_CLICKS can't be set on a Demand Gen campaign through the API: a CPC ceiling " +
+      "is refused (OPERATION_NOT_PERMITTED_FOR_CONTEXT) and an empty target_spend fails " +
+      "(FIELD_HAS_SUBFIELDS). Change it in the Google Ads UI, or keep a target-based strategy."
+    );
+  }
+}
+
 export interface BiddingUpdateOpts {
   resourceName: string;
   targetCpaMicros?: number;
   targetRoas?: number;
+  cpcBidCeilingMicros?: number;
 }
 
 export function buildBiddingCampaignUpdate(
   strategy: string,
   opts: BiddingUpdateOpts
 ): Record<string, any> {
-  const { resourceName, targetCpaMicros, targetRoas } = opts;
+  const { resourceName, targetCpaMicros, targetRoas, cpcBidCeilingMicros } = opts;
   const update: Record<string, any> = { resource_name: resourceName };
 
   switch (strategy) {
@@ -146,7 +167,13 @@ export function buildBiddingCampaignUpdate(
       update.manual_cpc = {};
       break;
     case "MAXIMIZE_CLICKS":
-      update.target_spend = {};
+      // An empty target_spend {} yields field mask "target_spend", which the API
+      // rejects (FIELD_HAS_SUBFIELDS); a 0 ceiling is rejected "Too low". The
+      // mask is derived from populated fields, so a positive ceiling is required.
+      if (cpcBidCeilingMicros === undefined || cpcBidCeilingMicros <= 0) {
+        throw new Error("MAXIMIZE_CLICKS strategy requires a positive cpc_bid_ceiling_dollars");
+      }
+      update.target_spend = { cpc_bid_ceiling_micros: cpcBidCeilingMicros };
       break;
     default:
       throw new Error(`Unsupported strategy: ${strategy}`);
