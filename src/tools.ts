@@ -1960,6 +1960,33 @@ export const tools: Tool[] = [
     },
   },
   {
+    name: "google_ads_update_campaign_end_date",
+    description: "Set the last serving day on one or more existing campaigns (Campaign.end_date_time = end_date 23:59:59 in the account's time zone). The campaign stops serving after that moment and its status stays ENABLED (serving status reads ENDED), so a report filtered on status alone still shows it. To extend or restart a campaign, call again with a later end_date. Clearing an end date (run indefinitely) is not supported here. Refuses an unknown campaign id with no write. Refuses VIDEO campaigns, in the dry run too: Google blocks campaign-level API changes on them, so set their end date in the Google Ads UI. Applies the auto claude-MM-DD-YY label plus any `label`, then reads back each campaign's end date. DRY-RUN BY DEFAULT: omit `confirm` or pass `confirm: false` to preview each campaign's name and current -> new end date; nothing is written.",
+    inputSchema: {
+      additionalProperties: false,
+      type: "object",
+      properties: {
+        expected_old: { type: "string", description: "The end date every listed campaign currently has, YYYY-MM-DD, or NONE for no end date; refused if any differs. Optional; when given and it does not match the live value, the tool refuses, returns current vs expected and makes no write." },
+        customer_id: { type: "string" },
+        campaign_ids: {
+          type: "array",
+          items: { type: "string", description: "Numeric ID of a campaign to update." },
+          description: "Campaign IDs to give the same end date.",
+        },
+        end_date: { type: "string", description: "Last serving day, YYYY-MM-DD, in the account's time zone. The campaign serves through 23:59:59 that day." },
+        label: {
+          type: "string",
+          description: "Optional label name to apply to every campaign in campaign_ids as part of this call. Created if it doesn't already exist.",
+        },
+        confirm: {
+          type: "boolean",
+          description: "Must be true to apply. Omit or false for dry-run preview.",
+        },
+      },
+      required: ["campaign_ids", "end_date"],
+    },
+  },
+  {
     name: "google_ads_update_campaign_network_settings",
     description: "Turn search partners (network_settings.target_search_network) and/or the Display Network (network_settings.target_content_network) on or off for one or more SEARCH campaigns. Only the settings you pass are changed; Google Search targeting is never touched. Refuses non-SEARCH campaigns. Applies today's claude-MM-DD-YY label to every campaign automatically; `label` adds one more. DRY-RUN BY DEFAULT: omit `confirm` or pass `confirm: false` to preview.",
     inputSchema: {

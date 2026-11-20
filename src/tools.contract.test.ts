@@ -81,6 +81,7 @@ describe("Tool Schema Contract", () => {
     "google_ads_create_and_attach_audience_bundle",
     "google_ads_update_campaign_ad_rotation",
     "google_ads_update_campaign_geo_target_type",
+    "google_ads_update_campaign_end_date",
     "google_ads_update_campaign_network_settings",
     "google_ads_update_recommendation_subscriptions",
     "google_ads_set_campaign_languages",
