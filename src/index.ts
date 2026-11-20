@@ -39,6 +39,7 @@ import { evaluateBudgetChange, formatDollarsFromMicros, assertExpectedOld, idOf,
 import { recordOverride, type OverrideLogTarget } from "./overrideLog.js";
 import { buildAdRotationCampaignUpdate, AD_SERVING_OPTIMIZATION_STATUS, AD_SERVING_OPTIMIZATION_STATUS_ENUM_TO_NAME } from "./adRotationUpdate.js";
 import { buildGeoTargetTypeCampaignUpdates, POSITIVE_GEO_TARGET_TYPE } from "./geoTargetTypeUpdate.js";
+import { buildCampaignEndDateUpdates, normalizeEndDate } from "./campaignEndDate.js";
 import { planRecommendationSubscriptionChanges, recommendationTypeEnum, type SubscriptionStatus } from "./recommendationSubscriptionUpdate.js";
 import { buildNetworkSettingsCampaignUpdates, type NetworkSettingsInput } from "./networkSettingsUpdate.js";
 import {
@@ -2793,6 +2794,97 @@ export class GoogleAdsManager {
       campaign_ids: campaignIds,
       mode,
       label_applied: label ?? null,
+    };
+  }
+
+  // Set the last serving day (Campaign.end_date_time, 23:59:59 customer time)
+  // on one or more existing campaigns. Reads every campaign first: an unknown
+  // id or an expected_old mismatch refuses with no write. dry_run returns the
+  // names with current -> new and writes nothing. Applies the auto
+  // claude-MM-DD-YY label plus any `label`, then reads back.
+  async updateCampaignEndDate(
+    customerId: string,
+    campaignIds: string[],
+    endDate: string,
+    label?: string,
+    opts: { expected_old?: string; dry_run?: boolean } = {}
+  ) {
+    const customer = this.getCustomer(customerId);
+    const cleanId = customerId.replace(/-/g, "");
+    const ids = campaignIds.map((id) => sanitizeNumericId(id));
+    const resourceNames = ids.map((id) => `customers/${cleanId}/campaigns/${id}`);
+    // Validate the date before any read or write.
+    const operations = buildCampaignEndDateUpdates(resourceNames, endDate);
+    const newEnd = operations[0]?.end_date_time;
+
+    const read = async (tag: string) => {
+      const rows = await withResilience(
+        () =>
+          customer.query(`
+            SELECT campaign.id, campaign.name, campaign.status, campaign.end_date_time
+            FROM campaign
+            WHERE campaign.id IN (${ids.join(",")})
+          `),
+        `updateCampaignEndDate.${tag}`
+      );
+      const byId = new Map<string, any>();
+      for (const r of rows as any[]) byId.set(String(r.campaign?.id), r.campaign);
+      return byId;
+    };
+
+    const before = await read("read");
+    const missing = ids.filter((id) => !before.has(id));
+    if (missing.length) {
+      throw new Error(`google_ads_update_campaign_end_date: campaign id(s) not found in ${cleanId}: ${missing.join(", ")}. No write was made.`);
+    }
+    if (opts.expected_old !== undefined) {
+      const fields: ExpectedOldField[] = ids.map((id) => ({
+        field: `"${before.get(id).name}" (id ${id}).end_date`,
+        expected: opts.expected_old,
+        current: normalizeEndDate(before.get(id).end_date_time),
+        kind: "exact" as const,
+      }));
+      assertExpectedOld("google_ads_update_campaign_end_date", `${fields.length} campaign(s)`, fields);
+    }
+
+    const statusName = (raw: any) =>
+      typeof raw === "number" ? (enums.CampaignStatus as any)[raw] ?? `UNKNOWN(${raw})` : raw;
+
+    if (opts.dry_run) {
+      return {
+        dry_run: true,
+        end_date_time: newEnd,
+        label: label ?? null,
+        campaigns: ids.map((id) => ({
+          id,
+          name: before.get(id).name,
+          status: statusName(before.get(id).status),
+          current_end: normalizeEndDate(before.get(id).end_date_time),
+          new_end: newEnd,
+        })),
+      };
+    }
+
+    await withResilience(() => customer.campaigns.update(operations), "updateCampaignEndDate.update");
+    await this.autoLabelCreated(customerId, resourceNames, "campaign");
+    await this.applyCustomLabels(customerId, resourceNames, "campaign", label ? [label] : undefined);
+
+    const after = await read("readBack");
+    const campaigns = ids.map((id) => ({
+      id,
+      name: before.get(id).name,
+      status: statusName(after.get(id)?.status ?? before.get(id).status),
+      before: normalizeEndDate(before.get(id).end_date_time),
+      after: after.get(id)?.end_date_time || "NONE",
+    }));
+    const mismatched = campaigns.filter((c) => c.after !== newEnd).map((c) => c.id);
+    return {
+      dry_run: false,
+      end_date_time: newEnd,
+      label_applied: label ?? null,
+      all_match: mismatched.length === 0,
+      mismatched,
+      campaigns,
     };
   }
 
@@ -6605,6 +6697,28 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           expected_old: args?.expected_old as string | undefined,
         });
         return { content: [{ type: "text", text: JSON.stringify({ success: true, ...geoTargetTypeResult }, null, 2) }] };
+      }
+
+      case "google_ads_update_campaign_end_date": {
+        const customerId = args?.customer_id as string || "";
+        const campaignIds = args?.campaign_ids as string[];
+        const endDate = args?.end_date as string;
+        const label = args?.label as string | undefined;
+
+        if (!campaignIds || campaignIds.length === 0 || !endDate) {
+          return { content: [{ type: "text", text: JSON.stringify({ error: "campaign_ids and end_date are required." }, null, 2) }] };
+        }
+
+        // The dry run reads live names and end dates (no write), so a wrong id
+        // shows up before confirm.
+        const endDateResult = await getAdsManager().updateCampaignEndDate(customerId, campaignIds, endDate, label, {
+          expected_old: args?.expected_old as string | undefined,
+          dry_run: !args?.confirm,
+        });
+        const payload = endDateResult.dry_run
+          ? { ...endDateResult, message: "Pass confirm: true to apply." }
+          : { success: endDateResult.all_match, ...endDateResult };
+        return { content: [{ type: "text", text: JSON.stringify(payload, null, 2) }] };
       }
 
       case "google_ads_update_campaign_network_settings": {
