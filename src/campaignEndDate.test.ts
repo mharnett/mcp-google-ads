@@ -46,7 +46,9 @@ describe("normalizeEndDate", () => {
 // Manager wiring
 // ---------------------------------------------------------------------------
 
-type Row = { campaign: { id: string; name: string; status: number; end_date_time?: string } };
+type Row = {
+  campaign: { id: string; name: string; status: number; end_date_time?: string; advertising_channel_type?: number | string };
+};
 
 function makeFake(before: Row[], after: Row[] = before) {
   const writes: Array<{ via: string; ops: any }> = [];
@@ -76,10 +78,14 @@ function makeManager(customer: any): GoogleAdsManager {
   return mgr;
 }
 
+// 14 = DEMAND_GEN, 6 = VIDEO (advertising_channel_type as the client returns it).
 const LIVE: Row[] = [
-  { campaign: { id: "111", name: "NAM YouTube Reach", status: 2, end_date_time: "" } },
-  { campaign: { id: "112", name: "EMEA YouTube Reach", status: 2, end_date_time: "2037-12-30 23:59:59" } },
+  { campaign: { id: "111", name: "NAM DG Retargeting", status: 2, end_date_time: "", advertising_channel_type: 14 } },
+  { campaign: { id: "112", name: "EMEA DG Retargeting", status: 2, end_date_time: "2037-12-30 23:59:59", advertising_channel_type: 14 } },
 ];
+const VIDEO_ROW: Row = {
+  campaign: { id: "113", name: "NAM YouTube Reach", status: 2, end_date_time: "2026-12-31 23:59:59", advertising_channel_type: 6 },
+};
 const ENDED: Row[] = LIVE.map((r) => ({ campaign: { ...r.campaign, end_date_time: "2026-11-30 23:59:59" } }));
 
 describe("updateCampaignEndDate", () => {
@@ -91,9 +97,47 @@ describe("updateCampaignEndDate", () => {
     expect(writes).toHaveLength(0);
     expect(out.dry_run).toBe(true);
     expect(out.campaigns).toEqual([
-      { id: "111", name: "NAM YouTube Reach", status: "ENABLED", current_end: "NONE", new_end: "2026-11-30 23:59:59" },
-      { id: "112", name: "EMEA YouTube Reach", status: "ENABLED", current_end: "NONE", new_end: "2026-11-30 23:59:59" },
+      { id: "111", name: "NAM DG Retargeting", status: "ENABLED", current_end: "NONE", new_end: "2026-11-30 23:59:59" },
+      { id: "112", name: "EMEA DG Retargeting", status: "ENABLED", current_end: "NONE", new_end: "2026-11-30 23:59:59" },
     ]);
+  });
+
+  // Google refuses campaign-level mutates on the VIDEO channel
+  // (MUTATE_NOT_ALLOWED, seen live 2026-11-20 on end_date_time). The dry run
+  // must refuse too, or it approves a call that can only fail on apply.
+  it.each([
+    ["dry run", { dry_run: true }],
+    ["apply", {}],
+  ])("%s refuses a VIDEO campaign by name, with no write", async (_mode, opts) => {
+    const { customer, writes } = makeFake([...LIVE, VIDEO_ROW]);
+    const err = await makeManager(customer)
+      .updateCampaignEndDate(CID, ["111", "112", "113"], "2026-11-30", undefined, opts)
+      .catch((e) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect(err.message).toContain('"NAM YouTube Reach" (id 113)');
+    expect(err.message).toMatch(/VIDEO/);
+    expect(err.message).toMatch(/Google Ads UI/);
+    expect(err.message).not.toContain("DG Retargeting");
+    expect(writes).toHaveLength(0);
+  });
+
+  it("refuses a VIDEO campaign before checking expected_old", async () => {
+    const { customer, writes } = makeFake([VIDEO_ROW]);
+    const err = await makeManager(customer)
+      .updateCampaignEndDate(CID, ["113"], "2026-11-30", undefined, { expected_old: "NONE" })
+      .catch((e) => e);
+    expect(err).not.toBeInstanceOf(ExpectedOldMismatch);
+    expect(err.message).toMatch(/VIDEO/);
+    expect(writes).toHaveLength(0);
+  });
+
+  it("accepts the channel type as an enum name too", async () => {
+    const named: Row = { campaign: { ...VIDEO_ROW.campaign, advertising_channel_type: "VIDEO" } };
+    const { customer, writes } = makeFake([named]);
+    await expect(
+      makeManager(customer).updateCampaignEndDate(CID, ["113"], "2026-11-30", undefined, { dry_run: true })
+    ).rejects.toThrow(/VIDEO/);
+    expect(writes).toHaveLength(0);
   });
 
   it("refuses an id the account does not have, naming it, with no write", async () => {
@@ -111,7 +155,7 @@ describe("updateCampaignEndDate", () => {
       .updateCampaignEndDate(CID, ["111", "112"], "2026-11-30", undefined, { expected_old: "NONE" })
       .catch((e) => e);
     expect(err).toBeInstanceOf(ExpectedOldMismatch);
-    expect(err.message).toContain("EMEA YouTube Reach");
+    expect(err.message).toContain("EMEA DG Retargeting");
     expect(writes).toHaveLength(0);
   });
 

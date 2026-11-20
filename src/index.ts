@@ -2821,7 +2821,8 @@ export class GoogleAdsManager {
       const rows = await withResilience(
         () =>
           customer.query(`
-            SELECT campaign.id, campaign.name, campaign.status, campaign.end_date_time
+            SELECT campaign.id, campaign.name, campaign.status, campaign.end_date_time,
+                   campaign.advertising_channel_type
             FROM campaign
             WHERE campaign.id IN (${ids.join(",")})
           `),
@@ -2836,6 +2837,18 @@ export class GoogleAdsManager {
     const missing = ids.filter((id) => !before.has(id));
     if (missing.length) {
       throw new Error(`google_ads_update_campaign_end_date: campaign id(s) not found in ${cleanId}: ${missing.join(", ")}. No write was made.`);
+    }
+    // Google refuses every campaign-level mutate on the VIDEO channel
+    // (MUTATE_NOT_ALLOWED), so refuse here, in dry run and apply alike, rather
+    // than preview a call that can only fail.
+    const isVideo = (t: unknown) => t === enums.AdvertisingChannelType.VIDEO || t === "VIDEO";
+    const video = ids.filter((id) => isVideo(before.get(id).advertising_channel_type));
+    if (video.length) {
+      const names = video.map((id) => `"${before.get(id).name}" (id ${id})`).join(", ");
+      throw new Error(
+        `google_ads_update_campaign_end_date: VIDEO campaigns can't be changed through the API (MUTATE_NOT_ALLOWED): ${names}. ` +
+          "Set their end date in the Google Ads UI. No write was made."
+      );
     }
     if (opts.expected_old !== undefined) {
       const fields: ExpectedOldField[] = ids.map((id) => ({

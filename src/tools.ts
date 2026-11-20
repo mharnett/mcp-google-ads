@@ -1961,7 +1961,7 @@ export const tools: Tool[] = [
   },
   {
     name: "google_ads_update_campaign_end_date",
-    description: "Set the last serving day on one or more existing campaigns (Campaign.end_date_time = end_date 23:59:59 in the account's time zone). The campaign stops serving after that moment and its status stays ENABLED (serving status reads ENDED), so a report filtered on status alone still shows it. To extend or restart a campaign, call again with a later end_date. Clearing an end date (run indefinitely) is not supported here. Refuses an unknown campaign id with no write. Applies the auto claude-MM-DD-YY label plus any `label`, then reads back each campaign's end date. DRY-RUN BY DEFAULT: omit `confirm` or pass `confirm: false` to preview each campaign's name and current -> new end date; nothing is written.",
+    description: "Set the last serving day on one or more existing campaigns (Campaign.end_date_time = end_date 23:59:59 in the account's time zone). The campaign stops serving after that moment and its status stays ENABLED (serving status reads ENDED), so a report filtered on status alone still shows it. To extend or restart a campaign, call again with a later end_date. Clearing an end date (run indefinitely) is not supported here. Refuses an unknown campaign id with no write. Refuses VIDEO campaigns, in the dry run too: Google blocks campaign-level API changes on them, so set their end date in the Google Ads UI. Applies the auto claude-MM-DD-YY label plus any `label`, then reads back each campaign's end date. DRY-RUN BY DEFAULT: omit `confirm` or pass `confirm: false` to preview each campaign's name and current -> new end date; nothing is written.",
     inputSchema: {
       additionalProperties: false,
       type: "object",
