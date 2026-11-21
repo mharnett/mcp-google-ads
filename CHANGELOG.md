@@ -14,6 +14,14 @@
 
 * add google_ads_link_asset_to_ad_group: links an existing SITELINK / CALLOUT / STRUCTURED_SNIPPET (or, with explicit_lead_form_request, LEAD_FORM) asset to ad groups. Dry-run by default; reads each ad group first and reports its name, campaign, current and resulting enabled link count; warns when a sitelink link would leave an ad group under 4 ad-group sitelinks (the first ad-group sitelink switches off campaign-level sitelinks there); skips ad groups that already have the asset; reads back after confirm; returns a claude-MM-DD-YY audit_label since ad-group links carry no label field. Pause a link by passing its returned adGroupAssets resource name to google_ads_pause_asset_links. Replaces a one-off client script.
 
+## [1.14.0](https://github.com/mharnett/mcp-google-ads/compare/v1.13.0...v1.14.0) (2026-11-21)
+
+
+### Features
+
+* **campaigns:** google_ads_update_campaign_end_date ([#96](https://github.com/mharnett/mcp-google-ads/issues/96)) ([457701c](https://github.com/mharnett/mcp-google-ads/commit/457701c71b4582b3d5c55909d0a79b56c4dbddf0))
+* **skills:** google-ads-program-audit, a read-only B2B program audit ([#98](https://github.com/mharnett/mcp-google-ads/issues/98)) ([618698d](https://github.com/mharnett/mcp-google-ads/commit/618698d4f28706cb16ecb7ae8d9d84dbf96a36a4))
+
 ## [1.13.0](https://github.com/mharnett/mcp-google-ads/compare/v1.12.1...v1.13.0) (2026-11-13)
 
 
