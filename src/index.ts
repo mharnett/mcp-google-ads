@@ -295,15 +295,8 @@ export function getClientFromWorkingDir(config: Config, cwd: string): ClientReso
 // GAQL SANITIZATION
 // ============================================
 
-/** Strip non-numeric characters from IDs used in GAQL WHERE clauses. */
-function sanitizeNumericId(id: string): string {
-  return id.replace(/[^0-9]/g, "");
-}
-
-/** Escape single quotes and backslashes in strings used in GAQL WHERE clauses. */
-function escapeGaqlString(s: string): string {
-  return s.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
-}
+// sanitizeNumericId, escapeGaqlString and the refusing require* validators
+// live in gaqlSanitize.ts so they can be tested directly.
 
 // ============================================
 // TYPED ERRORS & VALIDATION (extracted to errors.ts)
@@ -325,6 +318,22 @@ import {
   type ResolvedCredentials,
 } from "./credentials.js";
 import { onPosixSignal } from "./platform.js";
+import { escapeGaqlString, requireGaqlDate, requireNumericId, requireOneOf, sanitizeNumericId } from "./gaqlSanitize.js";
+
+/**
+ * Result fields for a create whose entity cannot carry a label. The client
+ * library has label services for campaigns, ad groups, ads, keywords and the
+ * customer only, so the claude-MM-DD-YY audit label cannot be attached to an
+ * asset or a shared set; say so instead of skipping silently.
+ */
+const UNLABELABLE_AUDIT = {
+  audit_label: null,
+  audit_label_note:
+    "Assets and shared sets cannot be labeled in Google Ads, so no claude-MM-DD-YY label was applied. Find this change in the account's change history.",
+} as const;
+
+/** experiment.status values google_ads_list_experiments filters on (besides ALL). */
+const EXPERIMENT_STATUS_FILTERS = ["SETUP", "ENABLED", "HALTED", "PROMOTED", "GRADUATED"] as const;
 
 // ============================================
 // GOOGLE ADS CLIENT
@@ -453,6 +462,7 @@ export class GoogleAdsManager {
 
   // Get campaign tracking parameters
   async getCampaignTracking(customerId: string, campaignId: string) {
+    campaignId = requireNumericId(campaignId, "campaign_id");
     const customer = this.getCustomer(customerId);
     const result = await withResilience(
       () =>
@@ -686,17 +696,20 @@ export class GoogleAdsManager {
   // Today's audit label in Claude-MM-DD-YY format (GLOBAL rule: every Claude-created asset gets this)
   // Canonical claude-MM-DD-YY[-desc] format lives in claudeLabel.ts so the
   // generator, validator and recognizer can't drift from each other.
-  private todayClaudeLabel(descriptor?: string): string {
+  todayClaudeLabel(descriptor?: string): string {
     return claudeAuditLabel(new Date(), descriptor);
   }
 
-  // Apply today's Claude-MM-DD-YY label to newly created assets.
+  // Apply today's Claude-MM-DD-YY label to newly created or changed entities.
   // Best-effort: log and swallow errors so creation never fails because of labeling.
-  // `assetType` selects which *Labels endpoint to hit.
+  // `assetType` selects which *Labels endpoint to hit. Returns the label name
+  // only when it was attached; null when there was nothing to label or the
+  // attach failed. Assets and shared sets have no label service in the
+  // client library: their creates return UNLABELABLE_AUDIT instead of calling this.
   private async autoLabelCreated(
     customerId: string,
     resourceNames: string[],
-    assetType: "campaign" | "ad_group" | "ad" | "keyword" | "shared_set" | "asset",
+    assetType: "campaign" | "ad_group" | "ad" | "keyword",
     descriptor?: string
   ): Promise<string | null> {
     if (!resourceNames?.length) return null;
@@ -717,38 +730,6 @@ export class GoogleAdsManager {
         case "keyword":
           await this.labelAdGroupCriteria(customerId, resourceNames, labelRN);
           break;
-        case "shared_set": {
-          // No campaign/ad_group/ad_group_ad equivalent exists for shared_set in all API versions.
-          // Attempt via customer.sharedSetLabels if available; otherwise log and skip.
-          const customer = this.getCustomer(customerId);
-          const sharedSetLabels = (customer as any).sharedSetLabels;
-          if (sharedSetLabels?.create) {
-            const ops = resourceNames.map(rn => ({ shared_set: rn, label: labelRN }));
-            await withResilience(() => sharedSetLabels.create(ops), "labelSharedSets");
-          } else {
-            console.error(`[INFO] sharedSetLabels endpoint not available — skipping auto-label for shared set`);
-          }
-          break;
-        }
-        case "asset": {
-          // Auto-label an uploaded asset via customer.customerAssetLabels.
-          // Some API versions / endpoints expose this differently; fall back
-          // to best-effort logging if the endpoint isn't available in v23.
-          const customer = this.getCustomer(customerId);
-          const customerAssetLabels = (customer as any).customerAssetLabels || (customer as any).assetLabels;
-          if (customerAssetLabels?.create) {
-            const ops = resourceNames.map(rn => ({ asset: rn, label: labelRN }));
-            try {
-              await withResilience(() => customerAssetLabels.create(ops), "labelAssets");
-            } catch (e: any) {
-              // Non-fatal — the asset was created, labeling is best-effort.
-              console.error(`[WARN] asset labeling failed: ${e.message}`);
-            }
-          } else {
-            console.error(`[INFO] customerAssetLabels endpoint not available — skipping auto-label for asset`);
-          }
-          break;
-        }
       }
       return labelName;
     } catch (e: any) {
@@ -768,6 +749,7 @@ export class GoogleAdsManager {
     createNewBudget: boolean = false,
     opts: BudgetUpdateOpts = {}
   ) {
+    campaignId = requireNumericId(campaignId, "campaign_id");
     const customer = this.getCustomer(customerId);
     const cleanId = customerId.replace(/-/g, "");
 
@@ -910,6 +892,7 @@ export class GoogleAdsManager {
   // and updateCampaignBudget's createNewBudget path both refuse to do it
   // silently and point callers here instead.
   async detachPortfolioBidStrategy(customerId: string, campaignId: string) {
+    campaignId = requireNumericId(campaignId, "campaign_id");
     const customer = this.getCustomer(customerId);
     const cleanId = customerId.replace(/-/g, "");
 
@@ -1076,7 +1059,7 @@ export class GoogleAdsManager {
 
   // Create an image asset for use in Demand Gen (or other image-capable) ads.
   // Validates mime type (PNG/JPEG/GIF), size (≤5MB), and min dimensions (600x314)
-  // before hitting the API. Auto-labels the created asset.
+  // before hitting the API. Assets cannot carry a label (UNLABELABLE_AUDIT).
   async createImageAsset(customerId: string, input: ImageInput) {
     const prepared = prepareImageForUpload(input);
     if (!prepared.valid) {
@@ -1110,13 +1093,10 @@ export class GoogleAdsManager {
     const resourceName: string | undefined = results[0]?.resource_name;
     const assetId = resourceName ? resourceName.split("/").pop() : undefined;
 
-    if (resourceName) {
-      await this.autoLabelCreated(customerId, [resourceName], "asset");
-    }
-
     return {
       asset_id: assetId,
       resource_name: resourceName,
+      ...UNLABELABLE_AUDIT,
       name: input.name,
       bytes: prepared.bytes!.length,
       mime_type: prepared.mime_type!,
@@ -1161,11 +1141,7 @@ export class GoogleAdsManager {
     const results = (result as any).results || [];
     const resourceName: string | undefined = results[0]?.resource_name;
 
-    if (resourceName) {
-      await this.autoLabelCreated(customerId, [resourceName], "asset");
-    }
-
-    return summarizeLeadFormResult(input, resourceName);
+    return { ...summarizeLeadFormResult(input, resourceName), ...UNLABELABLE_AUDIT };
   }
 
   // Create a responsive search ad (paused by default)
@@ -1841,10 +1817,7 @@ export class GoogleAdsManager {
 
     const result = await withResilience(() => customer.sharedSets.create([sharedSet]), "createSharedSet");
 
-    // GLOBAL rule: auto-apply Claude-MM-DD-YY label to the new shared set
-    const sharedSetRNs = ((result as any).results || []).map((r: any) => r.resource_name).filter(Boolean);
-    await this.autoLabelCreated(customerId, sharedSetRNs, "shared_set");
-
+    // Shared sets cannot carry a label; the dispatch says so in its result.
     return result;
   }
 
@@ -2497,6 +2470,7 @@ export class GoogleAdsManager {
     expected_old?: { strategy?: string; target_cpa_dollars?: number | null; target_roas?: number | null };
     overrideLog?: OverrideLogTarget;
   }) {
+    campaignId = requireNumericId(campaignId, "campaign_id");
     const customer = this.getCustomer(customerId);
     const cleanId = customerId.replace(/-/g, "");
 
@@ -2712,6 +2686,7 @@ export class GoogleAdsManager {
   // does not. Caller must pass an explicit mode — no default, so ROTATE_INDEFINITELY
   // can never be applied by omission.
   async updateCampaignAdRotation(customerId: string, campaignId: string, mode: string, opts: { expected_old?: string } = {}) {
+    campaignId = requireNumericId(campaignId, "campaign_id");
     const customer = this.getCustomer(customerId);
     const cleanId = customerId.replace(/-/g, "");
     const resourceName = `customers/${cleanId}/campaigns/${campaignId}`;
@@ -2801,11 +2776,13 @@ export class GoogleAdsManager {
       "updateCampaignGeoTargetType.update"
     );
 
+    const auditLabel = await this.autoLabelCreated(customerId, resourceNames, "campaign");
     await this.applyCustomLabels(customerId, resourceNames, "campaign", label ? [label] : undefined);
 
     return {
       campaign_ids: campaignIds,
       mode,
+      audit_label: auditLabel,
       label_applied: label ?? null,
     };
   }
@@ -3485,10 +3462,6 @@ export class GoogleAdsManager {
     const resourceName: string | undefined = results[0]?.resource_name;
     const assetId = resourceName ? resourceName.split("/").pop() : undefined;
 
-    if (resourceName) {
-      await this.autoLabelCreated(customerId, [resourceName], "asset");
-    }
-
     return {
       customer_id: cleanId,
       asset_id: assetId,
@@ -3497,6 +3470,7 @@ export class GoogleAdsManager {
       final_urls: args.final_urls,
       description1: args.description1,
       description2: args.description2,
+      ...UNLABELABLE_AUDIT,
     };
   }
 
@@ -3655,7 +3629,7 @@ export class GoogleAdsManager {
     }
     const newAssetId = newAssetResource.split("/").pop() || "";
 
-    await this.autoLabelCreated(customerId, [newAssetResource], "asset");
+    // The new asset cannot carry a label (UNLABELABLE_AUDIT); its links can't either.
 
     // 4. Create new links pointing at the new asset (one batch per level).
     const SITELINK_FIELD_TYPE = enums.AssetFieldType.SITELINK;
@@ -3802,6 +3776,8 @@ export class GoogleAdsManager {
       () => customer.campaigns.update([{ resource_name: resourceName, name: newName } as any]),
       "renameCampaign"
     );
+
+    await this.autoLabelCreated(customerId, [resourceName], "campaign");
 
     return {
       customer_id: cleanId,
@@ -3982,15 +3958,12 @@ export class GoogleAdsManager {
     const resourceName: string | undefined = results[0]?.resource_name;
     const assetId = resourceName ? resourceName.split("/").pop() : undefined;
 
-    if (resourceName) {
-      await this.autoLabelCreated(customerId, [resourceName], "asset");
-    }
-
     return {
       customer_id: cleanId,
       asset_id: assetId,
       resource_name: resourceName,
       callout_text: args.callout_text,
+      ...UNLABELABLE_AUDIT,
     };
   }
 
@@ -4013,16 +3986,13 @@ export class GoogleAdsManager {
     const resourceName: string | undefined = results[0]?.resource_name;
     const assetId = resourceName ? resourceName.split("/").pop() : undefined;
 
-    if (resourceName) {
-      await this.autoLabelCreated(customerId, [resourceName], "asset");
-    }
-
     return {
       customer_id: cleanId,
       asset_id: assetId,
       resource_name: resourceName,
       header: args.header,
       values: args.values,
+      ...UNLABELABLE_AUDIT,
     };
   }
 
@@ -4114,7 +4084,10 @@ export class GoogleAdsManager {
       }
     }
 
-    await this.autoLabelCreated(customerId, [expResourceName], "experiment" as any);
+    // Experiments cannot carry a label; the treatment campaign it created can.
+    const auditLabel = treatmentCampaignId
+      ? await this.autoLabelCreated(customerId, [`customers/${cleanId}/campaigns/${treatmentCampaignId}`], "campaign")
+      : null;
 
     return {
       customer_id: cleanId,
@@ -4124,6 +4097,7 @@ export class GoogleAdsManager {
       name: input.name,
       traffic_split_percent: trafficSplit,
       status: "SETUP",
+      audit_label: auditLabel,
       note: treatmentCampaignId
         ? `Treatment campaign ${treatmentCampaignId} created. Use google_ads_update_campaign_ad_urls to change landing pages, then google_ads_schedule_experiment to go live.`
         : "Treatment campaign not yet available — query google_ads_get_experiment in a few seconds.",
@@ -4134,9 +4108,12 @@ export class GoogleAdsManager {
     campaignId?: string;
     statusFilter?: string;
   } = {}) {
+    const statusFilter = options.statusFilter && options.statusFilter !== "ALL"
+      ? requireOneOf(options.statusFilter, "status_filter", EXPERIMENT_STATUS_FILTERS)
+      : undefined;
     const customer = this.getCustomer(customerId);
-    const statusClause = options.statusFilter && options.statusFilter !== "ALL"
-      ? `AND experiment.status = '${options.statusFilter}'`
+    const statusClause = statusFilter
+      ? `AND experiment.status = '${statusFilter}'`
       : `AND experiment.status != 'REMOVED'`;
 
     const rows = await withResilience(
@@ -4194,6 +4171,7 @@ export class GoogleAdsManager {
   }
 
   async getExperiment(customerId: string, experimentId: string) {
+    experimentId = requireNumericId(experimentId, "experiment_id");
     const customer = this.getCustomer(customerId);
     const cleanId = customerId.replace(/-/g, "");
     const expRN = `customers/${cleanId}/experiments/${experimentId}`;
@@ -4390,7 +4368,7 @@ export class GoogleAdsManager {
       );
     }
 
-    await this.autoLabelCreated(customerId, ads.map(a => a.resource_name).filter(Boolean), "ad" as any);
+    await this.autoLabelCreated(customerId, ads.map(a => a.resource_name).filter(Boolean), "ad");
 
     return {
       customer_id: cleanId,
@@ -4751,6 +4729,8 @@ export class GoogleAdsManager {
     campaignIds?: string[];
     adGroupIds?: string[];
   }) {
+    requireGaqlDate(options.startDate, "start_date");
+    requireGaqlDate(options.endDate, "end_date");
     const customer = this.getCustomer(customerId);
 
     let query = `
@@ -4810,6 +4790,8 @@ export class GoogleAdsManager {
     campaignIds?: string[];
     adGroupIds?: string[];
   }) {
+    requireGaqlDate(options.startDate, "start_date");
+    requireGaqlDate(options.endDate, "end_date");
     const customer = this.getCustomer(customerId);
 
     let query = `
@@ -4861,6 +4843,8 @@ export class GoogleAdsManager {
     campaignIds?: string[];
     adGroupIds?: string[];
   }) {
+    requireGaqlDate(options.startDate, "start_date");
+    requireGaqlDate(options.endDate, "end_date");
     const customer = this.getCustomer(customerId);
 
     let query = `
@@ -4910,6 +4894,8 @@ export class GoogleAdsManager {
     campaignIds?: string[];
     adGroupIds?: string[];
   }) {
+    requireGaqlDate(options.startDate, "start_date");
+    requireGaqlDate(options.endDate, "end_date");
     const customer = this.getCustomer(customerId);
 
     let query = `
@@ -4956,6 +4942,8 @@ export class GoogleAdsManager {
     campaignIds?: string[];
     adGroupIds?: string[];
   }) {
+    requireGaqlDate(options.startDate, "start_date");
+    requireGaqlDate(options.endDate, "end_date");
     const customer = this.getCustomer(customerId);
 
     let query = `
@@ -5010,6 +4998,8 @@ export class GoogleAdsManager {
     campaignIds?: string[];
     adGroupIds?: string[];
   }) {
+    requireGaqlDate(options.startDate, "start_date");
+    requireGaqlDate(options.endDate, "end_date");
     const customer = this.getCustomer(customerId);
 
     let query = `
@@ -5752,9 +5742,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
         // Label FIRST (label-first-then-remove) so the audit trail survives the remove.
         // If any label attach fails, abort before removing anything.
-        const autoLabel = (getAdsManager() as any).todayClaudeLabel
-          ? (getAdsManager() as any).todayClaudeLabel()
-          : undefined;
+        // Called directly (it used to be read through `as any` with a fallback
+        // to undefined, so a rename silently dropped the audit label).
+        const autoLabel = getAdsManager().todayClaudeLabel();
         const allLabels = [autoLabel, ...(removeArgs.labels ?? [])].filter(
           (l): l is string => typeof l === "string" && !!l
         );
@@ -5881,6 +5871,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               message: `Shared negative keyword list created: ${args?.name}`,
               shared_set_id: newSetId,
               resource_name: resourceName,
+              ...UNLABELABLE_AUDIT,
               results: result,
             }, null, 2),
           }],
@@ -7201,12 +7192,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "google_ads_create_page_feed": {
         const customerId = args?.customer_id as string || "";
-        const campaignId = args?.campaign_id as string;
         const feedName = args?.name as string;
         const urls = args?.urls as string[];
         const label = (args?.label as string | undefined) ?? "page-feed";
 
         try {
+          // Validated before the first write: the id goes into a resource name.
+          const campaignId = requireNumericId(args?.campaign_id, "campaign_id");
+          const cleanCustomerId = customerId.replace(/-/g, "");
           const customer = getAdsManager().getCustomer(customerId);
 
           // 1. Create one PageFeedAsset per URL
@@ -7224,7 +7217,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
           // 2. Create a PAGE_FEED AssetSet
           const assetSetCreateResult = await withResilience(
-            () => (customer as any).asset_sets.create([{
+            () => customer.assetSets.create([{
               name: feedName,
               type: enums.AssetSetType.PAGE_FEED,
             }]),
@@ -7235,7 +7228,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
           // 3. Link each asset to the AssetSet
           await withResilience(
-            () => (customer as any).asset_set_assets.create(
+            () => customer.assetSetAssets.create(
               assetResources.map((assetResource: string) => ({
                 asset_set: assetSetResource,
                 asset: assetResource,
@@ -7246,8 +7239,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
           // 4. Attach AssetSet to campaign
           const casCreateResult = await withResilience(
-            () => (customer as any).campaign_asset_sets.create([{
-              campaign: `customers/${customerId}/campaigns/${campaignId}`,
+            () => customer.campaignAssetSets.create([{
+              campaign: `customers/${cleanCustomerId}/campaigns/${campaignId}`,
               asset_set: assetSetResource,
             }]),
             "attachAssetSetToCampaign"
