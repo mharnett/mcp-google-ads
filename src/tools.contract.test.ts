@@ -216,7 +216,9 @@ describe("Tool Schema Contract", () => {
       expect(schema.required).toContain("ad_resource_name");
       // Editable copy fields are optional (omit to leave unchanged).
       expect(schema.properties.headlines?.type).toBe("array");
-      expect(schema.properties.long_headlines?.type).toBe("array");
+      // Multi-asset ads have no long_headlines API field (that is Demand Gen
+      // video), so the tool must not advertise one.
+      expect(schema.properties.long_headlines).toBeUndefined();
       expect(schema.properties.descriptions?.type).toBe("array");
       expect(schema.required).not.toContain("headlines");
       expect(schema.required).not.toContain("descriptions");

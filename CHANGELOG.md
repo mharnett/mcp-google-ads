@@ -14,6 +14,10 @@
 
 * add google_ads_link_asset_to_ad_group: links an existing SITELINK / CALLOUT / STRUCTURED_SNIPPET (or, with explicit_lead_form_request, LEAD_FORM) asset to ad groups. Dry-run by default; reads each ad group first and reports its name, campaign, current and resulting enabled link count; warns when a sitelink link would leave an ad group under 4 ad-group sitelinks (the first ad-group sitelink switches off campaign-level sitelinks there); skips ad groups that already have the asset; reads back after confirm; returns a claude-MM-DD-YY audit_label since ad-group links carry no label field. Pause a link by passing its returned adGroupAssets resource name to google_ads_pause_asset_links. Replaces a one-off client script.
 
+### Bug Fixes
+
+* google_ads_update_demand_gen_multi_asset_ad now edits headlines and descriptions IN PLACE through AdService (same ad ID, status and history), the edit the Google Ads UI makes. It used AdGroupAdService, which answers IMMUTABLE_FIELD for any nested ad field, and its description told callers to rebuild the ad (new ID, lost history, paused auto-generated video siblings). Checked with validate_only on a live Demand Gen multi-asset ad: unchanged copy is refused with IMMUTABLE_FIELD on the old path and accepted through AdService. Adds `validate_only`; validates the resulting full copy, so a headlines-only edit no longer fails for missing descriptions; labels every linked ad group ad; refuses `long_headlines` (not an API field on multi-asset ads, so it was silently dropped) and pinned headlines (Demand Gen does not pin); refuses non-multi-asset ads.
+
 ## [1.13.0](https://github.com/mharnett/mcp-google-ads/compare/v1.12.1...v1.13.0) (2026-11-13)
 
 

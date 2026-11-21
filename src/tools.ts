@@ -1185,7 +1185,7 @@ export const tools: Tool[] = [
   },
   {
     name: "google_ads_update_demand_gen_multi_asset_ad",
-    description: "Attempt to update copy on a Demand Gen ad. WARNING: on Demand Gen MULTI-ASSET ads the entire creative — headlines, descriptions, AND images — is IMMUTABLE after creation; the Google Ads API rejects any such update with IMMUTABLE_FIELD (verified live 2026-07-12). To change ANY creative on a multi-asset ad you must RECREATE it (create a new ad + pause the old one), not update it. This tool is retained for DG ad formats that may permit copy edits; against a multi-asset ad it will error. Provide the ad's resource name (customers/XXX/adGroupAds/YYY~ZZZ) or numeric ad ID.",
+    description: "Edit the headlines and/or descriptions of a Demand Gen multi-asset ad IN PLACE via AdService: same ad ID, status and ad-level history kept, the same edit the Google Ads UI makes; Google re-reviews the edited ad. Only the fields you pass change, and each list you pass replaces that field's whole list. Images, business name, call to action and final URL are not edited here (final URL: google_ads_update_ad_final_urls). Building a new ad is the wrong way to change copy: the new ad gets a new ID, loses its history and Google pauses its auto-generated video siblings. If the Ad is linked into several ad groups, every link changes (see affected_ad_group_ad_links). Long headlines and pinned headlines are refused (multi-asset ads have neither). Set validate_only=true to have Google check the edit without changing anything. Provide the ad's resource name (customers/XXX/adGroupAds/YYY~ZZZ) or numeric ad ID. Auto-labels every linked ad claude-MM-DD-YY.",
     inputSchema: {
       additionalProperties: false,
       type: "object",
@@ -1196,7 +1196,6 @@ export const tools: Tool[] = [
           description: "The ad's current texts (order-insensitive). Only the keys you pass are checked. Optional; when given and it does not match the live value, the tool refuses, returns current vs expected and makes no write.",
           properties: {
             headlines: { type: "array", items: { type: "string" } },
-            long_headlines: { type: "array", items: { type: "string" } },
             descriptions: { type: "array", items: { type: "string" } },
           },
         },
@@ -1207,35 +1206,22 @@ export const tools: Tool[] = [
         },
         headlines: {
           type: "array",
-          description: "Optional: max 5 headlines, each ≤40 characters. Omit to keep current value.",
-          items: {
-            oneOf: [
-              { type: "string" },
-              {
-                type: "object",
-                properties: {
-                  text: { type: "string" },
-                  pinned_position: { type: "number" },
-                },
-                required: ["text"],
-              },
-            ],
-          },
-        },
-        long_headlines: {
-          type: "array",
-          description: "Optional: max 5 long headlines, each ≤90 characters. Omit to keep current value.",
+          description: "Optional: the full new headline list, max 5, each ≤40 characters. Omit to keep current value.",
           items: { type: "string" },
         },
         descriptions: {
           type: "array",
-          description: "Optional: max 5 descriptions, each ≤90 characters. Omit to keep current value.",
+          description: "Optional: the full new description list, max 5, each ≤90 characters. Omit to keep current value.",
           items: { type: "string" },
         },
         labels: {
           type: "array",
           items: { type: "string" },
           description: "Optional additional labels (auto-applied Claude-MM-DD-YY label is added regardless).",
+        },
+        validate_only: {
+          type: "boolean",
+          description: "Optional: true sends the edit with validate_only so Google checks it and changes nothing (no labels applied). Default false.",
         },
       },
       required: [
