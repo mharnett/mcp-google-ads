@@ -4,6 +4,8 @@
 
 ### Features
 
+* add skills/google-ads-program-audit: a read-only audit playbook for a stalled B2B Google Ads program (setup before assets: bidder training, CRM import, auto-apply, broad match and negatives, Search Partners, Performance Max and AI Max, location, landing pages, budget; then offer, message, landing page). Every GAQL query in it was run against a live account. src/skillDocs.test.ts keeps skills to registered, read-only tools.
+
 * add google_ads_update_recommendation_subscriptions: turns Recommendations > Auto-apply on (ENABLED) or off (PAUSED) per recommendation type, e.g. RESPONSIVE_SEARCH_AD and RESPONSIVE_SEARCH_AD_IMPROVE_AD_STRENGTH. Dry-run by default, reads current subscriptions first, optional `expected_old`; pausing a type with no subscription is a no-op.
 
 * SEARCH campaigns now create with search partners and the Display Network OFF (previously omitted, so Google's defaults turned both on). Add google_ads_update_campaign_network_settings: sets `search_partners` and/or `display_network` on SEARCH campaigns, writing only those leaf fields. Dry-run by default, optional `expected_old`, refuses non-SEARCH campaigns, auto-applies the claude-MM-DD-YY campaign label.
