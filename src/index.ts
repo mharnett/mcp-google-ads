@@ -82,6 +82,8 @@ import {
   buildCreateStructuredSnippetDryRun,
   normalizeLinkAssetToCustomerArgs,
   buildLinkAssetToCustomerDryRun,
+  normalizeUpdateDemandGenMultiAssetAdArgs,
+  type UpdateDemandGenMultiAssetAdInput,
 } from "./assetHelpers.js";
 import {
   normalizeLinkAssetToAdGroupArgs,
@@ -1418,152 +1420,163 @@ export class GoogleAdsManager {
     };
   }
 
-  async updateDemandGenMultiAssetAd(
-    customerId: string,
-    input: {
-      ad_resource_name: string;
-      headlines?: Array<string | { text: string; pinned_position?: number }>;
-      long_headlines?: string[];
-      descriptions?: string[];
-      labels?: string[];
-      expected_old?: { headlines?: string[]; long_headlines?: string[]; descriptions?: string[] };
-    }
-  ) {
+  /**
+   * Edit Demand Gen multi-asset ad copy (headlines, descriptions) IN PLACE via
+   * AdService: customer.ads.update([{resource_name: customers/X/ads/Y,
+   * demand_gen_multi_asset_ad: {...}}]). Same ad id, status and ad-level
+   * history kept, which is the edit the Google Ads UI makes. google-ads-api
+   * builds the update mask from the payload's keys, so only the fields passed
+   * are written; each list passed replaces that field's whole list.
+   *
+   * Never route this through AdGroupAdService (mutateResources entity
+   * "ad_group_ad" with a nested `ad`): that service answers IMMUTABLE_FIELD
+   * for any nested ad field, which is where an earlier "multi-asset creative
+   * is immutable, rebuild the ad" note came from. A rebuild gets a new ad id,
+   * resets history and pauses Google's auto-generated video siblings.
+   *
+   * An Ad can be linked into several ad groups; AdService edits the shared Ad,
+   * so every link changes. All links are returned and labelled.
+   *
+   * Refused rather than dropped: long_headlines (DemandGenMultiAssetAdInfo has
+   * no such field; the client library would drop it silently) and pinned
+   * headlines (Demand Gen does not pin). Images are not edited here.
+   */
+  async updateDemandGenMultiAssetAd(customerId: string, input: UpdateDemandGenMultiAssetAdInput) {
     const customer = this.getCustomer(customerId);
     const cleanId = customerId.replace(/-/g, "");
 
-    // Resolve resource name if numeric ID provided
-    let resourceName = input.ad_resource_name;
-    if (!resourceName.startsWith("customers/")) {
-      // It's a numeric ad ID; need to resolve it
-      const adId = resourceName;
-      const adRows = await withResilience(
-        () =>
-          customer.query(
-            // ad_group_ad has no queryable `.id`; the ad's numeric ID lives at
-            // ad_group_ad.ad.id. (Using ad_group_ad.id fails with query_error 32.)
-            `SELECT ad_group_ad.resource_name FROM ad_group_ad WHERE ad_group_ad.ad.id = ${sanitizeNumericId(
-              adId
-            )}`
-          ),
-        "updateDemandGenMultiAssetAd.resolveResourceName"
+    if (input.long_headlines?.length) {
+      throw new Error(
+        "long_headlines cannot be set on a Demand Gen multi-asset ad: the API has no such field on DemandGenMultiAssetAdInfo (long headlines belong to Demand Gen video ads). Nothing was changed."
       );
-      if (!adRows || adRows.length === 0) {
-        throw new Error(`Ad ${adId} not found`);
-      }
-      resourceName = (adRows[0] as any)?.ad_group_ad?.resource_name;
-      if (!resourceName) {
-        throw new Error(`Could not resolve resource name for ad ${adId}`);
-      }
+    }
+    if ((input.headlines ?? []).some((h) => typeof h === "object" && h.pinned_position !== undefined)) {
+      throw new Error("Demand Gen headlines cannot be pinned; pass headline text only. Nothing was changed.");
+    }
+    if (!input.headlines && !input.descriptions) {
+      throw new Error("Must provide headlines and/or descriptions to update.");
     }
 
-    // Validate input (only validate fields that are being updated)
-    if (input.headlines || input.descriptions) {
-      const validationInput = {
-        final_urls: ["https://example.com"], // dummy, not validated for updates
-        business_name: "dummy",
-        call_to_action: "LEARN_MORE",
-        headlines: input.headlines || [],
-        descriptions: input.descriptions || [],
-        long_headlines: input.long_headlines,
-      };
-      const validation = validateDemandGenAd(validationInput as any);
-      if (!validation.valid) {
-        throw new Error("Demand Gen ad validation failed:\n" + validation.errors.join("\n"));
-      }
+    // Ad id from a numeric id, customers/X/adGroupAds/AG~AD, or customers/X/ads/AD.
+    const raw = String(input.ad_resource_name ?? "");
+    const fromName = raw.match(/\/adGroupAds\/\d+~(\d+)$/) ?? raw.match(/\/ads\/(\d+)$/);
+    if (raw.startsWith("customers/") && !fromName) {
+      throw new Error(`Unrecognised ad resource name: ${raw}`);
+    }
+    const adId = sanitizeNumericId(fromName ? fromName[1] : raw);
+
+    const rows = await withResilience(
+      () =>
+        customer.query(`
+          SELECT ad_group_ad.resource_name,
+                 ad_group_ad.status,
+                 ad_group_ad.ad.id,
+                 ad_group_ad.ad.type,
+                 ad_group_ad.ad.demand_gen_multi_asset_ad.headlines,
+                 ad_group_ad.ad.demand_gen_multi_asset_ad.descriptions,
+                 ad_group.id,
+                 ad_group.name,
+                 campaign.name
+          FROM ad_group_ad
+          WHERE ad_group_ad.ad.id = ${adId}
+            AND ad_group_ad.status != 'REMOVED'
+        `),
+      "updateDemandGenMultiAssetAd.query"
+    );
+    if (!rows || rows.length === 0) {
+      throw new Error(`Ad ${adId} not found (or removed).`);
     }
 
-    // Build update payload. IMPORTANT: on a Demand Gen MULTI-ASSET ad the entire
-    // creative is IMMUTABLE after creation — headlines, descriptions, and every
-    // image field (marketing/square/portrait/logo) are all rejected by the API
-    // with request_error IMMUTABLE_FIELD ("cannot be modified by 'UPDATE'").
-    // Verified live 2026-07-12. To change ANY creative on these ads you must
-    // recreate the ad (create new + pause old). This payload is still built for
-    // other DG ad formats that may permit copy edits; for multi-asset ads the
-    // mutate below will throw and the caller should recreate instead.
+    const first: any = rows[0];
+    const adType = first.ad_group_ad?.ad?.type;
+    if (adType !== 40 && adType !== "DEMAND_GEN_MULTI_ASSET_AD") {
+      throw new Error(
+        `Ad ${adId} is type ${adType}, not DEMAND_GEN_MULTI_ASSET_AD. This tool only edits Demand Gen multi-asset copy.`
+      );
+    }
+
+    const dg = first.ad_group_ad?.ad?.demand_gen_multi_asset_ad ?? {};
+    const texts = (xs: any[] | undefined) => (xs ?? []).map((x: any) => x?.text ?? "");
+    const currentHeadlines = texts(dg.headlines);
+    const currentDescriptions = texts(dg.descriptions);
+    const newHeadlines = input.headlines?.map((h) => (typeof h === "string" ? h : h.text));
+    const newDescriptions = input.descriptions;
+
     if (input.expected_old) {
-      const [live] = await withResilience(
-        () =>
-          customer.query(`
-            SELECT ad_group_ad.resource_name,
-                   ad_group_ad.ad.demand_gen_multi_asset_ad.headlines,
-                   ad_group_ad.ad.demand_gen_multi_asset_ad.long_headlines,
-                   ad_group_ad.ad.demand_gen_multi_asset_ad.descriptions
-            FROM ad_group_ad
-            WHERE ad_group_ad.resource_name = '${resourceName}'
-          `),
-        "updateDemandGenMultiAssetAd.expectedOld"
-      );
-      if (!live?.ad_group_ad) throw new Error(`Ad ${resourceName} not found`);
-      const dg = (live as any).ad_group_ad.ad?.demand_gen_multi_asset_ad ?? {};
-      const texts = (xs: any[] | undefined) => (xs ?? []).map((x: any) => x?.text ?? "");
-      assertExpectedOld("google_ads_update_demand_gen_multi_asset_ad", `ad ${resourceName}`, [
-        { field: "headlines", expected: input.expected_old.headlines, current: texts(dg.headlines), kind: "set" },
-        { field: "long_headlines", expected: input.expected_old.long_headlines, current: texts(dg.long_headlines), kind: "set" },
-        { field: "descriptions", expected: input.expected_old.descriptions, current: texts(dg.descriptions), kind: "set" },
+      assertExpectedOld("google_ads_update_demand_gen_multi_asset_ad", `ad ${adId}`, [
+        { field: "headlines", expected: input.expected_old.headlines, current: currentHeadlines, kind: "set" },
+        { field: "descriptions", expected: input.expected_old.descriptions, current: currentDescriptions, kind: "set" },
       ]);
     }
 
-    const updateResource: any = {
-      resource_name: resourceName,
-    };
-
-    if (input.headlines) {
-      updateResource.ad = {
-        demand_gen_multi_asset_ad: {
-          headlines: input.headlines.map((h) => ({
-            text: typeof h === "string" ? h : h.text,
-            ...(typeof h === "object" && h.pinned_position !== undefined
-              ? { pinned_position: h.pinned_position }
-              : {}),
-          })),
-        },
-      };
+    // Validate the resulting full copy: the changed field(s) plus the live
+    // value of whatever is untouched, so a headlines-only edit is checked
+    // against the ad's real descriptions. Final URL, business name and CTA are
+    // not edited here, so placeholders stand in for them.
+    const validation = validateDemandGenAd({
+      final_urls: ["https://example.com"],
+      business_name: "placeholder",
+      call_to_action: "LEARN_MORE",
+      headlines: newHeadlines ?? currentHeadlines,
+      descriptions: newDescriptions ?? currentDescriptions,
+    } as any);
+    if (!validation.valid) {
+      throw new Error("Demand Gen ad validation failed:\n" + validation.errors.join("\n"));
     }
 
-    if (input.descriptions) {
-      if (!updateResource.ad) updateResource.ad = { demand_gen_multi_asset_ad: {} };
-      updateResource.ad.demand_gen_multi_asset_ad.descriptions = input.descriptions.map((t) => ({
-        text: t,
-      }));
-    }
+    const adUpdate: any = { resource_name: buildAdResourceName(cleanId, adId), demand_gen_multi_asset_ad: {} };
+    if (newHeadlines) adUpdate.demand_gen_multi_asset_ad.headlines = newHeadlines.map((text) => ({ text }));
+    if (newDescriptions) adUpdate.demand_gen_multi_asset_ad.descriptions = newDescriptions.map((text) => ({ text }));
 
-    const mutateResp: any = await withResilience(
+    const links = (rows as any[]).map((r) => ({
+      resource_name: r.ad_group_ad?.resource_name as string,
+      ad_group_id: String(r.ad_group?.id ?? ""),
+      ad_group_name: r.ad_group?.name ?? "",
+      campaign: r.campaign?.name ?? "",
+      status: r.ad_group_ad?.status,
+    }));
+    const linkNames = links.map((l) => l.resource_name).filter(Boolean);
+    const updatedFields = [newHeadlines && "headlines", newDescriptions && "descriptions"].filter(Boolean) as string[];
+    const mechanism = "in-place update via AdService (customer.ads.update): same ad ID, history kept";
+
+    const resp: any = await withResilience(
       () =>
-        customer.mutateResources([
-          {
-            entity: "ad_group_ad",
-            operation: "update",
-            resource: updateResource as any,
-          } as any,
-        ]),
-      "updateDemandGenMultiAssetAd"
+        customer.ads.update([adUpdate], {
+          validate_only: !!input.validate_only,
+          partial_failure: false,
+        } as any),
+      "updateDemandGenMultiAssetAd.mutate"
     );
 
-    const adGroupAdResult = (mutateResp.mutate_operation_responses || [])
-      .map((r: any) => r.ad_group_ad_result)
-      .filter(Boolean)[0];
-    const resultResourceName: string | undefined = adGroupAdResult?.resource_name;
+    const common = {
+      customer_id: cleanId,
+      ad_id: adId,
+      ad_resource_name: adUpdate.resource_name,
+      resource_name: linkNames[0],
+      mechanism,
+      affected_ad_group_ad_links: links,
+      shared_across_multiple_ad_groups: links.length > 1,
+      updated_fields: updatedFields,
+    };
 
-    // Apply labels
-    if (resultResourceName) {
-      await this.autoLabelCreated(customerId, [resultResourceName], "ad");
+    if (input.validate_only) {
+      return { ...common, validate_only: true, passed: true };
+    }
+
+    const success = !!resp?.results?.[0]?.resource_name;
+    if (success) {
+      await this.autoLabelCreated(customerId, linkNames, "ad");
       for (const lbl of input.labels ?? []) {
         try {
           const labelRN = await this.ensureLabelExists(customerId, lbl);
-          await this.labelAdGroupAds(customerId, [resultResourceName], labelRN);
+          await this.labelAdGroupAds(customerId, linkNames, labelRN);
         } catch (e: any) {
           console.error(`[WARN] extra label '${lbl}' failed: ${e.message}`);
         }
       }
     }
 
-    return {
-      success: !!resultResourceName,
-      resource_name: resultResourceName,
-      ad_id: resultResourceName ? resultResourceName.split("~").pop() : undefined,
-      updated_fields: Object.keys(input).filter((k) => k !== "labels" && input[k as keyof typeof input]),
-    };
+    return { ...common, success };
   }
 
   /**
@@ -4452,9 +4465,9 @@ export class GoogleAdsManager {
       .filter(a => a.ad_group_id !== cleanAgId)
       .map(a => ({ ad_id: a.ad_id, ad_group: a.ad_group_name, campaign: a.campaign_name, status: a.status }));
 
-    // Editable in place: RSA (15) and Demand Gen multi-asset (40) -- the
-    // latter's creative is immutable but final_urls lives on the Ad and goes
-    // through AdService like an RSA. Video (30) really does reject final_urls
+    // Editable in place: RSA (15) and Demand Gen multi-asset (40) -- both
+    // are Ad-level fields edited through AdService (DG copy edits go the same
+    // way, see updateDemandGenMultiAssetAd). Video (30) really does reject final_urls
     // updates -- refuse rather than half-apply.
     const EDITABLE_TYPES = new Set<number | string>([15, "RESPONSIVE_SEARCH_AD", 40, "DEMAND_GEN_MULTI_ASSET_AD"]);
     const nonRsa = found.filter(a => !EDITABLE_TYPES.has(a.ad_type));
@@ -7127,23 +7140,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case "google_ads_update_demand_gen_multi_asset_ad": {
-        const customerId = args?.customer_id as string || "";
         try {
-          const result = await getAdsManager().updateDemandGenMultiAssetAd(customerId, {
-            ad_resource_name: args?.ad_resource_name as string,
-            headlines: args?.headlines as Array<string | { text: string; pinned_position?: number }> | undefined,
-            long_headlines: args?.long_headlines as string[] | undefined,
-            descriptions: args?.descriptions as string[] | undefined,
-            labels: args?.labels as string[] | undefined,
-            expected_old: args?.expected_old as any,
-          });
+          const norm = normalizeUpdateDemandGenMultiAssetAdArgs(args as Record<string, unknown> | undefined);
+          const result: any = await getAdsManager().updateDemandGenMultiAssetAd(norm.customerId, norm.input);
           return {
             content: [{
               type: "text",
               text: JSON.stringify({
                 ...result,
-                message: result.success
-                  ? `Demand Gen ad updated. Updated fields: ${result.updated_fields.join(", ")}`
+                message: result.validate_only
+                  ? `validate_only: Google accepted the edit to ${result.updated_fields.join(", ")}; nothing was changed.`
+                  : result.success
+                  ? `Demand Gen ad updated in place. Updated fields: ${result.updated_fields.join(", ")}`
                   : "Update failed",
               }, null, 2),
             }],

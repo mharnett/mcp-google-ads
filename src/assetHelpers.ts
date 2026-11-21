@@ -566,3 +566,38 @@ export function buildPauseLinksDryRun(args: PauseAssetLinksArgs): PauseLinksDryR
     would_pause: would,
   };
 }
+
+// ---------------------------------------------------------------------------
+// google_ads_update_demand_gen_multi_asset_ad: MCP args -> manager input, kept
+// out of the index.ts switch so the passthrough (validate_only, expected_old)
+// is unit-testable.
+// ---------------------------------------------------------------------------
+
+export interface UpdateDemandGenMultiAssetAdInput {
+  ad_resource_name: string;
+  headlines?: Array<string | { text: string; pinned_position?: number }>;
+  /** Not an API field on multi-asset ads; passed through only so the manager can refuse it loudly. */
+  long_headlines?: string[];
+  descriptions?: string[];
+  labels?: string[];
+  expected_old?: { headlines?: string[]; descriptions?: string[] };
+  validate_only?: boolean;
+}
+
+export function normalizeUpdateDemandGenMultiAssetAdArgs(args: Record<string, unknown> | undefined): {
+  customerId: string;
+  input: UpdateDemandGenMultiAssetAdInput;
+} {
+  return {
+    customerId: (args?.customer_id as string) || "",
+    input: {
+      ad_resource_name: args?.ad_resource_name as string,
+      headlines: args?.headlines as UpdateDemandGenMultiAssetAdInput["headlines"],
+      long_headlines: args?.long_headlines as string[] | undefined,
+      descriptions: args?.descriptions as string[] | undefined,
+      labels: args?.labels as string[] | undefined,
+      expected_old: args?.expected_old as UpdateDemandGenMultiAssetAdInput["expected_old"],
+      validate_only: args?.validate_only === true,
+    },
+  };
+}

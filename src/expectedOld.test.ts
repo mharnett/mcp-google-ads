@@ -547,6 +547,7 @@ describe("updateDemandGenMultiAssetAd expected_old", () => {
       ad_group_ad: {
         resource_name: `customers/${CID}/adGroupAds/7~11`,
         ad: {
+          type: 40, // DEMAND_GEN_MULTI_ASSET_AD
           demand_gen_multi_asset_ad: {
             headlines: [{ text: "Old headline" }],
             descriptions: [{ text: "Old description" }],
