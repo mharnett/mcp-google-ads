@@ -5313,7 +5313,10 @@ function getAdsManager(): GoogleAdsManager {
   return _adsManager;
 }
 
-const server = new Server(
+// Exported so tests can connect an in-memory transport and drive the real
+// tools/list and tools/call handlers registered below. main() is the only
+// production caller of server.connect().
+export const server = new Server(
   {
     name: __cliPkg.name,
     version: __cliPkg.version,
