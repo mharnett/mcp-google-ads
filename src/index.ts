@@ -91,6 +91,11 @@ import {
   type AdGroupAssetState,
 } from "./adGroupAssetLink.js";
 import {
+  normalizeLinkAssetToCampaignArgs,
+  runLinkAssetToCampaign,
+  type CampaignAssetState,
+} from "./campaignAssetLink.js";
+import {
   ENABLE_PATH,
   PARENT_LABEL_NOTE as ASSET_LINK_PARENT_LABEL_NOTE,
   LINK_PARENT_LABEL_NOTE,
@@ -110,7 +115,6 @@ import {
   buildCampaignCreatePayload,
   type CampaignCreateInput,
   assertLeadFormExplicitlyRequested,
-  isLeadFormFieldType,
 } from "./campaignBuilder.js";
 import {
   buildExperimentPayload,
@@ -4101,6 +4105,63 @@ export class GoogleAdsManager {
   // LINK ASSET TO CAMPAIGN
   // ============================================
 
+  /**
+   * Current ENABLED and PAUSED campaign links of one field type, per
+   * campaign, plus the campaign name. A PAUSED link still exists, so
+   * creating it again fails as a duplicate; a REMOVED link does not count.
+   * REMOVED campaigns are excluded (cannot take a new link); PAUSED
+   * campaigns are included. Read-only.
+   */
+  async getCampaignAssetState(customerId: string, campaignIds: string[], fieldType: string): Promise<CampaignAssetState[]> {
+    const customer = this.getCustomer(customerId);
+    const ids = campaignIds.filter(id => /^\d+$/.test(id));
+    if (ids.length === 0) return [];
+    if (!/^[A-Z_]+$/.test(fieldType)) throw new Error(`invalid field_type: ${fieldType}`);
+
+    const campaignRows = await withResilience(
+      () =>
+        customer.query(`
+          SELECT campaign.id, campaign.name
+          FROM campaign
+          WHERE campaign.id IN (${ids.join(", ")})
+            AND campaign.status != 'REMOVED'
+        `),
+      "getCampaignAssetState.campaigns"
+    );
+    const states = new Map<string, CampaignAssetState>();
+    for (const r of campaignRows as any[]) {
+      const id = String(r.campaign?.id ?? "");
+      if (!id || !ids.includes(id)) continue;
+      states.set(id, { campaign_id: id, campaign_name: r.campaign?.name ?? "", enabled_asset_ids: [], paused_asset_ids: [] });
+    }
+    if (states.size === 0) return [];
+
+    const cleanId = customerId.replace(/-/g, "");
+    const campaignResources = [...states.keys()].map(id => `'customers/${cleanId}/campaigns/${id}'`).join(", ");
+    const linkRows = await withResilience(
+      () =>
+        customer.query(`
+          SELECT campaign_asset.campaign, campaign_asset.asset, campaign_asset.status
+          FROM campaign_asset
+          WHERE campaign_asset.campaign IN (${campaignResources})
+            AND campaign_asset.field_type = '${fieldType}'
+            AND campaign_asset.status IN ('ENABLED', 'PAUSED')
+        `),
+      "getCampaignAssetState.campaignAssets"
+    );
+    for (const r of linkRows as any[]) {
+      const campaignId = String(r.campaign_asset?.campaign ?? "").split("/").pop() ?? "";
+      const assetId = String(r.campaign_asset?.asset ?? "").split("/").pop() ?? "";
+      const raw = r.campaign_asset?.status;
+      const status = typeof raw === "number" ? (enums.AssetLinkStatus as any)[raw] : String(raw ?? "");
+      const st = states.get(campaignId);
+      if (!st || !assetId) continue;
+      const bucket = status === "ENABLED" ? st.enabled_asset_ids : status === "PAUSED" ? st.paused_asset_ids : null;
+      if (bucket && !bucket.includes(assetId)) bucket.push(assetId);
+    }
+    return [...states.values()];
+  }
+
   async linkAssetToCampaign(customerId: string, args: {
     asset_id: string;
     campaign_ids: string[];
@@ -7256,48 +7317,19 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case "google_ads_link_asset_to_campaign": {
-        const customerId = args?.customer_id as string || "";
-        const assetId = args?.asset_id as string;
-        const campaignIds = args?.campaign_ids as string[];
-        const fieldType = args?.field_type as string;
-
-        if (!assetId || !campaignIds?.length || !fieldType) {
-          return { content: [{ type: "text", text: JSON.stringify({ error: "asset_id, campaign_ids (non-empty), and field_type are required." }, null, 2) }] };
+        // Lead-form refusal lives in the normalizer, so it fires before the
+        // read, the dry run and any write.
+        const normalized = normalizeLinkAssetToCampaignArgs(args as Record<string, unknown>);
+        if ("error" in normalized) {
+          return { content: [{ type: "text", text: JSON.stringify({ error: normalized.error }, null, 2) }], isError: true };
         }
-
-        if (isLeadFormFieldType(fieldType)) {
-          try {
-            assertLeadFormExplicitlyRequested(args as any, name);
-          } catch (e: any) {
-            return { content: [{ type: "text", text: JSON.stringify({ error: e.message }, null, 2) }], isError: true };
-          }
-        }
-
-        if (!args?.confirm) {
-          return {
-            content: [{
-              type: "text",
-              text: JSON.stringify({
-                dry_run: true,
-                action: "link_asset_to_campaign",
-                asset_id: assetId,
-                campaign_ids: campaignIds,
-                field_type: fieldType,
-                campaigns_to_link: campaignIds.length,
-                status: "PAUSED",
-                message: "Pass confirm: true to create the links PAUSED.",
-                enable_path: ENABLE_PATH,
-              }, null, 2),
-            }],
-          };
-        }
-
-        const linkResult = await getAdsManager().linkAssetToCampaign(customerId, {
-          asset_id: assetId,
-          campaign_ids: campaignIds,
-          field_type: fieldType,
+        const customerId = normalized.customer_id || "";
+        const manager = getAdsManager();
+        const result = await runLinkAssetToCampaign(normalized, {
+          getState: (ids, ft) => manager.getCampaignAssetState(customerId, ids, ft),
+          link: (a) => manager.linkAssetToCampaign(customerId, a),
         });
-        return { content: [{ type: "text", text: JSON.stringify({ success: true, ...linkResult }, null, 2) }] };
+        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }], ...("error" in result ? { isError: true } : {}) };
       }
 
       case "google_ads_link_asset_to_ad_group": {

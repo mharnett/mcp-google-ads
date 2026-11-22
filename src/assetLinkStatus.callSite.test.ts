@@ -154,9 +154,13 @@ describe("the link_asset_to_* tools create the link PAUSED and say so", () => {
     ["google_ads_link_asset_to_ad_group", { asset_id: "502", ad_group_ids: ["41"], field_type: "CALLOUT" }, "adGroupAssets.create"],
     ["google_ads_link_asset_to_customer", { asset_id: "503", field_type: "STRUCTURED_SNIPPET" }, "customerAssets.create"],
   ])("%s (%j) sends status PAUSED on every link", async (name, args, method) => {
-    // The ad group read the ad-group tool makes before linking.
+    // The ad group and campaign reads the ad-group and campaign tools make before linking.
     recorder.answerQuery(/FROM ad_group\s+WHERE\s+ad_group\.id IN \(41\)/, [
       { ad_group: { id: 41, name: "Example ad group", resource_name: `customers/${CID}/adGroups/41` }, campaign: { name: "Example campaign" } },
+    ]);
+    recorder.answerQuery(/FROM campaign\s+WHERE\s+campaign\.id IN/, [
+      { campaign: { id: 31, name: "Example campaign" } },
+      { campaign: { id: 32, name: "Second example campaign" } },
     ]);
 
     const body = await call(name, { ...args, confirm: true });

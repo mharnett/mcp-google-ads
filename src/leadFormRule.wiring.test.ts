@@ -30,13 +30,15 @@ describe("lead form rule is wired into every lead-form entry point", () => {
     expect(guard).toBeLessThan(api);
   });
 
-  it("link_asset_to_campaign checks the flag for LEAD_FORM before the dry run and the API", () => {
+  it("link_asset_to_campaign normalizes (the lead-form gate) before the read, the dry run and the API", () => {
+    // The gate itself lives in normalizeLinkAssetToCampaignArgs (campaignAssetLink.test.ts),
+    // and the dispatch refusal is pinned in assetLinkLabels.callSite.test.ts.
     const block = caseBlock("google_ads_link_asset_to_campaign");
-    const guard = block.indexOf("assertLeadFormExplicitlyRequested(");
-    expect(guard).toBeGreaterThan(-1);
-    expect(block.indexOf("isLeadFormFieldType(")).toBeGreaterThan(-1);
-    expect(guard).toBeLessThan(block.indexOf("dry_run"));
-    expect(guard).toBeLessThan(block.indexOf("linkAssetToCampaign("));
+    const norm = block.indexOf("normalizeLinkAssetToCampaignArgs(");
+    expect(norm).toBeGreaterThan(-1);
+    expect(norm).toBeLessThan(block.indexOf("runLinkAssetToCampaign("));
+    expect(norm).toBeLessThan(block.indexOf("getCampaignAssetState("));
+    expect(norm).toBeLessThan(block.indexOf("linkAssetToCampaign("));
   });
 
   it("both tools expose explicit_lead_form_request and say why", () => {

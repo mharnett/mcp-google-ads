@@ -14,6 +14,8 @@
  *
  * The ad-group tool's read asked for ENABLED links only, so a link that
  * already existed PAUSED looked absent and the create failed as a duplicate.
+ * The campaign tool had no read at all, so re-running any link staged earlier
+ * failed the same way; it now reads ENABLED and PAUSED links first too.
  * The query answers below apply the query's own status filter the way Google
  * does, so a read that still asks for ENABLED only cannot see the PAUSED row.
  *
@@ -157,6 +159,34 @@ function answerAdGroupLinks(links: Array<{ adGroup: string; asset: string; statu
   );
 }
 
+/** The campaign tool's read of the campaigns themselves: each id the query names exists. */
+function answerCampaigns(ids: string[]): void {
+  recorder.answerQuery(/FROM campaign\s+WHERE\s+campaign\.id IN/, (gaql) =>
+    ids
+      .filter((id) => admits(gaql, "campaign.id", id))
+      .map((id) => ({ campaign: { id: Number(id), name: `Example campaign ${id}`, resource_name: campaignRN(id) } })),
+  );
+}
+
+/** Existing campaign links, returned only where the query's own WHERE admits them, as Google would. */
+function answerCampaignLinks(links: Array<{ campaign: string; asset: string; status: number; fieldType: string }>): void {
+  recorder.answerQuery(/FROM campaign_asset\b/, (gaql) =>
+    links
+      .filter((l) => admits(gaql, "campaign_asset.status", enums.AssetLinkStatus[l.status] as string))
+      .filter((l) => admits(gaql, "campaign_asset.field_type", l.fieldType))
+      .filter((l) => admits(gaql, "campaign_asset.campaign", campaignRN(l.campaign)))
+      .map((l) => ({
+        campaign_asset: {
+          resource_name: `customers/${CID}/campaignAssets/${l.campaign}~${l.asset}~${l.fieldType}`,
+          campaign: campaignRN(l.campaign),
+          asset: `customers/${CID}/assets/${l.asset}`,
+          field_type: (enums.AssetFieldType as any)[l.fieldType],
+          status: l.status,
+        },
+      })),
+  );
+}
+
 /** Parents that already carry a label, answered only for the label and parents the query names. */
 function answerExistingParentLabels(kind: "campaign" | "ad_group", parents: string[], labelRN = AUDIT_LABEL_RN): void {
   const table = kind === "campaign" ? "campaign_label" : "ad_group_label";
@@ -246,8 +276,99 @@ describe("google_ads_link_asset_to_ad_group sees a link that already exists PAUS
   });
 });
 
+function campaignRow(body: any, campaignId: string): any {
+  const r = (body.campaigns ?? []).find((c: any) => c.campaign_id === campaignId);
+  expect(r, `no campaigns row for ${campaignId} in ${JSON.stringify(body)}`).toBeDefined();
+  return r;
+}
+
+describe("google_ads_link_asset_to_campaign sees a link that already exists PAUSED", () => {
+  it("reports it as already linked, with its status, and creates and labels only the new link", async () => {
+    answerCampaigns(["31", "32"]);
+    answerCampaignLinks([{ campaign: "31", asset: "501", status: PAUSED, fieldType: "SITELINK" }]);
+
+    const body = await call("google_ads_link_asset_to_campaign", {
+      asset_id: "501", campaign_ids: ["31", "32"], field_type: "SITELINK", confirm: true,
+    });
+
+    expect(ops("campaignAssets.create").map((op: any) => op.campaign)).toEqual([campaignRN("32")]);
+    expect(labelled("campaignLabels", "campaign")).toEqual([campaignRN("32")]);
+    expect(body).toMatchObject({ success: true, status: "PAUSED", linked: 1, skipped_already_linked: ["31"] });
+    expect(campaignRow(body, "31")).toMatchObject({
+      campaign_name: "Example campaign 31", already_linked: true, existing_link_status: "PAUSED", link_status: "PAUSED",
+    });
+    expect(campaignRow(body, "32")).toMatchObject({ already_linked: false, link_status: "PAUSED" });
+    expect(campaignRow(body, "32").existing_link_status).toBeUndefined();
+  });
+
+  it("the dry run says so too, names each campaign, and writes nothing", async () => {
+    answerCampaigns(["31", "32"]);
+    answerCampaignLinks([{ campaign: "31", asset: "501", status: PAUSED, fieldType: "SITELINK" }]);
+
+    const body = await call("google_ads_link_asset_to_campaign", { asset_id: "501", campaign_ids: ["31", "32"], field_type: "SITELINK" });
+
+    expect(body.dry_run).toBe(true);
+    expect(body.campaigns_to_link).toBe(1);
+    expect(campaignRow(body, "31")).toMatchObject({ already_linked: true, existing_link_status: "PAUSED" });
+    expect(campaignRow(body, "32").campaign_name).toBe("Example campaign 32");
+    expect(recorder.writes()).toEqual([]);
+  });
+
+  it("an ENABLED link is reported as ENABLED; nothing is created or labeled", async () => {
+    answerCampaigns(["31"]);
+    answerCampaignLinks([{ campaign: "31", asset: "501", status: ENABLED, fieldType: "SITELINK" }]);
+
+    const body = await call("google_ads_link_asset_to_campaign", {
+      asset_id: "501", campaign_ids: ["31"], field_type: "SITELINK", confirm: true,
+    });
+
+    expect(recorder.writes()).toEqual([]);
+    expect(body.linked).toBe(0);
+    expect(body.audit_label).toBeNull();
+    expect(campaignRow(body, "31")).toMatchObject({ already_linked: true, existing_link_status: "ENABLED", link_status: "ENABLED" });
+  });
+
+  it("a REMOVED link is not a link, and another field type's link does not count: the asset is linked again", async () => {
+    answerCampaigns(["31", "32"]);
+    answerCampaignLinks([
+      { campaign: "31", asset: "501", status: REMOVED, fieldType: "SITELINK" },
+      { campaign: "32", asset: "501", status: PAUSED, fieldType: "CALLOUT" },
+    ]);
+
+    const body = await call("google_ads_link_asset_to_campaign", {
+      asset_id: "501", campaign_ids: ["31", "32"], field_type: "SITELINK", confirm: true,
+    });
+
+    expect(ops("campaignAssets.create").map((op: any) => op.campaign)).toEqual([campaignRN("31"), campaignRN("32")]);
+    expect(body.skipped_already_linked).toEqual([]);
+  });
+
+  it("a campaign the read does not return (wrong id or REMOVED) is refused before any write", async () => {
+    answerCampaigns(["31"]);
+
+    const result: any = await raw("google_ads_link_asset_to_campaign", {
+      asset_id: "501", campaign_ids: ["31", "33"], field_type: "SITELINK", confirm: true,
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toMatch(/campaign 33 not found/);
+    expect(recorder.writes()).toEqual([]);
+  });
+
+  it("LEAD_FORM without explicit_lead_form_request is refused before any read", async () => {
+    const result: any = await raw("google_ads_link_asset_to_campaign", {
+      asset_id: "507", campaign_ids: ["31"], field_type: "LEAD_FORM", confirm: true,
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toMatch(/explicit_lead_form_request/);
+    expect(recorder.calls).toEqual([]);
+  });
+});
+
 describe("the link_asset_to_* creates label the campaign or ad group they linked", () => {
   it("link_asset_to_campaign labels each campaign it linked, and returns the label and why it went on the campaign", async () => {
+    answerCampaigns(["31", "32"]);
     const body = await call("google_ads_link_asset_to_campaign", {
       asset_id: "501", campaign_ids: ["31", "32"], field_type: "SITELINK", confirm: true,
     });
@@ -325,6 +446,7 @@ describe("the link_asset_to_* creates label the campaign or ad group they linked
     try {
       vi.setSystemTime(new Date("2026-11-22T06:30:00Z"));
       expect(new Date().getDate()).toBe(22); // the zone switch took effect
+      answerCampaigns(["31"]);
 
       const body = await call("google_ads_link_asset_to_campaign", {
         asset_id: "501", campaign_ids: ["31"], field_type: "SITELINK", confirm: true,
@@ -342,6 +464,7 @@ describe("the link_asset_to_* creates label the campaign or ad group they linked
   it("a label that fails does not undo the link; the result reports audit_label null", async () => {
     // A client error (code 400), so the resilience layer does not retry it.
     recorder.failMethod("campaignLabels.create", Object.assign(new Error("label refused"), { code: 400 }));
+    answerCampaigns(["31"]);
 
     const body = await call("google_ads_link_asset_to_campaign", {
       asset_id: "501", campaign_ids: ["31"], field_type: "SITELINK", confirm: true,
@@ -353,7 +476,9 @@ describe("the link_asset_to_* creates label the campaign or ad group they linked
   });
 
   it("a create that fails labels nothing", async () => {
+    // A link created between the read and the create (the read saw none).
     recorder.failMethod("campaignAssets.create", Object.assign(new Error("RESOURCE_ALREADY_EXISTS"), { code: 400 }));
+    answerCampaigns(["31"]);
 
     const result: any = await raw("google_ads_link_asset_to_campaign", {
       asset_id: "501", campaign_ids: ["31"], field_type: "SITELINK", confirm: true,
@@ -433,6 +558,7 @@ describe("a parent that already carries today's label is not labeled again", () 
 
   it("a campaign create attaches the label only to the campaigns that lack it", async () => {
     answerExistingParentLabels("campaign", [campaignRN("31")]);
+    answerCampaigns(["31", "32"]);
 
     const body = await call("google_ads_link_asset_to_campaign", {
       asset_id: "501", campaign_ids: ["31", "32"], field_type: "SITELINK", confirm: true,
@@ -442,22 +568,23 @@ describe("a parent that already carries today's label is not labeled again", () 
     expect(body.audit_label).toBe(AUDIT_LABEL);
   });
 
-  it("only exact campaign names reach the label read: a malformed campaign id is not put into GAQL", async () => {
-    // link_asset_to_campaign does not validate campaign_ids (Google refuses a bad one at the create;
-    // the fake accepts it), so the label path is the last place it could reach a query.
+  it("a malformed campaign id is refused before any read, so it never reaches GAQL", async () => {
     const bad = "31' OR '1'='1";
+    answerCampaigns(["31", "32"]);
 
-    const body = await call("google_ads_link_asset_to_campaign", {
+    const result: any = await raw("google_ads_link_asset_to_campaign", {
       asset_id: "501", campaign_ids: [bad, "32"], field_type: "SITELINK", confirm: true,
     });
 
-    expect(recorder.queries().some((q) => q.includes("OR '1'='1"))).toBe(false);
-    expect(labelled("campaignLabels", "campaign")).toEqual([campaignRN("32")]);
-    expect(body.audit_label).toBe(AUDIT_LABEL);
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toMatch(/invalid campaign_ids entry/);
+    expect(recorder.queries()).toEqual([]);
+    expect(recorder.writes()).toEqual([]);
   });
 
   it("a label held by another label id does not count: the parent is still labeled", async () => {
     answerExistingParentLabels("campaign", [campaignRN("31")], `customers/${CID}/labels/777`);
+    answerCampaigns(["31"]);
 
     await call("google_ads_link_asset_to_campaign", { asset_id: "501", campaign_ids: ["31"], field_type: "SITELINK", confirm: true });
 

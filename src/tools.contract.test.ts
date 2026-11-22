@@ -311,6 +311,13 @@ describe("Tool Schema Contract", () => {
       expect((tool.inputSchema as any).properties.audit_label.description).toMatch(/each ad group/);
     });
 
+    it("link_asset_to_campaign says it reads first and skips an existing ENABLED or PAUSED link", () => {
+      const tool = tools.find(t => t.name === "google_ads_link_asset_to_campaign")!;
+      expect(tool.description).toMatch(/Reads each campaign first/);
+      expect(tool.description).toMatch(/ENABLED or PAUSED/);
+      expect(tool.description).toMatch(/existing_link_status/);
+    });
+
     it("pause_asset_links points at enable_asset_links as its inverse", () => {
       const tool = tools.find(t => t.name === "google_ads_pause_asset_links");
       expect(tool!.description).toMatch(/google_ads_enable_asset_links/);
