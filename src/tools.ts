@@ -1283,7 +1283,7 @@ export const tools: Tool[] = [
   },
   {
     name: "google_ads_create_image_asset",
-    description: "Upload an image asset for use in Demand Gen (or other image-capable) ads. Provide exactly one of file_path (absolute path to PNG/JPG/GIF on disk) or base64_data (raw base64, no data URL prefix). Validates mime type, max 5MB, min dimensions 600x314 (Demand Gen minimum). Auto-labels the created asset. Returns {asset_id, resource_name, name, bytes, mime_type}.",
+    description: "Upload an image asset for use in Demand Gen (or other image-capable) ads. Provide exactly one of file_path (absolute path to PNG/JPG/GIF on disk) or base64_data (raw base64, no data URL prefix). Validates mime type, max 5MB, min dimensions 600x314 (Demand Gen minimum). Assets cannot carry a label, so no claude-MM-DD-YY label is applied and the result says so (audit_label: null). Returns {asset_id, resource_name, audit_label, audit_label_note, name, bytes, mime_type}.",
     inputSchema: {
       additionalProperties: false,
       type: "object",
@@ -1298,7 +1298,7 @@ export const tools: Tool[] = [
   },
   {
     name: "google_ads_create_lead_form_asset",
-    description: "Create a LeadFormAsset (Google Demand Gen / Discovery / Search lead form). Validates required fields, enum membership, and Google's character limits before hitting the API. NEVER use unless the user explicitly asked for a lead form: requires explicit_lead_form_request=true. After creation, use google_ads_link_asset_to_campaign with field_type=LEAD_FORM (also requires explicit_lead_form_request=true) to attach it to a campaign. Supports standard fields (incl. FIRST_NAME/LAST_NAME), Google's predefined qualifying questions (COMPANY_SIZE, JOB_DEPARTMENT, JOB_ROLE, PURCHASE_TIMELINE, ...), custom questions (single choice, or free text when answers are omitted) and an optional webhook delivery method (create-only; the secret is never echoed). Lead form assets cannot be edited after creation, so run with validate_only=true first. Auto-labels the created asset. Returns {asset_id, resource_name, name, qualifying_questions, custom_questions, webhook_configured}.",
+    description: "Create a LeadFormAsset (Google Demand Gen / Discovery / Search lead form). Validates required fields, enum membership, and Google's character limits before hitting the API. NEVER use unless the user explicitly asked for a lead form: requires explicit_lead_form_request=true. After creation, use google_ads_link_asset_to_campaign with field_type=LEAD_FORM (also requires explicit_lead_form_request=true) to attach it to a campaign. Supports standard fields (incl. FIRST_NAME/LAST_NAME), Google's predefined qualifying questions (COMPANY_SIZE, JOB_DEPARTMENT, JOB_ROLE, PURCHASE_TIMELINE, ...), custom questions (single choice, or free text when answers are omitted) and an optional webhook delivery method (create-only; the secret is never echoed). Lead form assets cannot be edited after creation, so run with validate_only=true first. Assets cannot carry a label, so no claude-MM-DD-YY label is applied and the result says so (audit_label: null). Returns {asset_id, resource_name, name, qualifying_questions, custom_questions, webhook_configured, audit_label, audit_label_note}.",
     inputSchema: {
       additionalProperties: false,
       type: "object",

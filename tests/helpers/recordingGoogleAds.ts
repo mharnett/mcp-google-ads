@@ -21,7 +21,28 @@
  *       await importOriginal<typeof import("../src/credentials.js")>(),
  *     ),
  *   );
+ *
+ * Fidelity: the fake customer exposes only the service namespaces the real
+ * google-ads-api Customer has (read off its ServiceFactory getters at load
+ * time). Any other name is undefined, exactly as in production, so a typo'd
+ * or non-existent service (`customer.asset_sets`, `customer.assetLabels`)
+ * fails here instead of being recorded as if it worked.
  */
+
+import { createRequire } from "node:module";
+
+const requireCjs = createRequire(import.meta.url);
+
+/** Service namespaces on the real Customer, e.g. "campaigns", "adGroupAdLabels". */
+export const REAL_SERVICE_NAMES: ReadonlySet<string> = (() => {
+  const ServiceFactory = requireCjs("google-ads-api/build/src/protos/autogen/serviceFactory.js").default;
+  const descriptors = Object.getOwnPropertyDescriptors(ServiceFactory.prototype);
+  return new Set(
+    Object.entries(descriptors)
+      .filter(([, d]) => typeof d.get === "function")
+      .map(([name]) => name),
+  );
+})();
 
 export const FAKE_CUSTOMER_ID = "1234567890";
 
@@ -31,16 +52,44 @@ export interface RecordedCall {
   args: any[];
 }
 
+/** A test-supplied GAQL answer: rows for any query the pattern matches. */
+export interface QueryAnswer {
+  pattern: RegExp;
+  rows: any[];
+}
+
 export const recorder = {
   apiConstructed: 0,
   customersOpened: 0,
   credentialReads: 0,
   calls: [] as RecordedCall[],
+  /** Checked first, in order, before the built-in answers in rowsFor(). */
+  queryAnswers: [] as QueryAnswer[],
+  /** Service methods ("<service>.<method>") that reject instead of resolving. */
+  failingMethods: new Map<string, Error>(),
   reset(): void {
     this.apiConstructed = 0;
     this.customersOpened = 0;
     this.credentialReads = 0;
     this.calls = [];
+    this.queryAnswers = [];
+    this.failingMethods = new Map();
+  },
+  /** Answer every query matching `pattern` with `rows`. */
+  answerQuery(pattern: RegExp, rows: any[]): void {
+    this.queryAnswers.push({ pattern, rows });
+  },
+  /** Make one service method reject, e.g. failMethod("campaignLabels.create", new Error("x")). */
+  failMethod(method: string, error: Error): void {
+    this.failingMethods.set(method, error);
+  },
+  /** Every recorded GAQL string, in call order. */
+  queries(): string[] {
+    return this.calls.filter((c) => c.method === "query").map((c) => String(c.args[0]));
+  },
+  /** Every recorded call that is not a GAQL read. */
+  writes(): RecordedCall[] {
+    return this.calls.filter((c) => c.method !== "query");
   },
   /** Recorded calls to one method, e.g. callsTo("adGroupAds.create"). */
   callsTo(method: string): RecordedCall[] {
@@ -54,6 +103,9 @@ export const recorder = {
  * ad group. Everything else returns no rows.
  */
 function rowsFor(gaql: string): any[] {
+  for (const answer of recorder.queryAnswers) {
+    if (answer.pattern.test(gaql)) return answer.rows;
+  }
   const label = gaql.match(/label\.name\s*=\s*'([^']*)'/);
   if (label) {
     return [{ label: { resource_name: `customers/${FAKE_CUSTOMER_ID}/labels/1`, name: label[1] } }];
@@ -77,7 +129,10 @@ function service(name: string): any {
     get(_target, method) {
       if (typeof method === "symbol" || method === "then") return undefined;
       return async (...args: any[]) => {
-        recorder.calls.push({ method: `${name}.${method}`, args });
+        const full = `${name}.${method}`;
+        recorder.calls.push({ method: full, args });
+        const failure = recorder.failingMethods.get(full);
+        if (failure) throw failure;
         return resultsFor(name, args[0]);
       };
     },
@@ -87,6 +142,13 @@ function service(name: string): any {
     },
   });
 }
+
+/** Resource name a mutateResources create returns, per entity. */
+const MUTATE_RESOURCE_NAMES: Record<string, string> = {
+  campaign: `customers/${FAKE_CUSTOMER_ID}/campaigns/1`,
+  ad_group: `customers/${FAKE_CUSTOMER_ID}/adGroups/1`,
+  ad_group_ad: `customers/${FAKE_CUSTOMER_ID}/adGroupAds/111~222`,
+};
 
 function makeCustomer(): any {
   const own: Record<string, any> = {
@@ -99,7 +161,7 @@ function makeCustomer(): any {
       return {
         mutate_operation_responses: (ops ?? []).map((op: any) => ({
           [`${op?.entity}_result`]: {
-            resource_name: `customers/${FAKE_CUSTOMER_ID}/adGroupAds/111~222`,
+            resource_name: MUTATE_RESOURCE_NAMES[op?.entity] ?? `customers/${FAKE_CUSTOMER_ID}/adGroupAds/111~222`,
           },
         })),
       };
@@ -109,7 +171,7 @@ function makeCustomer(): any {
     get(target, prop) {
       if (typeof prop === "symbol" || prop === "then") return undefined;
       if (prop in target) return target[prop];
-      return service(prop);
+      return REAL_SERVICE_NAMES.has(prop) ? service(prop) : undefined;
     },
   });
 }
