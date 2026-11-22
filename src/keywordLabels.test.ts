@@ -11,7 +11,7 @@
  * criterion-label op (same pattern as createResponsiveSearchAd.labels.test.ts).
  */
 
-import { describe, expect, it, beforeEach } from "vitest";
+import { afterEach, describe, expect, it, beforeEach, vi } from "vitest";
 
 import { GoogleAdsManager } from "./index.js";
 
@@ -62,12 +62,9 @@ function makeManager(fakeCustomer: any): GoogleAdsManager {
   return mgr;
 }
 
+/** The clock is pinned to 12:00 PST on 2026-11-21 (see beforeEach). */
 function todayLabel(): string {
-  const now = new Date();
-  const mm = String(now.getMonth() + 1).padStart(2, "0");
-  const dd = String(now.getDate()).padStart(2, "0");
-  const yy = String(now.getFullYear()).slice(-2);
-  return `claude-${mm}-${dd}-${yy}`;
+  return "claude-11-21-26";
 }
 
 describe("pauseKeywords labelling", () => {
@@ -75,8 +72,15 @@ describe("pauseKeywords labelling", () => {
   let mgr: GoogleAdsManager;
 
   beforeEach(() => {
+    // 12:00 PST on 2026-11-21: the audit label is claude-11-21-26 in any zone.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-21T20:00:00Z"));
     fake = makeFakeCustomer();
     mgr = makeManager(fake.customer);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("auto-applies today's claude-MM-DD-YY label to every paused keyword", async () => {

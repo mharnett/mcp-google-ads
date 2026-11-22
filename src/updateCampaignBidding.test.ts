@@ -180,7 +180,9 @@ describe("detachPortfolioBidStrategy", () => {
     expect(fake.campaignsUpdateOps[0].maximize_conversions).toEqual({ target_cpa_micros: 0 });
     expect(fake.campaignsUpdateOps[0].resource_name).toBe("customers/1234567890/campaigns/555");
 
-    expect(result).toEqual({
+    // The audit label is pinned at the dispatch (claudeLabel.callSite.test.ts).
+    const { audit_label: _auditLabel, ...shape } = result;
+    expect(shape).toEqual({
       campaign_id: "555",
       campaign_name: "Portfolio Campaign",
       previous_portfolio_strategy_resource: PORTFOLIO_RESOURCE,

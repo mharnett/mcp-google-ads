@@ -7,7 +7,6 @@ const BASE_VALID = {
   call_to_action: "LEARN_MORE",
   marketing_image_asset_ids: ["123"],
   headlines: ["Headline 1", "Headline 2"],
-  long_headlines: ["A longer headline that still fits within ninety characters for a DG ad."],
   descriptions: ["Description 1", "Description 2"],
 };
 
@@ -65,23 +64,14 @@ describe("validateDemandGenAd — descriptions", () => {
   });
 });
 
-describe("validateDemandGenAd — long_headlines", () => {
-  it("rejects long_headline > 90 chars", () => {
-    const result = validateDemandGenAd({
-      ...BASE_VALID,
-      long_headlines: ["x".repeat(91)],
+describe("buildDemandGenAdPayload — long_headlines", () => {
+  it("never emits long_headlines: DemandGenMultiAssetAdInfo has no such field", () => {
+    const payload = buildDemandGenAdPayload({
+      customer_id_clean: "1234567890",
+      ad_group_id: "111",
+      input: { ...BASE_VALID, long_headlines: ["A long headline"] } as any,
     });
-    expect(result.valid).toBe(false);
-    expect(result.errors.some((e) => /Long headline 1 too long/.test(e))).toBe(true);
-  });
-
-  it("rejects more than 5 long_headlines", () => {
-    const result = validateDemandGenAd({
-      ...BASE_VALID,
-      long_headlines: Array.from({ length: 6 }, (_, i) => `L${i}`),
-    });
-    expect(result.valid).toBe(false);
-    expect(result.errors.some((e) => /Maximum 5 long_headlines/.test(e))).toBe(true);
+    expect(Object.keys(payload.ad.demand_gen_multi_asset_ad)).not.toContain("long_headlines");
   });
 });
 
@@ -292,7 +282,6 @@ describe("buildDemandGenAdPayload — call_to_action_text uses display text", ()
         call_to_action: "LEARN_MORE",
         marketing_image_asset_ids: ["123"],
         headlines: ["H1"],
-        long_headlines: ["Long headline under ninety characters please."],
         descriptions: ["D1"],
       },
     });

@@ -3,15 +3,17 @@
  *
  * GLOBAL rule: every Claude-created/edited campaign, ad group, ad group ad, or
  * ad group criterion is stamped with an audit label so a batch can be found and
- * rolled back. (Only those four resource types have a label surface — budgets,
- * bidding, tracking edits, shared-set negatives and assets do NOT, so a
- * "label every mutation" invariant is unbuildable; this module governs only the
- * label STRING.)
+ * rolled back. (Only those four resource types have a label surface. Budgets,
+ * campaign criteria, negative ad group criteria, shared sets and assets do NOT:
+ * an edit to one of those labels the campaign or ad group it belongs to, or
+ * says in its result that nothing could be labeled. This module governs only
+ * the label STRING.)
  *
  * Format (locked 2026-07-23): `claude-MM-DD-YY` optionally followed by a
  * kebab-case description — `claude-MM-DD-YY-<desc>`:
  *   - `claude-` prefix keeps the `label.name LIKE 'claude-%'` rollback filter,
- *   - the 2-digit date isolates a day's batch,
+ *   - the 2-digit date isolates a day's batch; it is the America/Los_Angeles
+ *     calendar day, whatever time zone the server runs in,
  *   - the description (recommended) says what the change was.
  *
  * Single source of truth: the generator, the validator, and the recognizer
@@ -61,16 +63,28 @@ function boundDescriptor(slug: string, budget: number): string {
   return kept.replace(/-+$/g, "");
 }
 
+// The label names Mark's Pacific calendar day, never the machine's local day:
+// a server in UTC or UTC+9 would otherwise stamp tomorrow's date on an evening
+// change. Intl applies the America/Los_Angeles DST rules for each instant.
+const PACIFIC_DATE = new Intl.DateTimeFormat("en-US", {
+  timeZone: "America/Los_Angeles",
+  year: "2-digit",
+  month: "2-digit",
+  day: "2-digit",
+});
+
 /**
- * Build the canonical audit label for `date`, optionally with a `descriptor`.
- * The descriptor is slugged to kebab-case and dropped if it slugs to empty.
- * The output is always a string `isValidClaudeLabel` accepts.
+ * Build the canonical audit label for `date` (its America/Los_Angeles calendar
+ * day), optionally with a `descriptor`. The descriptor is slugged to kebab-case
+ * and dropped if it slugs to empty. The output is always a string
+ * `isValidClaudeLabel` accepts.
  */
 export function claudeAuditLabel(date: Date, descriptor?: string): string {
-  const mm = String(date.getMonth() + 1).padStart(2, "0");
-  const dd = String(date.getDate()).padStart(2, "0");
-  const yy = String(date.getFullYear()).slice(-2);
-  const base = `claude-${mm}-${dd}-${yy}`;
+  if (Number.isNaN(date.getTime())) {
+    throw new Error("claudeAuditLabel needs a valid Date");
+  }
+  const d = Object.fromEntries(PACIFIC_DATE.formatToParts(date).map((p) => [p.type, p.value]));
+  const base = `claude-${d.month}-${d.day}-${d.year}`;
 
   if (!descriptor) return base;
   let slug = slugify(descriptor);

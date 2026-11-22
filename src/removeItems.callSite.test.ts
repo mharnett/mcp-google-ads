@@ -34,8 +34,8 @@ vi.mock("./credentials.js", async (importOriginal) =>
 );
 
 const CID = FAKE_CUSTOMER_ID;
-/** 2026-11-21 12:00 local: the audit label for this instant is claude-11-21-26. */
-const FIXED_NOW = new Date(2026, 10, 21, 12, 0, 0);
+/** 12:00 PST on 2026-11-21: the audit label for this instant is claude-11-21-26. */
+const FIXED_NOW = new Date("2026-11-21T20:00:00Z");
 
 const TARGETS = { campaign_ids: ["31"], ad_group_ids: ["41"], ad_ids: ["51"] };
 

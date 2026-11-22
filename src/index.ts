@@ -332,6 +332,55 @@ const UNLABELABLE_AUDIT = {
     "Assets and shared sets cannot be labeled in Google Ads, so no claude-MM-DD-YY label was applied. Find this change in the account's change history.",
 } as const;
 
+/**
+ * Why an edit labeled a campaign or ad group instead of the entity it changed.
+ * Google Ads has no label surface for budgets or campaign criteria, refuses a
+ * label on a negative ad group criterion (CANNOT_ADD_LABEL_TO_NEGATIVE_CRITERION),
+ * and a removed criterion is gone, so the parent carries the audit label.
+ */
+const PARENT_LABEL_NOTE = {
+  budget:
+    "A campaign budget cannot carry a label in Google Ads, so the campaign named in the call was labeled. Other campaigns sharing the budget were not.",
+  campaignCriterion:
+    "Campaign-level criteria (negatives, locations) cannot carry a label in Google Ads, so the campaign was labeled.",
+  negativeAdGroupCriterion:
+    "Negative ad group keywords cannot carry a label in Google Ads, so the ad group was labeled.",
+  removedCampaignCriterion: "A removed criterion cannot carry a label, so each campaign it came off was labeled.",
+  removedAdGroupCriterion: "A removed criterion cannot carry a label, so each ad group it came off was labeled.",
+  newAudience:
+    "The new Audience cannot carry a label in Google Ads; the ad group criteria that attach it were labeled.",
+} as const;
+
+/**
+ * Parent campaign or ad group of each criterion resource name, deduped:
+ * customers/X/campaignCriteria/31~1001 -> customers/X/campaigns/31. A name
+ * that does not parse is skipped (the remove itself would have refused it).
+ */
+function criterionParents(criterionNames: string[], kind: "campaignCriteria" | "adGroupCriteria"): string[] {
+  const parent = kind === "campaignCriteria" ? "campaigns" : "adGroups";
+  const re = new RegExp(`^customers/(\\d+)/${kind}/(\\d+)~\\d+$`);
+  const out = new Set<string>();
+  for (const rn of criterionNames ?? []) {
+    const m = String(rn).match(re);
+    if (m) out.add(`customers/${m[1]}/${parent}/${m[2]}`);
+  }
+  return [...out];
+}
+
+/** Resource names a mutate response says it created. */
+function createdResourceNames(result: any): string[] {
+  return ((result?.results ?? []) as Array<{ resource_name?: string }>).map((r) => r?.resource_name ?? "").filter(Boolean);
+}
+
+/**
+ * Tool-response fields for a manager result that carries audit-label fields:
+ * the label (and note) at the top level, the rest under `results` as before.
+ */
+function auditedResults(result: any): Record<string, unknown> {
+  const { audit_label = null, audit_label_note, ...rest } = result ?? {};
+  return { audit_label, ...(audit_label_note ? { audit_label_note } : {}), results: rest };
+}
+
 /** experiment.status values google_ads_list_experiments filters on (besides ALL). */
 const EXPERIMENT_STATUS_FILTERS = ["SETUP", "ENABLED", "HALTED", "PROMOTED", "GRADUATED"] as const;
 
@@ -845,6 +894,7 @@ export class GoogleAdsManager {
         ]),
         "updateCampaignBudget.atomicMutate"
       );
+      const audit_label = await this.autoLabelCreated(customerId, [`customers/${cleanId}/campaigns/${campaignId}`], "campaign");
 
       const newBudgetResourceName = (mutateResult as any)
         ?.mutate_operation_responses?.[0]?.campaign_budget_result?.resource_name
@@ -858,6 +908,8 @@ export class GoogleAdsManager {
         old_daily_budget: Number(oldAmountMicros) / 1_000_000,
         new_budget_resource: newBudgetResourceName,
         new_daily_budget: dailyBudgetDollars,
+        audit_label,
+        audit_label_note: PARENT_LABEL_NOTE.budget,
         ...overrideFields,
         ...(await logBudgetOverride()),
       };
@@ -871,6 +923,7 @@ export class GoogleAdsManager {
           }]),
         "updateCampaignBudget.updateInPlace"
       );
+      const audit_label = await this.autoLabelCreated(customerId, [`customers/${cleanId}/campaigns/${campaignId}`], "campaign");
 
       return {
         campaign_id: campaignId,
@@ -880,6 +933,8 @@ export class GoogleAdsManager {
         old_daily_budget: Number(oldAmountMicros) / 1_000_000,
         new_daily_budget: dailyBudgetDollars,
         warning: "This update affects ALL campaigns sharing this budget",
+        audit_label,
+        audit_label_note: PARENT_LABEL_NOTE.budget,
         ...overrideFields,
         ...(await logBudgetOverride()),
       };
@@ -923,12 +978,14 @@ export class GoogleAdsManager {
         }]),
       "detachPortfolioBidStrategy.update"
     );
+    const audit_label = await this.autoLabelCreated(customerId, [`customers/${cleanId}/campaigns/${campaignId}`], "campaign");
 
     return {
       campaign_id: campaignId,
       campaign_name: current.campaign.name,
       previous_portfolio_strategy_resource: portfolioStrategyResource,
       new_strategy: "MAXIMIZE_CONVERSIONS",
+      audit_label,
       warning: "Detached from portfolio strategy → campaign-level Maximize Conversions with no target. Re-apply tCPA/tROAS targets if needed.",
     };
   }
@@ -1245,8 +1302,21 @@ export class GoogleAdsManager {
   // v23 typed helper doesn't know about DG ad types.
   async createDemandGenMultiAssetAd(
     customerId: string,
-    input: DemandGenAdInput & { ad_group_id: string; labels?: string[] }
+    input: DemandGenAdInput & {
+      ad_group_id: string;
+      labels?: string[];
+      /** Not an API field on multi-asset ads; passed through only so this can refuse it loudly. */
+      long_headlines?: string[];
+    }
   ) {
+    // Refused rather than dropped, as in updateDemandGenMultiAssetAd: the
+    // library would encode the ad without them and the create would succeed.
+    if (input.long_headlines?.length) {
+      throw new Error(
+        "long_headlines cannot be set on a Demand Gen multi-asset ad: the API has no such field on DemandGenMultiAssetAdInfo (long headlines belong to Demand Gen video ads). Nothing was created."
+      );
+    }
+
     // Validate before anything else — catches character/count issues cleanly.
     const validation = validateDemandGenAd(input);
     if (!validation.valid) {
@@ -1887,7 +1957,8 @@ export class GoogleAdsManager {
     }));
 
     const result = await withResilience(() => customer.campaignCriteria.create(criteria), "addCampaignNegativeKeywords");
-    return result;
+    const audit_label = await this.autoLabelCreated(customerId, [`customers/${cleanId}/campaigns/${campaignId}`], "campaign");
+    return { ...result, audit_label, audit_label_note: PARENT_LABEL_NOTE.campaignCriterion };
   }
 
   // Add location (geo) targeting criteria at the AD GROUP level.
@@ -1907,7 +1978,8 @@ export class GoogleAdsManager {
       () => customer.adGroupCriteria.create(criteria as any),
       "setAdGroupLocationTargeting"
     );
-    return result;
+    const audit_label = await this.autoLabelCreated(customerId, createdResourceNames(result), "keyword");
+    return { ...result, audit_label };
   }
 
   // Add location (geo) targeting criteria to an existing campaign.
@@ -1929,21 +2001,24 @@ export class GoogleAdsManager {
       () => customer.campaignCriteria.create(criteria as any),
       "setCampaignLocationTargeting"
     );
-    return result;
+    const audit_label = await this.autoLabelCreated(customerId, [campaignRN], "campaign");
+    return { ...result, audit_label, audit_label_note: PARENT_LABEL_NOTE.campaignCriterion };
   }
 
   // Remove campaign-level negative keywords by resource name
   async removeCampaignNegativeKeywords(customerId: string, resourceNames: string[]) {
     const customer = this.getCustomer(customerId);
     const result = await withResilience(() => customer.campaignCriteria.remove(resourceNames), "removeCampaignNegativeKeywords");
-    return result;
+    const audit_label = await this.autoLabelCreated(customerId, criterionParents(resourceNames, "campaignCriteria"), "campaign");
+    return { ...result, audit_label, audit_label_note: PARENT_LABEL_NOTE.removedCampaignCriterion };
   }
 
   // Remove ad-group-level negative keywords by resource name
   async removeAdGroupNegativeKeywords(customerId: string, resourceNames: string[]) {
     const customer = this.getCustomer(customerId);
     const result = await withResilience(() => customer.adGroupCriteria.remove(resourceNames), "removeAdGroupNegativeKeywords");
-    return result;
+    const audit_label = await this.autoLabelCreated(customerId, criterionParents(resourceNames, "adGroupCriteria"), "ad_group");
+    return { ...result, audit_label, audit_label_note: PARENT_LABEL_NOTE.removedAdGroupCriterion };
   }
 
   // Add ad-group-level negative keywords. Mirrors addCampaignNegativeKeywords
@@ -1963,7 +2038,8 @@ export class GoogleAdsManager {
     }));
 
     const result = await withResilience(() => customer.adGroupCriteria.create(criteria), "addAdGroupNegativeKeywords");
-    return result;
+    const audit_label = await this.autoLabelCreated(customerId, [`customers/${cleanId}/adGroups/${adGroupId}`], "ad_group");
+    return { ...result, audit_label, audit_label_note: PARENT_LABEL_NOTE.negativeAdGroupCriterion };
   }
 
   // Attach a user_list (Customer Match list, similar audience, etc.) to one or
@@ -2014,7 +2090,11 @@ export class GoogleAdsManager {
       );
     }
 
-    return createResult;
+    const audit_label = await this.autoLabelCreated(customerId, createdResourceNames(createResult), "keyword");
+    if (mode === "TARGETING") {
+      await this.autoLabelCreated(customerId, adGroupIds.map((id) => `customers/${cleanId}/adGroups/${id}`), "ad_group");
+    }
+    return { ...createResult, audit_label };
   }
 
   // Create an Audience resource bundling one or more user_lists and attach it
@@ -2094,10 +2174,13 @@ export class GoogleAdsManager {
       () => customer.adGroupCriteria.create(criteria as any),
       "createAndAttachAudienceBundle.attachToAdGroups",
     );
+    const audit_label = await this.autoLabelCreated(customerId, createdResourceNames(criteriaResult), "keyword");
 
     return {
       audience_resource_name: audienceRN,
       ad_group_criteria: criteriaResult,
+      audit_label,
+      ...(existingAudienceId ? {} : { audit_label_note: PARENT_LABEL_NOTE.newAudience }),
     };
   }
 
@@ -2447,7 +2530,8 @@ export class GoogleAdsManager {
     }
 
     const result = await withResilience(() => customer.campaigns.update([campaignUpdate]), "updateCampaignTracking");
-    return result;
+    const audit_label = await this.autoLabelCreated(customerId, [campaignUpdate.resource_name], "campaign");
+    return { ...result, audit_label };
   }
 
   // Update campaign bidding strategy (and/or target CPA / target ROAS).
@@ -2593,6 +2677,7 @@ export class GoogleAdsManager {
       () => customer.campaigns.update([campaignUpdate]),
       "updateCampaignBidding.update"
     );
+    const audit_label = await this.autoLabelCreated(customerId, [`customers/${cleanId}/campaigns/${campaignId}`], "campaign");
 
     let overrideLogResult: Record<string, unknown> = {};
     if (biddingOverride) {
@@ -2629,6 +2714,7 @@ export class GoogleAdsManager {
       new_strategy: resolvedStrategy,
       target_cpa_dollars: updates.target_cpa_dollars,
       target_roas: updates.target_roas,
+      audit_label,
     };
   }
 
@@ -2674,10 +2760,12 @@ export class GoogleAdsManager {
       () => customer.campaigns.update([campaignUpdate]),
       "updateCampaignSelectiveOptimization.update"
     );
+    const audit_label = await this.autoLabelCreated(customerId, [campaignUpdate.resource_name], "campaign");
 
     return {
       campaign_id: campaignId,
       conversion_action_ids: conversionActionIds,
+      audit_label,
     };
   }
 
@@ -2718,12 +2806,14 @@ export class GoogleAdsManager {
       () => customer.campaigns.update([campaignUpdate]),
       "updateCampaignAdRotation.update"
     );
+    const audit_label = await this.autoLabelCreated(customerId, [resourceName], "campaign");
 
     return {
       campaign_id: campaignId,
       campaign_name: current.campaign.name,
       previous_mode: previousMode,
       new_mode: mode,
+      audit_label,
     };
   }
 
@@ -5839,6 +5929,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               success: true,
               campaign_id: campaignId,
               campaign_name: currentTracking.campaign_name,
+              audit_label: result.audit_label,
               before: {
                 final_url_suffix: currentTracking.final_url_suffix,
                 tracking_url_template: currentTracking.tracking_url_template,
@@ -5929,6 +6020,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             text: JSON.stringify({
               success: true,
               message: "Negative keywords added to shared list",
+              ...UNLABELABLE_AUDIT,
               results: result,
             }, null, 2),
           }],
@@ -5948,6 +6040,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             text: JSON.stringify({
               success: true,
               message: `Removed ${resourceNames.length} negative keywords from shared list`,
+              ...UNLABELABLE_AUDIT,
               results: result,
             }, null, 2),
           }],
@@ -5967,7 +6060,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             text: JSON.stringify({
               success: true,
               message: `Location targeting set: ${(args?.geo_target_ids as string[]).length} geo targets added to ad group ${args?.ad_group_id}`,
-              results: result,
+              ...auditedResults(result),
             }, null, 2),
           }],
         };
@@ -5986,7 +6079,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             text: JSON.stringify({
               success: true,
               message: `Location targeting set: ${(args?.geo_target_ids as string[]).length} geo targets added to campaign ${args?.campaign_id}`,
-              results: result,
+              ...auditedResults(result),
             }, null, 2),
           }],
         };
@@ -6005,7 +6098,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             text: JSON.stringify({
               success: true,
               message: "Campaign-level negative keywords added",
-              results: result,
+              ...auditedResults(result),
             }, null, 2),
           }],
         };
@@ -6024,7 +6117,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             text: JSON.stringify({
               success: true,
               message: `Removed ${resourceNames.length} campaign-level negative keywords`,
-              results: result,
+              ...auditedResults(result),
             }, null, 2),
           }],
         };
@@ -6064,7 +6157,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             text: JSON.stringify({
               success: true,
               message: `Attached user_list ${userListId} to ${adGroupIds.length} ad group(s) in ${mode} mode`,
-              results: result,
+              ...auditedResults(result),
             }, null, 2),
           }],
         };
@@ -6116,7 +6209,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             text: JSON.stringify({
               success: true,
               message: successMsg,
-              results: result,
+              ...auditedResults(result),
             }, null, 2),
           }],
         };
@@ -6135,7 +6228,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             text: JSON.stringify({
               success: true,
               message: "Ad-group-level negative keywords added",
-              results: result,
+              ...auditedResults(result),
             }, null, 2),
           }],
         };
@@ -6154,7 +6247,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             text: JSON.stringify({
               success: true,
               message: `Removed ${resourceNames.length} ad-group-level negative keywords`,
-              results: result,
+              ...auditedResults(result),
             }, null, 2),
           }],
         };
