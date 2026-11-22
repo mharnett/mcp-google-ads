@@ -21,7 +21,7 @@
  * methods run directly.
  */
 
-import { describe, expect, it, beforeEach } from "vitest";
+import { afterEach, describe, expect, it, beforeEach, vi } from "vitest";
 
 import { GoogleAdsManager } from "./index.js";
 
@@ -100,8 +100,15 @@ describe("createResponsiveSearchAd label wiring", () => {
   let mgr: GoogleAdsManager;
 
   beforeEach(() => {
+    // 12:00 PST on 2026-11-21: the audit label is claude-11-21-26 in any zone.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-21T20:00:00Z"));
     fake = makeFakeCustomer();
     mgr = makeManager(fake.customer);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("attaches caller-supplied custom labels to the created ad (not just the auto label)", async () => {
@@ -127,11 +134,7 @@ describe("createResponsiveSearchAd label wiring", () => {
       labels: ["test-a"],
     });
 
-    const now = new Date();
-    const mm = String(now.getMonth() + 1).padStart(2, "0");
-    const dd = String(now.getDate()).padStart(2, "0");
-    const yy = String(now.getFullYear()).slice(-2);
-    const autoLabel = `claude-${mm}-${dd}-${yy}`;
+    const autoLabel = "claude-11-21-26";
 
     const attachedLabelRns = new Set(fake.appliedLabelOps.map((o) => o.label));
     expect(attachedLabelRns.has(fake.labelRnFor(autoLabel))).toBe(true);
@@ -144,16 +147,12 @@ describe("createResponsiveSearchAd label wiring", () => {
       label_descriptor: "Brand CPA Fix",
     });
 
-    const now = new Date();
-    const mm = String(now.getMonth() + 1).padStart(2, "0");
-    const dd = String(now.getDate()).padStart(2, "0");
-    const yy = String(now.getFullYear()).slice(-2);
-    const describedAutoLabel = `claude-${mm}-${dd}-${yy}-brand-cpa-fix`;
+    const describedAutoLabel = "claude-11-21-26-brand-cpa-fix";
 
     const attachedLabelRns = new Set(fake.appliedLabelOps.map((o) => o.label));
     expect(attachedLabelRns.has(fake.labelRnFor(describedAutoLabel))).toBe(true);
     // and the bare (descriptor-less) auto label is NOT what got attached
-    expect(attachedLabelRns.has(fake.labelRnFor(`claude-${mm}-${dd}-${yy}`))).toBe(false);
+    expect(attachedLabelRns.has(fake.labelRnFor("claude-11-21-26"))).toBe(false);
   });
 
   it("works (auto label only) when no custom labels are passed", async () => {

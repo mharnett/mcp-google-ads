@@ -108,7 +108,6 @@ describe("create tools send status PAUSED (GOOGLE_ADS_MCP_WRITE=true)", () => {
       call_to_action: "LEARN_MORE",
       marketing_image_asset_ids: ["123"],
       headlines: ["Headline 1", "Headline 2"],
-      long_headlines: ["A longer headline that still fits within ninety characters for a DG ad."],
       descriptions: ["Description 1", "Description 2"],
     });
 
@@ -144,6 +143,48 @@ function nonLabelWrites(): string[] {
     .map((c) => c.method)
     .filter((m) => !/^(labels|campaignLabels|adGroupLabels|adGroupAdLabels|adGroupCriterionLabels)\./.test(m));
 }
+
+describe("google_ads_create_demand_gen_multi_asset_ad refuses long_headlines", () => {
+  // DemandGenMultiAssetAdInfo has no long_headlines field (that is Demand Gen
+  // video), so the library would drop them and the ad would ship without them.
+  it("refuses before any read or write, and says why", async () => {
+    const result: any = await client.callTool({
+      name: "google_ads_create_demand_gen_multi_asset_ad",
+      arguments: {
+        customer_id: FAKE_CUSTOMER_ID,
+        ad_group_id: "111",
+        final_urls: ["https://example.com/"],
+        business_name: "Example Org",
+        call_to_action: "LEARN_MORE",
+        marketing_image_asset_ids: ["123"],
+        headlines: ["Headline 1", "Headline 2"],
+        long_headlines: ["A longer headline that still fits within ninety characters for a DG ad."],
+        descriptions: ["Description 1", "Description 2"],
+      },
+    });
+    const body = JSON.parse(result.content[0].text);
+
+    expect(body.success).toBe(false);
+    expect(body.error).toMatch(/long_headlines/);
+    expect(body.error).toMatch(/Nothing was created/);
+    expect(recorder.calls).toEqual([]);
+  });
+
+  it("an empty long_headlines list is not refused (nothing would be dropped)", async () => {
+    await call("google_ads_create_demand_gen_multi_asset_ad", {
+      ad_group_id: "111",
+      final_urls: ["https://example.com/"],
+      business_name: "Example Org",
+      call_to_action: "LEARN_MORE",
+      marketing_image_asset_ids: ["123"],
+      headlines: ["Headline 1", "Headline 2"],
+      long_headlines: [],
+      descriptions: ["Description 1", "Description 2"],
+    });
+
+    expect(recorder.callsTo("mutateResources").length).toBeGreaterThan(0);
+  });
+});
 
 describe("campaign, ad group and experiment creates are staged (GOOGLE_ADS_MCP_WRITE=true)", () => {
   it("google_ads_create_campaign (SEARCH) creates the campaign PAUSED", async () => {

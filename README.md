@@ -387,18 +387,17 @@ google_ads_create_demand_gen_multi_asset_ad({
   square_marketing_image_asset_ids: ["42002"],   // 1:1 optional
   logo_image_asset_ids: ["42003"],               // logo optional
   headlines: ["Spring Sale Now On", "Save 20% Today"],     // max 5, ≤40 chars each
-  long_headlines: ["A longer pitch under ninety characters."], // max 5, ≤90 chars
   descriptions: ["Shop the latest looks.", "Free returns."]   // max 5, ≤90 chars each
 })
 # → resource_name: customers/.../adGroupAds/555456~67890000
 ```
 
-After all four calls the campaign, ad group, and ad all live in your account in PAUSED state and are labeled `Claude-MM-DD-YY`. Review in the Google Ads UI, then enable via `google_ads_enable_items`.
+After all four calls the campaign, ad group, and ad all live in your account in PAUSED state and are labeled `claude-MM-DD-YY`. Review in the Google Ads UI, then enable via `google_ads_enable_items`.
 
 ## Safety Features
 
 1. **Everything starts PAUSED** — Nothing goes live until you explicitly enable it
-2. **Label tracking** — All Claude-created items get a `claude-pending` label
+2. **Label tracking** — Every create and edit stamps a `claude-MM-DD-YY` label (the America/Los_Angeles date, whatever the server's time zone) on the campaign, ad group, ad or keyword it changed. Budgets, campaign-level criteria and negative keywords cannot carry a label, so the campaign or ad group they belong to gets it. Assets and shared sets cannot be labeled at all, and the tool result says so
 3. **Validation** — Ads are validated before creation (headline/description lengths, etc.)
 4. **Approval prompts** — The `enable_items` tool requires explicit approval in Claude Code
 5. **Client isolation** — Working directory determines which account, preventing cross-client mistakes

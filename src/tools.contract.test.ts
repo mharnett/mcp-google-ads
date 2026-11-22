@@ -199,7 +199,10 @@ describe("Tool Schema Contract", () => {
       expect(schema.properties.square_marketing_image_asset_ids?.type).toBe("array");
       expect(schema.properties.portrait_marketing_image_asset_ids?.type).toBe("array");
       expect(schema.properties.logo_image_asset_ids?.type).toBe("array");
-      expect(schema.properties.long_headlines?.type).toBe("array");
+      // Multi-asset ads have no long_headlines API field (that is Demand Gen
+      // video): the create refuses them, so the schema must not offer them.
+      expect(schema.properties.long_headlines).toBeUndefined();
+      expect(tool!.description).not.toMatch(/long_headlines/);
       expect(schema.properties.labels?.type).toBe("array");
 
       // video_asset_ids is the DG video-only creative path — settable, not required.

@@ -138,7 +138,7 @@ describe("runLinkAssetToAdGroup", () => {
     const link = vi.fn().mockResolvedValue({
       resource_names: ["customers/9876543210/adGroupAssets/185247350836~999~SITELINK"],
     });
-    return { getState, link, now: () => new Date(2026, 9, 23) };
+    return { getState, link, now: () => new Date("2026-10-23T19:00:00Z") };
   }
 
   it("dry run reads state, lists the ad group by name, never links", async () => {

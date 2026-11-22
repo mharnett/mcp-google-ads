@@ -21,6 +21,8 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 
+import { enums } from "google-ads-api";
+
 import { recorder, FAKE_CUSTOMER_ID } from "../tests/helpers/recordingGoogleAds.js";
 import { server } from "./index.js";
 
@@ -35,8 +37,8 @@ vi.mock("./credentials.js", async (importOriginal) =>
 );
 
 const CID = FAKE_CUSTOMER_ID;
-/** 2026-11-21 12:00 local: today's audit label is claude-11-21-26. */
-const FIXED_NOW = new Date(2026, 10, 21, 12, 0, 0);
+/** 12:00 PST on 2026-11-21: today's audit label is claude-11-21-26. */
+const FIXED_NOW = new Date("2026-11-21T20:00:00Z");
 const AUDIT_LABEL = "claude-11-21-26";
 /** The resource name the fake returns for the audit label, and only for it. */
 const AUDIT_LABEL_RN = `customers/${CID}/labels/900`;
@@ -93,6 +95,15 @@ async function call(name: string, args: Record<string, unknown>): Promise<any> {
   return body;
 }
 
+/** Every label attach, through any label service, whatever the label. */
+function anyLabelAttach(): string[] {
+  return (Object.keys(TARGET_FIELD) as LabelService[]).flatMap((svc) =>
+    recorder.callsTo(`${svc}.create`).map(() => svc),
+  );
+}
+
+const CAMPAIGN_31 = { id: 31, name: "Example campaign" };
+
 /** Resources that received today's audit label through one label service. */
 function auditLabelled(service: LabelService): string[] {
   return recorder
@@ -137,7 +148,6 @@ describe("creates attach today's audit label to what they created", () => {
       call_to_action: "LEARN_MORE",
       marketing_image_asset_ids: ["123"],
       headlines: ["Headline 1", "Headline 2"],
-      long_headlines: ["A longer headline that still fits within ninety characters for a DG ad."],
       descriptions: ["Description 1", "Description 2"],
     });
     expect(auditLabelled("adGroupAdLabels")).toEqual([`customers/${CID}/adGroupAds/111~222`]);
@@ -248,5 +258,311 @@ describe("edits label what they changed", () => {
 
     expect(auditLabelled("campaignLabels")).toEqual([`customers/${CID}/campaigns/31`, `customers/${CID}/campaigns/32`]);
     expect(body.audit_label).toBe(AUDIT_LABEL);
+  });
+});
+
+describe("campaign setting edits label the campaign they changed", () => {
+  it("google_ads_update_campaign_tracking labels the campaign", async () => {
+    recorder.answerQuery(/FROM campaign\s+WHERE campaign\.id = 31/, [{ campaign: { ...CAMPAIGN_31 } }]);
+
+    const body = await call("google_ads_update_campaign_tracking", { campaign_id: "31", final_url_suffix: "utm_source=google" });
+
+    expect(auditLabelled("campaignLabels")).toEqual([`customers/${CID}/campaigns/31`]);
+    expect(body.audit_label).toBe(AUDIT_LABEL);
+  });
+
+  it.each([
+    ["in place", false],
+    ["with a new budget", true],
+  ])("google_ads_update_campaign_budget (%s) labels the campaign and says the budget cannot be labeled", async (_how, createNew) => {
+    recorder.answerQuery(/FROM campaign\s+WHERE campaign\.id = 31/, [
+      { campaign: { ...CAMPAIGN_31, bidding_strategy_type: 10 }, campaign_budget: { id: 61, amount_micros: 10_000_000, name: "Example budget" } },
+    ]);
+
+    const body = await call("google_ads_update_campaign_budget", { campaign_id: "31", daily_budget: 11, create_new_budget: createNew });
+
+    expect(auditLabelled("campaignLabels")).toEqual([`customers/${CID}/campaigns/31`]);
+    expect(body.audit_label).toBe(AUDIT_LABEL);
+    expect(body.audit_label_note).toMatch(/budget/i);
+  });
+
+  it("google_ads_update_campaign_bidding labels the campaign", async () => {
+    recorder.answerQuery(/FROM campaign\s+WHERE campaign\.id = 31/, [
+      {
+        campaign: {
+          ...CAMPAIGN_31,
+          bidding_strategy_type: enums.BiddingStrategyType.MAXIMIZE_CONVERSIONS,
+          advertising_channel_type: enums.AdvertisingChannelType.SEARCH,
+          maximize_conversions: { target_cpa_micros: 50_000_000 },
+        },
+      },
+    ]);
+
+    const body = await call("google_ads_update_campaign_bidding", { campaign_id: "31", target_cpa_dollars: 52 });
+
+    expect(recorder.callsTo("campaigns.update")).toHaveLength(1);
+    expect(auditLabelled("campaignLabels")).toEqual([`customers/${CID}/campaigns/31`]);
+    expect(body.audit_label).toBe(AUDIT_LABEL);
+  });
+
+  it("google_ads_update_campaign_selective_optimization labels the campaign", async () => {
+    const body = await call("google_ads_update_campaign_selective_optimization", { campaign_id: "31", conversion_action_ids: ["71"] });
+
+    expect(auditLabelled("campaignLabels")).toEqual([`customers/${CID}/campaigns/31`]);
+    expect(body.audit_label).toBe(AUDIT_LABEL);
+  });
+
+  it("google_ads_update_campaign_ad_rotation labels the campaign", async () => {
+    recorder.answerQuery(/FROM campaign\s+WHERE campaign\.id = 31/, [{ campaign: { ...CAMPAIGN_31, ad_serving_optimization_status: 2 } }]);
+
+    const body = await call("google_ads_update_campaign_ad_rotation", { campaign_id: "31", mode: "ROTATE", confirm: true });
+
+    expect(auditLabelled("campaignLabels")).toEqual([`customers/${CID}/campaigns/31`]);
+    expect(body.audit_label).toBe(AUDIT_LABEL);
+  });
+
+  it("google_ads_detach_portfolio_bid_strategy labels the campaign", async () => {
+    recorder.answerQuery(/FROM campaign\s+WHERE campaign\.id = 31/, [
+      { campaign: { ...CAMPAIGN_31, bidding_strategy: `customers/${CID}/biddingStrategies/77`, bidding_strategy_type: 10 } },
+    ]);
+
+    const body = await call("google_ads_detach_portfolio_bid_strategy", { campaign_id: "31", confirm: true });
+
+    expect(auditLabelled("campaignLabels")).toEqual([`customers/${CID}/campaigns/31`]);
+    expect(body.audit_label).toBe(AUDIT_LABEL);
+  });
+});
+
+describe("negatives label the campaign or ad group, because the negative itself cannot carry a label", () => {
+  const KEYWORDS = [{ text: "free example", match_type: "PHRASE" }];
+
+  it("google_ads_add_campaign_negatives labels the campaign", async () => {
+    const body = await call("google_ads_add_campaign_negatives", { campaign_id: "31", keywords: KEYWORDS });
+
+    expect(auditLabelled("campaignLabels")).toEqual([`customers/${CID}/campaigns/31`]);
+    expect(body.audit_label).toBe(AUDIT_LABEL);
+    expect(body.audit_label_note).toMatch(/campaign/i);
+  });
+
+  it("google_ads_remove_campaign_negatives labels each campaign a negative came off, once", async () => {
+    const body = await call("google_ads_remove_campaign_negatives", {
+      resource_names: [
+        `customers/${CID}/campaignCriteria/31~1001`,
+        `customers/${CID}/campaignCriteria/32~1002`,
+        `customers/${CID}/campaignCriteria/31~1003`,
+      ],
+    });
+
+    expect(auditLabelled("campaignLabels")).toEqual([`customers/${CID}/campaigns/31`, `customers/${CID}/campaigns/32`]);
+    expect(body.audit_label).toBe(AUDIT_LABEL);
+  });
+
+  it("google_ads_add_adgroup_negatives labels the ad group and never tries to label the negative", async () => {
+    const body = await call("google_ads_add_adgroup_negatives", { ad_group_id: "41", keywords: KEYWORDS });
+
+    expect(auditLabelled("adGroupLabels")).toEqual([`customers/${CID}/adGroups/41`]);
+    // Google refuses a label on a negative ad group criterion
+    // (CANNOT_ADD_LABEL_TO_NEGATIVE_CRITERION).
+    expect(recorder.callsTo("adGroupCriterionLabels.create")).toEqual([]);
+    expect(body.audit_label).toBe(AUDIT_LABEL);
+    expect(body.audit_label_note).toMatch(/ad group/i);
+  });
+
+  it("google_ads_remove_adgroup_negatives labels each ad group a negative came off", async () => {
+    const body = await call("google_ads_remove_adgroup_negatives", {
+      resource_names: [`customers/${CID}/adGroupCriteria/41~2001`, `customers/${CID}/adGroupCriteria/42~2002`],
+    });
+
+    expect(auditLabelled("adGroupLabels")).toEqual([`customers/${CID}/adGroups/41`, `customers/${CID}/adGroups/42`]);
+    expect(body.audit_label).toBe(AUDIT_LABEL);
+  });
+
+  it.each<[string, Record<string, unknown>]>([
+    ["google_ads_add_shared_negatives", { shared_set_id: "91", keywords: KEYWORDS }],
+    ["google_ads_remove_shared_negatives", { resource_names: [`customers/${CID}/sharedCriteria/91~3001`] }],
+  ])("%s reports audit_label: null with the reason, and attaches nothing", async (name, args) => {
+    const body = await call(name, args);
+
+    expect(body.audit_label).toBeNull();
+    expect(body.audit_label_note).toMatch(/cannot be labeled/);
+    expect(anyLabelAttach()).toEqual([]);
+  });
+});
+
+describe("location targeting labels what it changed", () => {
+  it("google_ads_set_campaign_location_targeting labels the campaign", async () => {
+    const body = await call("google_ads_set_campaign_location_targeting", { campaign_id: "31", geo_target_ids: ["2840", "2124"] });
+
+    expect(auditLabelled("campaignLabels")).toEqual([`customers/${CID}/campaigns/31`]);
+    expect(body.audit_label).toBe(AUDIT_LABEL);
+    expect(body.audit_label_note).toMatch(/campaign/i);
+  });
+
+  it("google_ads_set_ad_group_location_targeting labels each new location criterion", async () => {
+    const body = await call("google_ads_set_ad_group_location_targeting", { ad_group_id: "41", geo_target_ids: ["2840", "2124"] });
+
+    expect(auditLabelled("adGroupCriterionLabels")).toEqual([
+      `customers/${CID}/adGroupCriteria/1`,
+      `customers/${CID}/adGroupCriteria/2`,
+    ]);
+    expect(body.audit_label).toBe(AUDIT_LABEL);
+  });
+});
+
+describe("audience attaches label what they created", () => {
+  it("google_ads_attach_user_list_audience (OBSERVATION) labels each new audience criterion", async () => {
+    const body = await call("google_ads_attach_user_list_audience", { ad_group_ids: ["41", "42"], user_list_id: "81", confirm: true });
+
+    expect(auditLabelled("adGroupCriterionLabels")).toEqual([
+      `customers/${CID}/adGroupCriteria/1`,
+      `customers/${CID}/adGroupCriteria/2`,
+    ]);
+    expect(auditLabelled("adGroupLabels")).toEqual([]);
+    expect(body.audit_label).toBe(AUDIT_LABEL);
+  });
+
+  it("google_ads_attach_user_list_audience (TARGETING) also labels the ad groups whose targeting it changed", async () => {
+    await call("google_ads_attach_user_list_audience", { ad_group_ids: ["41", "42"], user_list_id: "81", mode: "TARGETING", confirm: true });
+
+    expect(recorder.callsTo("adGroups.update")).toHaveLength(1);
+    expect(auditLabelled("adGroupCriterionLabels")).toEqual([
+      `customers/${CID}/adGroupCriteria/1`,
+      `customers/${CID}/adGroupCriteria/2`,
+    ]);
+    expect(auditLabelled("adGroupLabels")).toEqual([`customers/${CID}/adGroups/41`, `customers/${CID}/adGroups/42`]);
+  });
+
+  it("google_ads_create_and_attach_audience_bundle labels each new audience criterion", async () => {
+    const body = await call("google_ads_create_and_attach_audience_bundle", {
+      name: "Example bundle",
+      user_list_ids: ["81"],
+      ad_group_ids: ["41"],
+      confirm: true,
+    });
+
+    expect(recorder.callsTo("audiences.create")).toHaveLength(1);
+    expect(auditLabelled("adGroupCriterionLabels")).toEqual([`customers/${CID}/adGroupCriteria/1`]);
+    expect(body.audit_label).toBe(AUDIT_LABEL);
+  });
+});
+
+/** Rows the video-targeting tools read for campaign 31. */
+function answerCampaign31(extra: Record<string, unknown> = {}): void {
+  recorder.answerQuery(/FROM campaign WHERE campaign\.id IN \(31\)/, [{ campaign: { ...CAMPAIGN_31, status: 3, ...extra } }]);
+}
+
+describe("edits that already labeled, now pinned at the dispatch", () => {
+  it("google_ads_set_campaign_languages labels the campaign it changed", async () => {
+    answerCampaign31();
+
+    await call("google_ads_set_campaign_languages", { campaign_ids: ["31"], languages: ["en"], confirm: true });
+
+    expect(recorder.callsTo("campaignCriteria.create")).toHaveLength(1);
+    expect(auditLabelled("campaignLabels")).toEqual([`customers/${CID}/campaigns/31`]);
+  });
+
+  it("google_ads_add_youtube_channel_exclusions (campaign level) labels the campaign", async () => {
+    answerCampaign31();
+
+    await call("google_ads_add_youtube_channel_exclusions", {
+      level: "campaign",
+      campaign_ids: ["31"],
+      channel_ids: ["UCabcdefghijklmnopqrstuv"],
+      confirm: true,
+    });
+
+    expect(recorder.callsTo("campaignCriteria.create")).toHaveLength(1);
+    expect(auditLabelled("campaignLabels")).toEqual([`customers/${CID}/campaigns/31`]);
+  });
+
+  it("google_ads_add_ad_group_targeting labels each new criterion", async () => {
+    recorder.answerQuery(/FROM ad_group WHERE ad_group\.id IN \(41\)/, [
+      { ad_group: { id: 41, name: "Example AG" }, campaign: { name: "Example campaign", advertising_channel_type: 6 } },
+    ]);
+
+    await call("google_ads_add_ad_group_targeting", { ad_group_ids: ["41"], topic_ids: ["66"], confirm: true });
+
+    expect(auditLabelled("adGroupCriterionLabels")).toEqual([`customers/${CID}/adGroupCriteria/1`]);
+  });
+
+  it("google_ads_update_video_inventory labels the campaign", async () => {
+    answerCampaign31({ advertising_channel_type: 6 });
+
+    await call("google_ads_update_video_inventory", { campaign_ids: ["31"], allow_shorts: false, confirm: true });
+
+    expect(recorder.callsTo("campaigns.update")).toHaveLength(1);
+    expect(auditLabelled("campaignLabels")).toEqual([`customers/${CID}/campaigns/31`]);
+  });
+
+  it("google_ads_update_campaign_ad_urls labels every ad it repointed", async () => {
+    recorder.answerQuery(/FROM ad_group_ad\s+WHERE campaign\.id = 31/, [
+      { ad_group_ad: { resource_name: `customers/${CID}/adGroupAds/41~51`, ad: { id: 51, final_urls: ["https://example.com/old"] } }, ad_group: { name: "AG" } },
+      { ad_group_ad: { resource_name: `customers/${CID}/adGroupAds/42~52`, ad: { id: 52, final_urls: ["https://example.com/old"] } }, ad_group: { name: "AG2" } },
+    ]);
+
+    await call("google_ads_update_campaign_ad_urls", { campaign_id: "31", new_final_url: "https://example.com/new", execute: true });
+
+    expect(recorder.callsTo("adGroupAds.update")).toHaveLength(1);
+    expect(auditLabelled("adGroupAdLabels")).toEqual([`customers/${CID}/adGroupAds/41~51`, `customers/${CID}/adGroupAds/42~52`]);
+  });
+
+  it("google_ads_update_ad_asset_automation labels the ad", async () => {
+    await call("google_ads_update_ad_asset_automation", { ad_ids: ["51"], automation_types: ["GENERATE_VIDEOS_FROM_OTHER_ASSETS"] });
+
+    expect(recorder.callsTo("mutateResources")).toHaveLength(1);
+    expect(auditLabelled("adGroupAdLabels")).toEqual([`customers/${CID}/adGroupAds/41~51`]);
+  });
+
+  it("google_ads_update_video_ad_videos labels the ad", async () => {
+    recorder.answerQuery(/FROM ad_group_ad\s+WHERE ad_group_ad\.ad\.id = 52/, [
+      {
+        ad_group_ad: {
+          resource_name: `customers/${CID}/adGroupAds/42~52`,
+          ad: { type: enums.AdType.VIDEO_RESPONSIVE_AD, name: "Example video ad", video_responsive_ad: { videos: [{ asset: `customers/${CID}/assets/7` }] } },
+        },
+      },
+    ]);
+
+    await call("google_ads_update_video_ad_videos", { ad_id: "52", videos: ["dQw4w9WgXcQ"], skip_visibility_check: true });
+
+    expect(recorder.callsTo("mutateResources")).toHaveLength(1);
+    expect(auditLabelled("adGroupAdLabels")).toEqual([`customers/${CID}/adGroupAds/42~52`]);
+  });
+
+  it("google_ads_update_demand_gen_multi_asset_ad labels every ad group ad sharing the ad", async () => {
+    const dg = {
+      type: 40,
+      demand_gen_multi_asset_ad: { headlines: [{ text: "Old headline" }], descriptions: [{ text: "Old description" }] },
+    };
+    recorder.answerQuery(/FROM ad_group_ad\s+WHERE ad_group_ad\.ad\.id = 53/, [
+      { ad_group_ad: { resource_name: `customers/${CID}/adGroupAds/43~53`, ad: { id: 53, ...dg } }, ad_group: { id: 43 } },
+      { ad_group_ad: { resource_name: `customers/${CID}/adGroupAds/44~53`, ad: { id: 53, ...dg } }, ad_group: { id: 44 } },
+    ]);
+
+    await call("google_ads_update_demand_gen_multi_asset_ad", { ad_resource_name: "53", headlines: ["New headline"] });
+
+    expect(recorder.callsTo("ads.update")).toHaveLength(1);
+    expect(auditLabelled("adGroupAdLabels")).toEqual([`customers/${CID}/adGroupAds/43~53`, `customers/${CID}/adGroupAds/44~53`]);
+  });
+});
+
+describe("the dispatch stamps the Pacific date, not the server's", () => {
+  let savedTz: string | undefined;
+  beforeEach(() => {
+    savedTz = process.env.TZ;
+  });
+  afterEach(() => {
+    if (savedTz === undefined) delete process.env.TZ;
+    else process.env.TZ = savedTz;
+  });
+
+  it("a server in Tokyo, where it is already 11-22, still labels claude-11-21-26", async () => {
+    process.env.TZ = "Asia/Tokyo";
+    expect(new Date().getDate()).toBe(22); // the zone switch took effect
+
+    await call("google_ads_rename_campaign", { campaign_id: "31", new_name: "Renamed campaign", confirm: true });
+
+    expect(auditLabelled("campaignLabels")).toEqual([`customers/${CID}/campaigns/31`]);
+    expect(recorder.queries().some((q) => q.includes("claude-11-22-26"))).toBe(false);
   });
 });

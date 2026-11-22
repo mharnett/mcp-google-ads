@@ -3,8 +3,9 @@
  * so we don't need to stand up a live Google Ads client to unit test the
  * rules. Rules come from Google Ads API docs for DemandGenMultiAssetAdInfo:
  *   - headlines:       max 5, each ≤ 40 chars
- *   - long_headlines:  max 5, each ≤ 90 chars
  *   - descriptions:    max 5, each ≤ 90 chars
+ *   - long_headlines:  NOT a field on DemandGenMultiAssetAdInfo (it belongs to
+ *                      Demand Gen video ads); the create tool refuses it
  *   - marketing_image_asset_ids: optional, ≥ 1 when provided (1.91:1 landscape images); video-only ads supported
  *   - video_asset_ids:  optional, YouTube video asset IDs for video-only (or video+image) ads
  *   - business_name:   required, non-empty
@@ -25,7 +26,6 @@ export interface DemandGenAdInput {
   logo_image_asset_ids?: string[];
   video_asset_ids?: string[];
   headlines: Array<string | { text: string; pinned_position?: number }>;
-  long_headlines?: string[];
   descriptions: string[];
   labels?: string[];
 }
@@ -37,8 +37,6 @@ export interface DemandGenAdValidationResult {
 
 export const MAX_HEADLINES = 5;
 export const MAX_HEADLINE_LEN = 40;
-export const MAX_LONG_HEADLINES = 5;
-export const MAX_LONG_HEADLINE_LEN = 90;
 export const MAX_DESCRIPTIONS = 5;
 export const MAX_DESCRIPTION_LEN = 90;
 
@@ -49,12 +47,8 @@ function headlineText(h: string | { text: string; pinned_position?: number }): s
 /**
  * Build the raw Google Ads DemandGenMultiAssetAdInfo payload. Asset IDs in the
  * input are expanded to full resource names. Optional image fields are only
- * set when the caller provided a non-empty list.
- *
- * NOTE: the v23 typed helper for AdService is missing the long_headlines field
- * on DemandGenMultiAssetAdInfo. We emit long_headlines regardless; the payload
- * is submitted via customer.mutateResources which accepts unknown fields and
- * forwards them to the server.
+ * set when the caller provided a non-empty list. Only fields the proto has are
+ * emitted: the client library drops any other key when it encodes the request.
  */
 export interface DemandGenAdPayload {
   ad_group: string;
@@ -98,9 +92,6 @@ export function buildDemandGenAdPayload(args: {
   if (input.video_asset_ids?.length) {
     dgAd.videos = input.video_asset_ids.map(assetRef);
   }
-  if (input.long_headlines?.length) {
-    dgAd.long_headlines = input.long_headlines.map((t) => ({ text: t }));
-  }
 
   // PAUSED status — matches the platform-wide "Claude creates, human reviews" rule.
   // enums.AdGroupAdStatus.PAUSED = 3
@@ -143,16 +134,6 @@ export function validateDemandGenAd(ad: DemandGenAdInput): DemandGenAdValidation
     const text = headlineText(h);
     if (text.length > MAX_HEADLINE_LEN) {
       errors.push(`Headline ${i + 1} too long (${text.length}/${MAX_HEADLINE_LEN}): "${text}"`);
-    }
-  });
-
-  // Long headlines (optional)
-  if (ad.long_headlines && ad.long_headlines.length > MAX_LONG_HEADLINES) {
-    errors.push(`Maximum ${MAX_LONG_HEADLINES} long_headlines, got ${ad.long_headlines.length}`);
-  }
-  (ad.long_headlines ?? []).forEach((t, i) => {
-    if (t.length > MAX_LONG_HEADLINE_LEN) {
-      errors.push(`Long headline ${i + 1} too long (${t.length}/${MAX_LONG_HEADLINE_LEN}): "${t}"`);
     }
   });
 

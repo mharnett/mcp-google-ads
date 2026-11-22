@@ -27,7 +27,6 @@ const INPUT = {
   call_to_action: "LEARN_MORE",
   marketing_image_asset_ids: ["123"],
   headlines: ["Headline 1", "Headline 2"],
-  long_headlines: ["A longer headline that still fits within ninety characters for a DG ad."],
   descriptions: ["Description 1", "Description 2"],
 };
 

@@ -1098,7 +1098,7 @@ export const tools: Tool[] = [
   },
   {
     name: "google_ads_create_demand_gen_multi_asset_ad",
-    description: "Create a Demand Gen Multi-Asset ad under a DEMAND_GEN_MULTI_ASSET_AD_GROUP (will be PAUSED until approved). Supports both image-based and video-only ads. Validates character limits and count caps before the API call: headlines (max 5, ≤40 chars each), long_headlines (max 5, ≤90 chars), descriptions (max 5, ≤90 chars). For image ads: marketing_image_asset_ids (1.91:1 landscape, ≥1); for video ads: video_asset_ids (YouTube video asset IDs) — omit images entirely for a video-only ad, or combine both. Square/portrait/logo assets are optional. call_to_action is a string enum value such as 'LEARN_MORE' or 'SHOP_NOW'. Auto-labels the created ad.",
+    description: "Create a Demand Gen Multi-Asset ad under a DEMAND_GEN_MULTI_ASSET_AD_GROUP (will be PAUSED until approved). Supports both image-based and video-only ads. Validates character limits and count caps before the API call: headlines (max 5, ≤40 chars each), descriptions (max 5, ≤90 chars). Multi-asset ads have no long headlines (those belong to Demand Gen video ads), so a call that passes them is refused. For image ads: marketing_image_asset_ids (1.91:1 landscape, ≥1); for video ads: video_asset_ids (YouTube video asset IDs) — omit images entirely for a video-only ad, or combine both. Square/portrait/logo assets are optional. call_to_action is a string enum value such as 'LEARN_MORE' or 'SHOP_NOW'. Auto-labels the created ad.",
     inputSchema: {
       additionalProperties: false,
       type: "object",
@@ -1156,11 +1156,6 @@ export const tools: Tool[] = [
               },
             ],
           },
-        },
-        long_headlines: {
-          type: "array",
-          description: "Max 5 long headlines, each ≤90 characters.",
-          items: { type: "string" },
         },
         descriptions: {
           type: "array",
