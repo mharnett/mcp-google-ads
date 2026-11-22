@@ -118,6 +118,47 @@ describe("run-mcp.sh Keychain item selection", () => {
 });
 
 // ============================================
+// The server sees which Keychain item it was given.
+// ============================================
+// src/authHint.ts builds the auth-error hint from
+// GOOGLE_ADS_REFRESH_TOKEN_SERVICE / _ACCOUNT. They only reach the server if
+// run-mcp.sh exports them; a plain shell assignment does not. Same stubs as
+// above, with a `node` that prints the two names instead of the token.
+describe("run-mcp.sh exports the Keychain item it read (names only) to the server", () => {
+  let nodeDir;
+
+  beforeAll(() => {
+    nodeDir = mkdtempSync(path.join(tmpdir(), "run-mcp-item-name-bin-"));
+    writeFileSync(
+      path.join(nodeDir, "node"),
+      `#!/bin/bash\necho "$GOOGLE_ADS_REFRESH_TOKEN_SERVICE|$GOOGLE_ADS_REFRESH_TOKEN_ACCOUNT"\n`
+    );
+    chmodSync(path.join(nodeDir, "node"), 0o755);
+  });
+
+  afterAll(() => {
+    rmSync(nodeDir, { recursive: true, force: true });
+  });
+
+  function itemSeenByServer(value) {
+    const env = { ...process.env, PATH: `${nodeDir}:${binDir}:${process.env.PATH}` };
+    delete env.GOOGLE_ADS_REFRESH_TOKEN_SERVICE;
+    delete env.GOOGLE_ADS_REFRESH_TOKEN_ACCOUNT;
+    if (value === undefined) delete env.GOOGLE_ADS_MCP_WRITE;
+    else env.GOOGLE_ADS_MCP_WRITE = value;
+    return spawnSync("bash", [SCRIPT], { env, encoding: "utf8" }).stdout.trim();
+  }
+
+  it("read-only branch", () => {
+    expect(itemSeenByServer(undefined)).toBe("GOOGLE_ADS_REFRESH_TOKEN|google-ads-ro-drak");
+  });
+
+  it("write branch", () => {
+    expect(itemSeenByServer("true")).toBe("GOOGLE_ADS_REFRESH_TOKEN_AUTOMATION|google-ads-automation");
+  });
+});
+
+// ============================================
 // Keychain RESOLUTION (integration — real `security`).
 // ============================================
 // The selection tests above stub `security`, so they assert only which account

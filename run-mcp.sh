@@ -22,6 +22,9 @@ else
   GOOGLE_ADS_REFRESH_TOKEN_SERVICE=GOOGLE_ADS_REFRESH_TOKEN
   GOOGLE_ADS_REFRESH_TOKEN_ACCOUNT=google-ads-ro-drak
 fi
+# The item's names only, never the token: the server's auth-error hint
+# (src/authHint.ts) names the item it was given.
+export GOOGLE_ADS_REFRESH_TOKEN_SERVICE GOOGLE_ADS_REFRESH_TOKEN_ACCOUNT
 export GOOGLE_ADS_REFRESH_TOKEN=$(keychain_get "$GOOGLE_ADS_REFRESH_TOKEN_SERVICE" "$GOOGLE_ADS_REFRESH_TOKEN_ACCOUNT" 2>/dev/null)
 
 # Optional: post each confirm_large_change override to #drak-ops via the drak
