@@ -4,6 +4,13 @@ name: release-please
 # When you merge the Release PR, it tags + creates a GitHub Release,
 # and dispatches publish.yml (the step at the bottom) to push to npm via OIDC.
 #
+# Manifest mode: release-please-config.json carries the settings (a
+# release-type input would skip that file, extra-files with it) and
+# .release-please-manifest.json pins the last-released version. Each release
+# also bumps server.json (the MCP Registry listing) via extra-files. Tags stay
+# vX.Y.Z (include-component-in-tag: false) so release-please finds the
+# releases made before manifest mode.
+#
 # Conventional commit prefixes that drive version bumps:
 #   feat:  → minor bump
 #   fix:   → patch bump
@@ -28,7 +35,8 @@ jobs:
       - uses: googleapis/release-please-action@v4
         id: release
         with:
-          release-type: node
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
       # GITHUB_TOKEN events don't trigger other workflows, except
       # workflow_dispatch. Publishing stays in publish.yml because npm's
       # Trusted Publisher is registered to that filename.

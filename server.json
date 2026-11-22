@@ -6,18 +6,40 @@
     "url": "https://github.com/mharnett/mcp-google-ads",
     "source": "github"
   },
-  "version": "1.0.1",
+  "version": "1.14.0",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "mcp-google-ads",
-      "version": "1.0.1",
-      "transport": { "type": "stdio" },
+      "version": "1.14.0",
+      "transport": {
+        "type": "stdio"
+      },
       "environmentVariables": [
-        { "name": "GOOGLE_ADS_CLIENT_ID", "description": "OAuth client ID", "isRequired": true, "isSecret": false },
-        { "name": "GOOGLE_ADS_CLIENT_SECRET", "description": "OAuth client secret", "isRequired": true, "isSecret": true },
-        { "name": "GOOGLE_ADS_REFRESH_TOKEN", "description": "OAuth refresh token", "isRequired": true, "isSecret": true },
-        { "name": "GOOGLE_ADS_DEVELOPER_TOKEN", "description": "Google Ads API developer token", "isRequired": true, "isSecret": true }
+        {
+          "name": "GOOGLE_ADS_CLIENT_ID",
+          "description": "OAuth client ID",
+          "isRequired": true,
+          "isSecret": false
+        },
+        {
+          "name": "GOOGLE_ADS_CLIENT_SECRET",
+          "description": "OAuth client secret",
+          "isRequired": true,
+          "isSecret": true
+        },
+        {
+          "name": "GOOGLE_ADS_REFRESH_TOKEN",
+          "description": "OAuth refresh token",
+          "isRequired": true,
+          "isSecret": true
+        },
+        {
+          "name": "GOOGLE_ADS_DEVELOPER_TOKEN",
+          "description": "Google Ads API developer token",
+          "isRequired": true,
+          "isSecret": true
+        }
       ]
     }
   ]
