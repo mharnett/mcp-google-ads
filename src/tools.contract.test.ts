@@ -53,6 +53,7 @@ describe("Tool Schema Contract", () => {
     "google_ads_create_sitelink",
     "google_ads_replace_sitelink_url",
     "google_ads_pause_asset_links",
+    "google_ads_enable_asset_links",
     "google_ads_keyword_volume",
     "google_ads_create_demand_gen_multi_asset_ad",
     "google_ads_update_demand_gen_multi_asset_ad",
@@ -253,6 +254,44 @@ describe("Tool Schema Contract", () => {
       expect(schema.required).toEqual(["asset_id", "field_type"]);
       expect(schema.properties).not.toHaveProperty("campaign_ids");
       expect(schema.properties.field_type?.enum).toEqual(["SITELINK", "CALLOUT", "STRUCTURED_SNIPPET"]);
+    });
+
+    it("enable_asset_links takes resource_names, previews by default and gates lead forms", () => {
+      const tool = tools.find(t => t.name === "google_ads_enable_asset_links");
+      expect(tool).toBeDefined();
+      const schema = tool!.inputSchema as any;
+      expect(schema.additionalProperties).toBe(false);
+      expect(schema.required).toEqual(["resource_names"]);
+      expect(schema.properties.resource_names?.type).toBe("array");
+      expect(schema.properties.resource_names?.items?.type).toBe("string");
+      expect(schema.properties.confirm?.type).toBe("boolean");
+      expect(schema.properties.customer_id?.type).toBe("string");
+      expect(schema.properties.explicit_lead_form_request?.type).toBe("boolean");
+      expect(schema.properties.explicit_lead_form_request.description).toMatch(/explicitly asked/i);
+      // The description must name every link shape it accepts, the PAUSED
+      // staging it undoes, the dry-run default and the parent label.
+      expect(tool!.description).toMatch(/campaignAssets/);
+      expect(tool!.description).toMatch(/adGroupAssets/);
+      expect(tool!.description).toMatch(/customerAssets/);
+      expect(tool!.description).toMatch(/PAUSED/);
+      expect(tool!.description).toMatch(/DRY-RUN BY DEFAULT/);
+      expect(tool!.description).toMatch(/claude-MM-DD-YY/);
+    });
+
+    it.each([
+      "google_ads_link_asset_to_campaign",
+      "google_ads_link_asset_to_ad_group",
+      "google_ads_link_asset_to_customer",
+    ])("%s says links are created PAUSED and names the enable tool", (name) => {
+      const tool = tools.find(t => t.name === name);
+      expect(tool).toBeDefined();
+      expect(tool!.description).toMatch(/created PAUSED/);
+      expect(tool!.description).toMatch(/google_ads_enable_asset_links/);
+    });
+
+    it("pause_asset_links points at enable_asset_links as its inverse", () => {
+      const tool = tools.find(t => t.name === "google_ads_pause_asset_links");
+      expect(tool!.description).toMatch(/google_ads_enable_asset_links/);
     });
 
     it("link_asset_to_campaign field_type enum includes LEAD_FORM", () => {

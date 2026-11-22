@@ -1,6 +1,6 @@
 # MCP Google Ads Server
 
-An MCP (Model Context Protocol) server for the Google Ads API with built-in safeguards for review before changes go live. Production-proven with MCC (Manager Account) support, 85 tools for campaign management, reporting, and optimization. v1.2.0 adds Demand Gen campaign creation end-to-end.
+An MCP (Model Context Protocol) server for the Google Ads API with built-in safeguards for review before changes go live. Production-proven with MCC (Manager Account) support, 86 tools for campaign management, reporting, and optimization. v1.2.0 adds Demand Gen campaign creation end-to-end.
 
 ## Quick install
 
@@ -259,7 +259,7 @@ Restart Claude Code.
 5. Claude enables (requires your approval prompt)
 ```
 
-### Available Tools (36)
+### Available Tools (41)
 
 #### Context & Discovery
 | Tool | Description |
@@ -284,6 +284,15 @@ Restart Claude Code.
 | `google_ads_pause_items` | Pause active items |
 | `google_ads_pause_keywords` | Pause specific keywords |
 | `google_ads_update_campaign_budget` | Update campaign daily budget |
+
+#### Asset Links
+| Tool | Description |
+|------|-------------|
+| `google_ads_link_asset_to_campaign` | Link a sitelink, callout, structured snippet or lead form to campaigns (link created PAUSED) |
+| `google_ads_link_asset_to_ad_group` | Link an asset to ad groups (PAUSED); warns when enabling would leave fewer than 4 ad-group sitelinks |
+| `google_ads_link_asset_to_customer` | Link an asset at the account level (PAUSED) |
+| `google_ads_enable_asset_links` | Enable PAUSED asset links by resource name, with a per-link result; labels each link's campaign or ad group |
+| `google_ads_pause_asset_links` | Pause asset links by resource name |
 
 #### Tracking & URLs
 | Tool | Description |
@@ -396,8 +405,8 @@ After all four calls the campaign, ad group, and ad all live in your account in 
 
 ## Safety Features
 
-1. **Everything starts PAUSED** — Nothing goes live until you explicitly enable it
-2. **Label tracking** — Every create and edit stamps a `claude-MM-DD-YY` label (the America/Los_Angeles date, whatever the server's time zone) on the campaign, ad group, ad or keyword it changed. Budgets, campaign-level criteria and negative keywords cannot carry a label, so the campaign or ad group they belong to gets it. Assets and shared sets cannot be labeled at all, and the tool result says so
+1. **Everything starts PAUSED** — Nothing goes live until you explicitly enable it. Asset links (sitelinks, callouts, snippets, lead forms) are created PAUSED too and serve only once `google_ads_enable_asset_links` enables them
+2. **Label tracking** — Every create and edit stamps a `claude-MM-DD-YY` label (the America/Los_Angeles date, whatever the server's time zone) on the campaign, ad group, ad or keyword it changed. Budgets, campaign-level criteria and negative keywords cannot carry a label, so the campaign or ad group they belong to gets it; so does the campaign or ad group of an asset link when `google_ads_enable_asset_links` turns it on. Assets and shared sets cannot be labeled at all, and the tool result says so
 3. **Validation** — Ads are validated before creation (headline/description lengths, etc.)
 4. **Approval prompts** — The `enable_items` tool requires explicit approval in Claude Code
 5. **Client isolation** — Working directory determines which account, preventing cross-client mistakes

@@ -10,12 +10,17 @@
 // The tool warns (it does not refuse, and it does not copy the campaign set)
 // whenever the resulting ad-group sitelink count would be under 4.
 //
+// The link is created PAUSED, so nothing changes at link time: the counts
+// and the warning describe the ad group once google_ads_enable_asset_links
+// turns the new link on.
+//
 // Ad-group asset links have no label field, so the audit record is a
 // claude-MM-DD-YY label string returned with the result and written to stderr,
 // the same way the apply_* scripts print theirs.
 
 import { assertLeadFormExplicitlyRequested } from "./campaignBuilder.js";
 import { claudeAuditLabel, isValidClaudeLabel } from "./claudeLabel.js";
+import { ENABLE_PATH } from "./assetLinkEnable.js";
 
 export const AD_GROUP_ASSET_FIELD_TYPES = ["SITELINK", "CALLOUT", "STRUCTURED_SNIPPET", "LEAD_FORM"] as const;
 export type AdGroupAssetFieldType = (typeof AD_GROUP_ASSET_FIELD_TYPES)[number];
@@ -120,10 +125,10 @@ export function normalizeLinkAssetToAdGroupArgs(
 
 function underMinimumWarning(c: { ad_group_name?: string; campaign_name?: string; current: number; resulting: number }): string {
   const where = `"${c.ad_group_name}"${c.campaign_name ? ` in "${c.campaign_name}"` : ""}`;
-  const base = `${where} would have ${c.resulting} enabled ad-group sitelinks, fewer than ${MIN_AD_GROUP_SITELINKS}.`;
+  const base = `${where} would have ${c.resulting} enabled ad-group sitelinks once the new link is enabled, fewer than ${MIN_AD_GROUP_SITELINKS}.`;
   if (c.current === 0) {
     return `${base} It has none today, so it currently serves the campaign-level sitelinks; ` +
-      "attaching an ad-group sitelink switches those off for this ad group. " +
+      "enabling an ad-group sitelink switches those off for this ad group. " +
       "Link the campaign set (or more ad-group sitelinks) to it as well.";
   }
   return `${base} Link more ad-group sitelinks to it.`;
@@ -177,7 +182,11 @@ export interface LinkAssetToAdGroupDeps {
   log?: (line: string) => void;
 }
 
-/** Dry run by default; with confirm, links then reads back. */
+/**
+ * Dry run by default; with confirm, creates the missing links PAUSED. There
+ * is no read-back: the state read sees ENABLED links only, and a PAUSED link
+ * changes nothing until it is enabled.
+ */
 export async function runLinkAssetToAdGroup(args: LinkAssetToAdGroupArgs, deps: LinkAssetToAdGroupDeps): Promise<Record<string, unknown>> {
   const before = await deps.getState(args.ad_group_ids, args.field_type);
   const coverage = assessAdGroupAssetCoverage(args.asset_id, args.field_type, before, args.ad_group_ids);
@@ -189,7 +198,7 @@ export async function runLinkAssetToAdGroup(args: LinkAssetToAdGroupArgs, deps: 
     return {
       dry_run: true,
       action: "link_asset_to_ad_group",
-      message: "DRY RUN. Nothing linked. Pass confirm: true to apply.",
+      message: "DRY RUN. Nothing linked. Pass confirm: true to create the links PAUSED.",
       customer_id: args.customer_id ?? "",
       asset_id: args.asset_id,
       field_type: args.field_type,
@@ -197,6 +206,7 @@ export async function runLinkAssetToAdGroup(args: LinkAssetToAdGroupArgs, deps: 
       ad_groups: coverage,
       warnings,
       errors: missing.map((c) => c.error),
+      enable_path: ENABLE_PATH,
       pause_path: PAUSE_PATH,
     };
   }
@@ -213,25 +223,7 @@ export async function runLinkAssetToAdGroup(args: LinkAssetToAdGroupArgs, deps: 
     resource_names = res.resource_names;
   }
 
-  const after = to_link.length > 0 ? await deps.getState(args.ad_group_ids, args.field_type) : before;
-  const ad_groups = after.map((s) => ({
-    ad_group_id: s.ad_group_id,
-    ad_group_name: s.ad_group_name,
-    campaign_name: s.campaign_name,
-    enabled_count: new Set(s.enabled_asset_ids).size,
-    asset_linked: s.enabled_asset_ids.includes(args.asset_id),
-  }));
-  const after_warnings = args.field_type !== "SITELINK" ? [] : after
-    .filter((s) => new Set(s.enabled_asset_ids).size < MIN_AD_GROUP_SITELINKS)
-    .map((s) => {
-      const prior = before.find((b) => b.ad_group_id === s.ad_group_id);
-      return underMinimumWarning({
-        ad_group_name: s.ad_group_name,
-        campaign_name: s.campaign_name,
-        current: prior ? new Set(prior.enabled_asset_ids).size : 0,
-        resulting: new Set(s.enabled_asset_ids).size,
-      });
-    });
+  const ad_groups = coverage.map((c) => ({ ...c, link_status: c.already_linked ? "ENABLED" : "PAUSED" }));
 
   (deps.log ?? ((l: string) => console.error(l)))(
     `[audit ${audit_label}] link_asset_to_ad_group customer=${args.customer_id ?? ""} asset=${args.asset_id} ` +
@@ -244,11 +236,13 @@ export async function runLinkAssetToAdGroup(args: LinkAssetToAdGroupArgs, deps: 
     asset_id: args.asset_id,
     field_type: args.field_type,
     audit_label,
+    status: "PAUSED",
     linked: to_link.length,
     skipped_already_linked,
     resource_names,
     ad_groups,
-    warnings: after_warnings,
+    warnings,
+    enable_path: ENABLE_PATH,
     pause_path: PAUSE_PATH,
   };
 }

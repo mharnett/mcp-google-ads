@@ -91,6 +91,18 @@ import {
   type AdGroupAssetState,
 } from "./adGroupAssetLink.js";
 import {
+  ENABLE_PATH,
+  PARENT_LABEL_NOTE as ASSET_LINK_PARENT_LABEL_NOTE,
+  normalizeEnableAssetLinksArgs,
+  planEnableAssetLinks,
+  buildEnableAssetLinksDryRun,
+  labelParentOf,
+  withSkipReasons,
+  type AssetLinkTarget,
+  type AssetLinkState,
+  type EnableLinkRow,
+} from "./assetLinkEnable.js";
+import {
   buildCampaignCreatePayload,
   type CampaignCreateInput,
   assertLeadFormExplicitlyRequested,
@@ -3519,6 +3531,139 @@ export class GoogleAdsManager {
     return result;
   }
 
+  /**
+   * Current status of each asset link, with its campaign or ad group's status
+   * and name. Read-only. The names come from parseAssetLinkTarget (digits,
+   * tildes and an AssetFieldType name), so they are safe inside the GAQL string.
+   */
+  async getAssetLinkStates(customerId: string, links: AssetLinkTarget[]): Promise<AssetLinkState[]> {
+    const customer = this.getCustomer(customerId);
+    const enumName = (e: Record<number, string>, v: unknown): string =>
+      typeof v === "number" ? (e[v] ?? `UNKNOWN(${v})`) : String(v ?? "");
+    const inList = (level: AssetLinkTarget["level"]): string =>
+      links.filter(l => l.level === level).map(l => `'${l.resource_name}'`).join(", ");
+    const states: AssetLinkState[] = [];
+
+    const campaignLinks = inList("campaign_asset");
+    if (campaignLinks) {
+      const rows = await withResilience(
+        () => customer.query(`
+          SELECT campaign_asset.resource_name, campaign_asset.status, campaign.name, campaign.status
+          FROM campaign_asset
+          WHERE campaign_asset.resource_name IN (${campaignLinks})
+        `),
+        "getAssetLinkStates.campaignAssets"
+      );
+      for (const r of rows as any[]) {
+        states.push({
+          resource_name: String(r.campaign_asset?.resource_name ?? ""),
+          status: enumName(enums.AssetLinkStatus as any, r.campaign_asset?.status),
+          parent_status: enumName(enums.CampaignStatus as any, r.campaign?.status),
+          ...(r.campaign?.name ? { campaign_name: r.campaign.name } : {}),
+        });
+      }
+    }
+
+    const adGroupLinks = inList("ad_group_asset");
+    if (adGroupLinks) {
+      const rows = await withResilience(
+        () => customer.query(`
+          SELECT ad_group_asset.resource_name, ad_group_asset.status, ad_group.name, ad_group.status, campaign.name
+          FROM ad_group_asset
+          WHERE ad_group_asset.resource_name IN (${adGroupLinks})
+        `),
+        "getAssetLinkStates.adGroupAssets"
+      );
+      for (const r of rows as any[]) {
+        states.push({
+          resource_name: String(r.ad_group_asset?.resource_name ?? ""),
+          status: enumName(enums.AssetLinkStatus as any, r.ad_group_asset?.status),
+          parent_status: enumName(enums.AdGroupStatus as any, r.ad_group?.status),
+          ...(r.ad_group?.name ? { ad_group_name: r.ad_group.name } : {}),
+          ...(r.campaign?.name ? { campaign_name: r.campaign.name } : {}),
+        });
+      }
+    }
+
+    const customerLinks = inList("customer_asset");
+    if (customerLinks) {
+      const rows = await withResilience(
+        () => customer.query(`
+          SELECT customer_asset.resource_name, customer_asset.status
+          FROM customer_asset
+          WHERE customer_asset.resource_name IN (${customerLinks})
+        `),
+        "getAssetLinkStates.customerAssets"
+      );
+      for (const r of rows as any[]) {
+        states.push({
+          resource_name: String(r.customer_asset?.resource_name ?? ""),
+          status: enumName(enums.AssetLinkStatus as any, r.customer_asset?.status),
+        });
+      }
+    }
+    return states;
+  }
+
+  /**
+   * Enable the links the plan marked would_enable, one update per level, then
+   * label the campaign or ad group of each link that went live. A failed
+   * level marks its own links failed and the others still go through; a
+   * failed label is logged and that link reports audit_label: null.
+   */
+  async enableAssetLinks(customerId: string, plan: EnableLinkRow[]) {
+    const customer = this.getCustomer(customerId);
+    const cleanId = customerId.replace(/-/g, "");
+    const ENABLED = enums.AssetLinkStatus.ENABLED;
+    const rows: EnableLinkRow[] = plan.map(r => ({ ...r }));
+    const update: Record<AssetLinkTarget["level"], (ops: any[]) => Promise<unknown>> = {
+      campaign_asset: (ops) => customer.campaignAssets.update(ops as any),
+      ad_group_asset: (ops) => customer.adGroupAssets.update(ops as any),
+      customer_asset: (ops) => customer.customerAssets.update(ops as any),
+    };
+
+    for (const level of ["campaign_asset", "ad_group_asset", "customer_asset"] as const) {
+      const batch = rows.filter(r => r.level === level && r.outcome === "would_enable");
+      if (batch.length === 0) continue;
+      const ops = batch.map(r => ({ resource_name: r.resource_name, status: ENABLED }));
+      try {
+        await withResilience(() => update[level](ops), `enableAssetLinks.${level}`);
+        for (const r of batch) r.outcome = "enabled";
+      } catch (e: any) {
+        for (const r of batch) {
+          r.outcome = "failed";
+          r.error = e?.message ?? String(e);
+        }
+      }
+    }
+
+    const enabled = rows.filter(r => r.outcome === "enabled");
+    const parents = (kind: "campaign" | "ad_group") => [
+      ...new Set(enabled.map(labelParentOf).filter((p) => p?.kind === kind).map((p) => p!.resource_name)),
+    ];
+    const campaignParents = parents("campaign");
+    const adGroupParents = parents("ad_group");
+    const campaignLabel = campaignParents.length ? await this.autoLabelCreated(customerId, campaignParents, "campaign") : null;
+    const adGroupLabel = adGroupParents.length ? await this.autoLabelCreated(customerId, adGroupParents, "ad_group") : null;
+    for (const r of enabled) {
+      r.audit_label = r.level === "campaign_asset" ? campaignLabel : r.level === "ad_group_asset" ? adGroupLabel : null;
+    }
+    const labelable = enabled.filter(r => r.level !== "customer_asset");
+    const audit_label = labelable.length > 0 && labelable.every(r => r.audit_label) ? labelable[0].audit_label! : null;
+    const failed = rows.filter(r => r.outcome === "failed").length;
+
+    return {
+      success: failed === 0,
+      customer_id: cleanId,
+      enabled: enabled.length,
+      skipped: rows.length - enabled.length - failed,
+      failed,
+      audit_label,
+      audit_label_note: ASSET_LINK_PARENT_LABEL_NOTE,
+      links: withSkipReasons(rows),
+    };
+  }
+
   // ============================================
   // SITELINK CREATE + REPLACE
   // ============================================
@@ -3904,10 +4049,12 @@ export class GoogleAdsManager {
     }
 
     const assetResource = `customers/${cleanId}/assets/${args.asset_id}`;
+    // Staged PAUSED: nothing serves until google_ads_enable_asset_links.
     const operations = args.campaign_ids.map(id => ({
       campaign: `customers/${cleanId}/campaigns/${id}`,
       asset: assetResource,
       field_type: fieldType,
+      status: enums.AssetLinkStatus.PAUSED,
     }));
 
     const result = await withResilience(
@@ -3924,7 +4071,9 @@ export class GoogleAdsManager {
       asset_resource_name: assetResource,
       field_type: args.field_type,
       campaigns_linked: args.campaign_ids.length,
+      status: "PAUSED",
       resource_names: resourceNames,
+      enable_path: ENABLE_PATH,
     };
   }
 
@@ -4010,10 +4159,12 @@ export class GoogleAdsManager {
     }
 
     const assetResource = `customers/${cleanId}/assets/${args.asset_id}`;
+    // Staged PAUSED: nothing serves until google_ads_enable_asset_links.
     const operations = args.ad_group_ids.map(id => ({
       ad_group: `customers/${cleanId}/adGroups/${id}`,
       asset: assetResource,
       field_type: fieldType,
+      status: enums.AssetLinkStatus.PAUSED,
     }));
 
     const result = await withResilience(
@@ -4106,8 +4257,9 @@ export class GoogleAdsManager {
     const assetResource = `customers/${cleanId}/assets/${args.asset_id}`;
     const result = await withResilience(
       () =>
+        // Staged PAUSED: nothing serves until google_ads_enable_asset_links.
         customer.customerAssets.create([
-          { asset: assetResource, field_type: fieldType } as any,
+          { asset: assetResource, field_type: fieldType, status: enums.AssetLinkStatus.PAUSED } as any,
         ]),
       "linkAssetToCustomer"
     );
@@ -4120,7 +4272,10 @@ export class GoogleAdsManager {
       asset_id: args.asset_id,
       asset_resource_name: assetResource,
       field_type: args.field_type,
+      status: "PAUSED",
       resource_name: resourceName,
+      resource_names: resourceName ? [resourceName] : [],
+      enable_path: ENABLE_PATH,
     };
   }
 
@@ -6679,6 +6834,22 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         return { content: [{ type: "text", text: JSON.stringify({ success: true, ...result }, null, 2) }] };
       }
 
+      case "google_ads_enable_asset_links": {
+        // Strict parse, one-account check and lead-form gate, before any read.
+        const normalized = normalizeEnableAssetLinksArgs(args as Record<string, unknown>);
+        if ("error" in normalized) {
+          return { content: [{ type: "text", text: JSON.stringify({ error: normalized.error }, null, 2) }], isError: true };
+        }
+        const manager = getAdsManager();
+        const states = await manager.getAssetLinkStates(normalized.customer_id, normalized.links);
+        const plan = planEnableAssetLinks(normalized.links, states);
+        if (!normalized.confirm) {
+          return { content: [{ type: "text", text: JSON.stringify(buildEnableAssetLinksDryRun(normalized, plan), null, 2) }] };
+        }
+        const result = await manager.enableAssetLinks(normalized.customer_id, plan);
+        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }], ...(result.success ? {} : { isError: true }) };
+      }
+
       case "google_ads_rename_ad_group": {
         const customerId = args?.customer_id as string || "";
         const adGroupId = args?.ad_group_id as string;
@@ -7012,7 +7183,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 campaign_ids: campaignIds,
                 field_type: fieldType,
                 campaigns_to_link: campaignIds.length,
-                message: "Pass confirm: true to apply the links.",
+                status: "PAUSED",
+                message: "Pass confirm: true to create the links PAUSED.",
+                enable_path: ENABLE_PATH,
               }, null, 2),
             }],
           };
