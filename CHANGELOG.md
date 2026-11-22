@@ -18,6 +18,26 @@
 
 * google_ads_update_demand_gen_multi_asset_ad now edits headlines and descriptions IN PLACE through AdService (same ad ID, status and history), the edit the Google Ads UI makes. It used AdGroupAdService, which answers IMMUTABLE_FIELD for any nested ad field, and its description told callers to rebuild the ad (new ID, lost history, paused auto-generated video siblings). Checked with validate_only on a live Demand Gen multi-asset ad: unchanged copy is refused with IMMUTABLE_FIELD on the old path and accepted through AdService. Adds `validate_only`; validates the resulting full copy, so a headlines-only edit no longer fails for missing descriptions; labels every linked ad group ad; refuses `long_headlines` (not an API field on multi-asset ads, so it was silently dropped) and pinned headlines (Demand Gen does not pin); refuses non-multi-asset ads.
 
+## [1.14.0](https://github.com/mharnett/mcp-google-ads/compare/v1.13.0...v1.14.0) (2026-11-22)
+
+
+### Features
+
+* **assets:** create asset links PAUSED; add google_ads_enable_asset_links ([#104](https://github.com/mharnett/mcp-google-ads/issues/104)) ([929010e](https://github.com/mharnett/mcp-google-ads/commit/929010ecb625eebca6cab62bb08c23ac4760a26c))
+* **campaigns:** google_ads_update_campaign_end_date ([#96](https://github.com/mharnett/mcp-google-ads/issues/96)) ([457701c](https://github.com/mharnett/mcp-google-ads/commit/457701c71b4582b3d5c55909d0a79b56c4dbddf0))
+* **skills:** google-ads-program-audit, a read-only B2B program audit ([#98](https://github.com/mharnett/mcp-google-ads/issues/98)) ([618698d](https://github.com/mharnett/mcp-google-ads/commit/618698d4f28706cb16ecb7ae8d9d84dbf96a36a4))
+
+
+### Bug Fixes
+
+* **assets:** label asset-link creates and pauses; see existing PAUSED ad-group links ([#105](https://github.com/mharnett/mcp-google-ads/issues/105)) ([1bc0a8d](https://github.com/mharnett/mcp-google-ads/commit/1bc0a8de021acc1bf6ba54c4c89d62d1bc15356f))
+* **assets:** link_asset_to_campaign reads existing links first; placeholder ids in ad-group fixtures ([#107](https://github.com/mharnett/mcp-google-ads/issues/107)) ([b9fc81b](https://github.com/mharnett/mcp-google-ads/commit/b9fc81b76f22a4e210379fc8cbf75385f47fe994))
+* **demand-gen:** edit multi-asset ad copy in place through AdService ([#99](https://github.com/mharnett/mcp-google-ads/issues/99)) ([4ce9c29](https://github.com/mharnett/mcp-google-ads/commit/4ce9c2989e863f0d5781a6e84061309f44f5bcd1))
+* **errors:** auth-error hint names the Keychain item the server read ([#108](https://github.com/mharnett/mcp-google-ads/issues/108)) ([fd3b7fa](https://github.com/mharnett/mcp-google-ads/commit/fd3b7fa59a4a21b286e9307a6b9e65f8e7e21c86))
+* label every edit with the Pacific claude-MM-DD-YY date; refuse long_headlines on DG create ([#102](https://github.com/mharnett/mcp-google-ads/issues/102)) ([e726785](https://github.com/mharnett/mcp-google-ads/commit/e726785a42da68929ddfdc50dc9cfde449af4f20))
+* refuse unsafe GAQL inputs, repair create_page_feed, and test staging, remove_items and labels at the dispatch ([977285e](https://github.com/mharnett/mcp-google-ads/commit/977285ec5b1390d47aea96e66faa4dd6661f9532))
+* refuse unsafe GAQL inputs, repair create_page_feed, test staging and labels at the dispatch ([#101](https://github.com/mharnett/mcp-google-ads/issues/101)) ([977285e](https://github.com/mharnett/mcp-google-ads/commit/977285ec5b1390d47aea96e66faa4dd6661f9532))
+
 ## [1.13.0](https://github.com/mharnett/mcp-google-ads/compare/v1.12.1...v1.13.0) (2026-11-13)
 
 
