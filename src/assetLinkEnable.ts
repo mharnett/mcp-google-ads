@@ -23,9 +23,26 @@ export const ENABLE_PATH =
   "Links are created PAUSED and do not serve. To turn them on, pass the returned resource_names to " +
   "google_ads_enable_asset_links; it previews by default and enables with confirm: true.";
 
+const ACCOUNT_LEVEL_SENTENCE =
+  "An account-level (customerAssets) link has no campaign or ad group to label; find it in the account's change history.";
+
 export const PARENT_LABEL_NOTE =
   "An asset link cannot carry a label in Google Ads, so the campaign or ad group each enabled link belongs to was labeled. " +
-  "An account-level (customerAssets) link has no campaign or ad group to label; find it in the account's change history.";
+  ACCOUNT_LEVEL_SENTENCE;
+
+/** link_asset_to_campaign and link_asset_to_ad_group results. */
+export const LINK_PARENT_LABEL_NOTE =
+  "An asset link cannot carry a label in Google Ads, so the campaign or ad group each new link belongs to was labeled.";
+
+/** pause_asset_links results. */
+export const PAUSE_PARENT_LABEL_NOTE =
+  "An asset link cannot carry a label in Google Ads, so the campaign or ad group each paused link belongs to was labeled. " +
+  ACCOUNT_LEVEL_SENTENCE;
+
+/** link_asset_to_customer results, and a pause of account-level links only. */
+export const ACCOUNT_LINK_LABEL_NOTE =
+  "An account-level (customerAssets) link has no campaign or ad group to label, so no claude-MM-DD-YY label was applied. " +
+  "Find this change in the account's change history.";
 
 export const AD_GROUP_SITELINK_NOTE =
   "Once an ad group has any enabled ad-group sitelink, its campaign-level sitelinks stop serving there. " +

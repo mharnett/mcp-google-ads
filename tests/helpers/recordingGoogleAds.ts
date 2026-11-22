@@ -52,10 +52,14 @@ export interface RecordedCall {
   args: any[];
 }
 
-/** A test-supplied GAQL answer: rows for any query the pattern matches. */
+/**
+ * A test-supplied GAQL answer: rows for any query the pattern matches. A
+ * function gets the GAQL string, so a test can apply the query's own WHERE
+ * the way Google would (a static answer ignores it).
+ */
 export interface QueryAnswer {
   pattern: RegExp;
-  rows: any[];
+  rows: any[] | ((gaql: string) => any[]);
 }
 
 export const recorder = {
@@ -75,8 +79,8 @@ export const recorder = {
     this.queryAnswers = [];
     this.failingMethods = new Map();
   },
-  /** Answer every query matching `pattern` with `rows`. */
-  answerQuery(pattern: RegExp, rows: any[]): void {
+  /** Answer every query matching `pattern` with `rows` (or what `rows(gaql)` returns). */
+  answerQuery(pattern: RegExp, rows: QueryAnswer["rows"]): void {
     this.queryAnswers.push({ pattern, rows });
   },
   /** Make one service method reject, e.g. failMethod("campaignLabels.create", new Error("x")). */
@@ -104,7 +108,7 @@ export const recorder = {
  */
 function rowsFor(gaql: string): any[] {
   for (const answer of recorder.queryAnswers) {
-    if (answer.pattern.test(gaql)) return answer.rows;
+    if (answer.pattern.test(gaql)) return typeof answer.rows === "function" ? answer.rows(gaql) : answer.rows;
   }
   const label = gaql.match(/label\.name\s*=\s*'([^']*)'/);
   if (label) {

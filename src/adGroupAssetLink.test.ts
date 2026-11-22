@@ -37,6 +37,7 @@ function state(over: Partial<AdGroupAssetState> = {}): AdGroupAssetState {
     ad_group_name: "Acme - Acme",
     campaign_name: "Brand - NAM",
     enabled_asset_ids: [],
+    paused_asset_ids: [],
     ...over,
   };
 }
@@ -113,7 +114,27 @@ describe("assessAdGroupAssetCoverage", () => {
   it("an asset already linked is not double-counted and is flagged", () => {
     const [a] = assessAdGroupAssetCoverage("999", "SITELINK", [state({ enabled_asset_ids: ["1", "2", "3", "999"] })]);
     expect(a.already_linked).toBe(true);
+    expect(a.existing_link_status).toBe("ENABLED");
     expect(a.resulting_enabled_count).toBe(4);
+  });
+
+  it("an asset already linked PAUSED is flagged with its status and counted once it is enabled", () => {
+    const [a] = assessAdGroupAssetCoverage("999", "SITELINK", [
+      state({ enabled_asset_ids: ["1", "2"], paused_asset_ids: ["7", "999"] }),
+    ]);
+    expect(a.already_linked).toBe(true);
+    expect(a.existing_link_status).toBe("PAUSED");
+    // Other PAUSED links (7) do not serve, so they are not counted.
+    expect(a.current_enabled_count).toBe(2);
+    expect(a.resulting_enabled_count).toBe(3);
+    expect(a.warning).toMatch(/3 enabled ad-group sitelinks/);
+  });
+
+  it("an asset not linked has no existing_link_status", () => {
+    const [a] = assessAdGroupAssetCoverage("999", "CALLOUT", [state({ paused_asset_ids: ["7"] })]);
+    expect(a.already_linked).toBe(false);
+    expect(a.existing_link_status).toBeUndefined();
+    expect(a.current_enabled_count).toBe(0);
   });
 
   it("no sitelink warning for CALLOUT", () => {
@@ -135,9 +156,11 @@ describe("runLinkAssetToAdGroup", () => {
     const getState = vi.fn()
       .mockResolvedValueOnce(before)
       .mockResolvedValueOnce(after);
-    const link = vi.fn().mockResolvedValue({
+    // The manager labels the ad groups it linked and returns the label it attached.
+    const link = vi.fn().mockImplementation(async (a: { audit_label: string }) => ({
       resource_names: ["customers/9876543210/adGroupAssets/185247350836~999~SITELINK"],
-    });
+      audit_label: a.audit_label,
+    }));
     return { getState, link, now: () => new Date("2026-10-23T19:00:00Z") };
   }
 
@@ -167,7 +190,10 @@ describe("runLinkAssetToAdGroup", () => {
       d,
     );
     expect(d.link).toHaveBeenCalledTimes(1);
-    expect(d.link.mock.calls[0][0]).toEqual({ asset_id: "999", ad_group_ids: ["185247350836"], field_type: "SITELINK" });
+    // The label goes on the ad groups it links: today's Pacific claude-MM-DD-YY.
+    expect(d.link.mock.calls[0][0]).toEqual({
+      asset_id: "999", ad_group_ids: ["185247350836"], field_type: "SITELINK", audit_label: "claude-10-23-26",
+    });
     // A read-back of ENABLED links cannot see a PAUSED link, so there is none.
     expect(d.getState).toHaveBeenCalledTimes(1);
     expect(out.success).toBe(true);
@@ -188,9 +214,36 @@ describe("runLinkAssetToAdGroup", () => {
       const p = parseAssetLinkResourceName(rn);
       expect("error" in p ? p.error : p.level).toBe("ad_group_asset");
     }
-    // Ad-group asset links carry no label field: the audit record is the label string.
+    // An ad-group asset link carries no label, so its ad group does.
     expect(isValidClaudeLabel(out.audit_label)).toBe(true);
-    expect(out.audit_label).toBe("claude-10-23-26-ad-group-asset-link");
+    expect(out.audit_label).toBe("claude-10-23-26");
+    expect(out.audit_label_note).toMatch(/ad group/);
+    expect(out.ad_groups.find((a: any) => a.ad_group_id === "2").existing_link_status).toBe("ENABLED");
+  });
+
+  it("confirm passes the caller's audit_label to the link, and reports the label the link attached", async () => {
+    const d = deps([state({ ad_group_id: "41" })]);
+    d.link.mockResolvedValueOnce({ resource_names: [], audit_label: null });
+    const out: any = await runLinkAssetToAdGroup(
+      { asset_id: "999", ad_group_ids: ["41"], field_type: "SITELINK", audit_label: "claude-10-23-26-brand-sitelinks", confirm: true },
+      d,
+    );
+    expect(d.link.mock.calls[0][0].audit_label).toBe("claude-10-23-26-brand-sitelinks");
+    // The attach failed (null): the result says so instead of echoing the name.
+    expect(out.audit_label).toBeNull();
+  });
+
+  it("confirm skips an ad group whose link already exists PAUSED", async () => {
+    const d = deps([state({ ad_group_id: "41", paused_asset_ids: ["999"] }), state({ ad_group_id: "42", ad_group_name: "Other" })]);
+    const out: any = await runLinkAssetToAdGroup(
+      { asset_id: "999", ad_group_ids: ["41", "42"], field_type: "CALLOUT", confirm: true },
+      d,
+    );
+    expect(d.link.mock.calls[0][0].ad_group_ids).toEqual(["42"]);
+    expect(out.skipped_already_linked).toEqual(["41"]);
+    expect(out.ad_groups.find((a: any) => a.ad_group_id === "41")).toMatchObject({
+      already_linked: true, existing_link_status: "PAUSED", link_status: "PAUSED",
+    });
   });
 
   it("confirm with nothing to link does not call the API", async () => {
@@ -201,6 +254,8 @@ describe("runLinkAssetToAdGroup", () => {
     );
     expect(d.link).not.toHaveBeenCalled();
     expect(out.linked).toBe(0);
+    // Nothing changed, so nothing was labeled.
+    expect(out.audit_label).toBeNull();
   });
 
   it("confirm refuses when an ad group id was not found", async () => {

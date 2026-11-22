@@ -289,6 +289,28 @@ describe("Tool Schema Contract", () => {
       expect(tool!.description).toMatch(/google_ads_enable_asset_links/);
     });
 
+    it.each([
+      ["google_ads_link_asset_to_campaign", /campaign it linked/],
+      ["google_ads_link_asset_to_ad_group", /ad group it linked/],
+      ["google_ads_pause_asset_links", /campaign or ad group of each paused link/],
+    ])("%s says it labels the link's parent claude-MM-DD-YY", (name, parent) => {
+      const tool = tools.find(t => t.name === name);
+      expect(tool!.description).toMatch(/claude-MM-DD-YY/);
+      expect(tool!.description).toMatch(parent);
+    });
+
+    it("link_asset_to_customer says an account-level link has nothing to label", () => {
+      const tool = tools.find(t => t.name === "google_ads_link_asset_to_customer");
+      expect(tool!.description).toMatch(/audit_label: null/);
+    });
+
+    it("link_asset_to_ad_group says an existing PAUSED link is skipped and reported, and audit_label is the ad group label", () => {
+      const tool = tools.find(t => t.name === "google_ads_link_asset_to_ad_group")!;
+      expect(tool.description).toMatch(/ENABLED or PAUSED/);
+      expect(tool.description).not.toMatch(/ad-group-asset-link/);
+      expect((tool.inputSchema as any).properties.audit_label.description).toMatch(/each ad group/);
+    });
+
     it("pause_asset_links points at enable_asset_links as its inverse", () => {
       const tool = tools.find(t => t.name === "google_ads_pause_asset_links");
       expect(tool!.description).toMatch(/google_ads_enable_asset_links/);
