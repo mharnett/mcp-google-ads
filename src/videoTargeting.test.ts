@@ -93,10 +93,10 @@ describe("buildYouTubeChannelExclusions", () => {
 
 describe("buildAdGroupTargetingCriteria", () => {
   it("builds ENABLED topic and custom audience criteria", () => {
-    const ops = buildAdGroupTargetingCriteria(AG, CID, { topic_ids: ["77"], custom_audience_ids: ["1006445559"] });
+    const ops = buildAdGroupTargetingCriteria(AG, CID, { topic_ids: ["77"], custom_audience_ids: ["333"] });
     expect(ops).toEqual([
       { ad_group: AG, status: 2, topic: { topic_constant: "topicConstants/77" } },
-      { ad_group: AG, status: 2, custom_audience: { custom_audience: `customers/${CID}/customAudiences/1006445559` } },
+      { ad_group: AG, status: 2, custom_audience: { custom_audience: `customers/${CID}/customAudiences/333` } },
     ]);
   });
   it("requires at least one criterion", () => {
@@ -142,13 +142,13 @@ describe("buildCustomAudience", () => {
 
 describe("buildLookalikeUserList", () => {
   it("builds a NARROW lookalike from seed lists", () => {
-    const u = buildLookalikeUserList(CID, { name: "NAM Strong Fit LaL Narrow", seed_user_list_ids: ["9374900393"], expansion_level: "NARROW", country_codes: ["us", "CA"] });
+    const u = buildLookalikeUserList(CID, { name: "Example Lookalike Narrow", seed_user_list_ids: ["444"], expansion_level: "NARROW", country_codes: ["us", "CA"] });
     expect(u).toEqual({
-      name: "NAM Strong Fit LaL Narrow",
+      name: "Example Lookalike Narrow",
       lookalike_user_list: {
         // v24 LookalikeUserListInfo.seed_user_list_ids is int64[]; an unknown key
         // (e.g. seed_user_lists) is dropped by the client and Google sees zero seeds.
-        seed_user_list_ids: [9374900393],
+        seed_user_list_ids: [444],
         expansion_level: 2,
         country_codes: ["US", "CA"],
       },
