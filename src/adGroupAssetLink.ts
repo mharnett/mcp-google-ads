@@ -12,15 +12,17 @@
 //
 // The link is created PAUSED, so nothing changes at link time: the counts
 // and the warning describe the ad group once google_ads_enable_asset_links
-// turns the new link on.
+// turns the new link on. The read sees ENABLED and PAUSED links, so an ad
+// group that already has the asset linked PAUSED is reported as linked, with
+// its status, and is not sent a duplicate create.
 //
-// Ad-group asset links have no label field, so the audit record is a
-// claude-MM-DD-YY label string returned with the result and written to stderr,
-// the same way the apply_* scripts print theirs.
+// An ad-group asset link cannot carry a label, so the claude-MM-DD-YY label
+// (today's Pacific date, or the caller's audit_label) goes on each ad group
+// the call linked; the manager's link method attaches it.
 
 import { assertLeadFormExplicitlyRequested } from "./campaignBuilder.js";
 import { claudeAuditLabel, isValidClaudeLabel } from "./claudeLabel.js";
-import { ENABLE_PATH } from "./assetLinkEnable.js";
+import { ENABLE_PATH, LINK_PARENT_LABEL_NOTE } from "./assetLinkEnable.js";
 
 export const AD_GROUP_ASSET_FIELD_TYPES = ["SITELINK", "CALLOUT", "STRUCTURED_SNIPPET", "LEAD_FORM"] as const;
 export type AdGroupAssetFieldType = (typeof AD_GROUP_ASSET_FIELD_TYPES)[number];
@@ -29,7 +31,6 @@ export type AdGroupAssetFieldType = (typeof AD_GROUP_ASSET_FIELD_TYPES)[number];
 export const MIN_AD_GROUP_SITELINKS = 4;
 
 const TOOL_NAME = "google_ads_link_asset_to_ad_group";
-const DEFAULT_AUDIT_DESCRIPTOR = "ad-group-asset-link";
 
 export const PAUSE_PATH =
   "To undo, pass the returned resource_names (customers/{cid}/adGroupAssets/{adGroupId}~{assetId}~{FIELD_TYPE}) " +
@@ -44,12 +45,13 @@ export interface LinkAssetToAdGroupArgs {
   confirm: boolean;
 }
 
-/** One ad group's current enabled links of the requested field type. */
+/** One ad group's current ENABLED and PAUSED links of the requested field type. */
 export interface AdGroupAssetState {
   ad_group_id: string;
   ad_group_name: string;
   campaign_name: string;
   enabled_asset_ids: string[];
+  paused_asset_ids: string[];
 }
 
 export interface AdGroupCoverage {
@@ -59,6 +61,8 @@ export interface AdGroupCoverage {
   current_enabled_count: number;
   resulting_enabled_count: number;
   already_linked: boolean;
+  /** Status of the asset's existing link in this ad group, when it has one. */
+  existing_link_status?: "ENABLED" | "PAUSED";
   warning?: string;
   error?: string;
 }
@@ -145,16 +149,18 @@ export function assessAdGroupAssetCoverage(
   requested_ids?: string[],
 ): AdGroupCoverage[] {
   const out: AdGroupCoverage[] = states.map((s) => {
+    // PAUSED links do not serve, so only ENABLED ones count.
     const current = new Set(s.enabled_asset_ids);
-    const already_linked = current.has(asset_id);
-    const resulting = already_linked ? current.size : current.size + 1;
+    const existing = current.has(asset_id) ? "ENABLED" : (s.paused_asset_ids ?? []).includes(asset_id) ? "PAUSED" : undefined;
+    const resulting = existing === "ENABLED" ? current.size : current.size + 1;
     const cov: AdGroupCoverage = {
       ad_group_id: s.ad_group_id,
       ad_group_name: s.ad_group_name,
       campaign_name: s.campaign_name,
       current_enabled_count: current.size,
       resulting_enabled_count: resulting,
-      already_linked,
+      already_linked: existing !== undefined,
+      ...(existing ? { existing_link_status: existing } : {}),
     };
     if (field_type === "SITELINK" && resulting < MIN_AD_GROUP_SITELINKS) {
       cov.warning = underMinimumWarning({ ad_group_name: s.ad_group_name, campaign_name: s.campaign_name, current: current.size, resulting });
@@ -177,14 +183,20 @@ export function assessAdGroupAssetCoverage(
 
 export interface LinkAssetToAdGroupDeps {
   getState: (ad_group_ids: string[], field_type: AdGroupAssetFieldType) => Promise<AdGroupAssetState[]>;
-  link: (args: { asset_id: string; ad_group_ids: string[]; field_type: AdGroupAssetFieldType }) => Promise<{ resource_names: string[] }>;
+  /** Creates the links PAUSED and labels their ad groups `audit_label`; returns the label attached, or null. */
+  link: (args: {
+    asset_id: string;
+    ad_group_ids: string[];
+    field_type: AdGroupAssetFieldType;
+    audit_label: string;
+  }) => Promise<{ resource_names: string[]; audit_label: string | null }>;
   now?: () => Date;
   log?: (line: string) => void;
 }
 
 /**
- * Dry run by default; with confirm, creates the missing links PAUSED. There
- * is no read-back: the state read sees ENABLED links only, and a PAUSED link
+ * Dry run by default; with confirm, creates the missing links PAUSED and
+ * labels the ad groups it linked. There is no read-back: a PAUSED link
  * changes nothing until it is enabled.
  */
 export async function runLinkAssetToAdGroup(args: LinkAssetToAdGroupArgs, deps: LinkAssetToAdGroupDeps): Promise<Record<string, unknown>> {
@@ -192,7 +204,7 @@ export async function runLinkAssetToAdGroup(args: LinkAssetToAdGroupArgs, deps: 
   const coverage = assessAdGroupAssetCoverage(args.asset_id, args.field_type, before, args.ad_group_ids);
   const missing = coverage.filter((c) => c.error);
   const warnings = coverage.map((c) => c.warning).filter((w): w is string => !!w);
-  const audit_label = args.audit_label ?? claudeAuditLabel((deps.now ?? (() => new Date()))(), DEFAULT_AUDIT_DESCRIPTOR);
+  const audit_label = args.audit_label ?? claudeAuditLabel((deps.now ?? (() => new Date()))());
 
   if (!args.confirm) {
     return {
@@ -218,12 +230,14 @@ export async function runLinkAssetToAdGroup(args: LinkAssetToAdGroupArgs, deps: 
   const to_link = coverage.filter((c) => !c.already_linked).map((c) => c.ad_group_id);
   const skipped_already_linked = coverage.filter((c) => c.already_linked).map((c) => c.ad_group_id);
   let resource_names: string[] = [];
+  let applied_label: string | null = null;
   if (to_link.length > 0) {
-    const res = await deps.link({ asset_id: args.asset_id, ad_group_ids: to_link, field_type: args.field_type });
+    const res = await deps.link({ asset_id: args.asset_id, ad_group_ids: to_link, field_type: args.field_type, audit_label });
     resource_names = res.resource_names;
+    applied_label = res.audit_label;
   }
 
-  const ad_groups = coverage.map((c) => ({ ...c, link_status: c.already_linked ? "ENABLED" : "PAUSED" }));
+  const ad_groups = coverage.map((c) => ({ ...c, link_status: c.existing_link_status ?? "PAUSED" }));
 
   (deps.log ?? ((l: string) => console.error(l)))(
     `[audit ${audit_label}] link_asset_to_ad_group customer=${args.customer_id ?? ""} asset=${args.asset_id} ` +
@@ -235,7 +249,8 @@ export async function runLinkAssetToAdGroup(args: LinkAssetToAdGroupArgs, deps: 
     customer_id: args.customer_id ?? "",
     asset_id: args.asset_id,
     field_type: args.field_type,
-    audit_label,
+    audit_label: applied_label,
+    audit_label_note: LINK_PARENT_LABEL_NOTE,
     status: "PAUSED",
     linked: to_link.length,
     skipped_already_linked,

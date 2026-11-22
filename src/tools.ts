@@ -1051,7 +1051,7 @@ export const tools: Tool[] = [
   },
   {
     name: "google_ads_pause_asset_links",
-    description: "Pause asset links (customer_asset, campaign_asset, or ad_group_asset). Use this to stop a sitelink from serving without deleting the underlying asset. DRY-RUN BY DEFAULT: omit `confirm` or pass `confirm: false` to get a preview. Resource name form: customers/{cid}/customerAssets/{assetId}~SITELINK, customers/{cid}/campaignAssets/{campId}~{assetId}~SITELINK, or customers/{cid}/adGroupAssets/{agId}~{assetId}~SITELINK. Ad-group links created by google_ads_link_asset_to_ad_group return their adGroupAssets resource names for exactly this. The inverse is google_ads_enable_asset_links.",
+    description: "Pause asset links (customer_asset, campaign_asset, or ad_group_asset). Use this to stop a sitelink from serving without deleting the underlying asset. DRY-RUN BY DEFAULT: omit `confirm` or pass `confirm: false` to get a preview. Resource name form: customers/{cid}/customerAssets/{assetId}~SITELINK, customers/{cid}/campaignAssets/{campId}~{assetId}~SITELINK, or customers/{cid}/adGroupAssets/{agId}~{assetId}~SITELINK. Ad-group links created by google_ads_link_asset_to_ad_group return their adGroupAssets resource names for exactly this. An asset link cannot carry a label, so the claude-MM-DD-YY label goes on the campaign or ad group of each paused link; account-level links have no parent to label. The inverse is google_ads_enable_asset_links.",
     inputSchema: {
       additionalProperties: false,
       type: "object",
@@ -1723,7 +1723,7 @@ export const tools: Tool[] = [
   },
   {
     name: "google_ads_link_asset_to_campaign",
-    description: "Link an existing asset to one or more campaigns by field type. Supports SITELINK, CALLOUT, STRUCTURED_SNIPPET, and LEAD_FORM. Create the asset first (e.g. with google_ads_create_sitelink or google_ads_create_lead_form_asset), then use this to attach it to campaigns. Links are created PAUSED and do not serve until google_ads_enable_asset_links enables the returned resource_names. DRY-RUN BY DEFAULT: omit `confirm` or pass `confirm: false` to preview.",
+    description: "Link an existing asset to one or more campaigns by field type. Supports SITELINK, CALLOUT, STRUCTURED_SNIPPET, and LEAD_FORM. Create the asset first (e.g. with google_ads_create_sitelink or google_ads_create_lead_form_asset), then use this to attach it to campaigns. Links are created PAUSED and do not serve until google_ads_enable_asset_links enables the returned resource_names. An asset link cannot carry a label, so each campaign it linked is labeled claude-MM-DD-YY. DRY-RUN BY DEFAULT: omit `confirm` or pass `confirm: false` to preview.",
     inputSchema: {
       additionalProperties: false,
       type: "object",
@@ -1754,7 +1754,7 @@ export const tools: Tool[] = [
   },
   {
     name: "google_ads_link_asset_to_ad_group",
-    description: "Link an existing asset to one or more ad groups by field type (ad-group level). Supports SITELINK, CALLOUT, STRUCTURED_SNIPPET, and LEAD_FORM (LEAD_FORM requires explicit_lead_form_request=true). Links are created PAUSED and do not serve until google_ads_enable_asset_links enables the returned resource_names. Reads each ad group first and reports its name, campaign, current enabled link count of that field type and the count once the new link is enabled. WARNS when a SITELINK link would leave an ad group with fewer than 4 enabled ad-group sitelinks once enabled: once an ad group has any enabled ad-group sitelink, its campaign-level sitelinks stop serving there, so enabling the first one can cut it to 1. The tool does not copy the campaign set; link those yourself if needed. Ad groups that already have the asset are skipped. Ad-group asset links have no label field, so the result carries an audit_label (claude-MM-DD-YY[-desc], default claude-MM-DD-YY-ad-group-asset-link) as the audit record. To pause a link after enabling it, pass the returned resource_names to google_ads_pause_asset_links. DRY-RUN BY DEFAULT: omit `confirm` or pass `confirm: false` to preview.",
+    description: "Link an existing asset to one or more ad groups by field type (ad-group level). Supports SITELINK, CALLOUT, STRUCTURED_SNIPPET, and LEAD_FORM (LEAD_FORM requires explicit_lead_form_request=true). Links are created PAUSED and do not serve until google_ads_enable_asset_links enables the returned resource_names. Reads each ad group first and reports its name, campaign, current enabled link count of that field type and the count once the new link is enabled. WARNS when a SITELINK link would leave an ad group with fewer than 4 enabled ad-group sitelinks once enabled: once an ad group has any enabled ad-group sitelink, its campaign-level sitelinks stop serving there, so enabling the first one can cut it to 1. The tool does not copy the campaign set; link those yourself if needed. Ad groups that already have the asset linked, ENABLED or PAUSED, are skipped and reported with the link's status (existing_link_status); enable a PAUSED one with google_ads_enable_asset_links. An asset link cannot carry a label, so each ad group it linked is labeled claude-MM-DD-YY (or the audit_label given). To pause a link after enabling it, pass the returned resource_names to google_ads_pause_asset_links. DRY-RUN BY DEFAULT: omit `confirm` or pass `confirm: false` to preview.",
     inputSchema: {
       additionalProperties: false,
       type: "object",
@@ -1777,7 +1777,7 @@ export const tools: Tool[] = [
         },
         audit_label: {
           type: "string",
-          description: "Optional audit label in claude-MM-DD-YY[-desc] form, returned with the result and logged. Defaults to claude-MM-DD-YY-ad-group-asset-link.",
+          description: "Optional label in claude-MM-DD-YY[-desc] form to put on each ad group linked. Defaults to today's claude-MM-DD-YY (America/Los_Angeles date).",
         },
         confirm: {
           type: "boolean",
@@ -1832,7 +1832,7 @@ export const tools: Tool[] = [
   },
   {
     name: "google_ads_link_asset_to_customer",
-    description: "Link an existing asset to the customer account itself (account-level, applies across every campaign unless overridden at a lower level). Supports SITELINK, CALLOUT, and STRUCTURED_SNIPPET. Create the asset first (e.g. with google_ads_create_sitelink, google_ads_create_callout, or google_ads_create_structured_snippet), then use this to attach it at the account level. Links are created PAUSED and do not serve until google_ads_enable_asset_links enables the returned resource_names. To remove an account-level link, use google_ads_pause_asset_links against the resulting customer_asset resource name. DRY-RUN BY DEFAULT: omit `confirm` or pass `confirm: false` to preview.",
+    description: "Link an existing asset to the customer account itself (account-level, applies across every campaign unless overridden at a lower level). Supports SITELINK, CALLOUT, and STRUCTURED_SNIPPET. Create the asset first (e.g. with google_ads_create_sitelink, google_ads_create_callout, or google_ads_create_structured_snippet), then use this to attach it at the account level. Links are created PAUSED and do not serve until google_ads_enable_asset_links enables the returned resource_names. To remove an account-level link, use google_ads_pause_asset_links against the resulting customer_asset resource name. An account-level link has no campaign or ad group to label, so the result reports audit_label: null. DRY-RUN BY DEFAULT: omit `confirm` or pass `confirm: false` to preview.",
     inputSchema: {
       additionalProperties: false,
       type: "object",

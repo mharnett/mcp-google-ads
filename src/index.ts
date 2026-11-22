@@ -93,7 +93,11 @@ import {
 import {
   ENABLE_PATH,
   PARENT_LABEL_NOTE as ASSET_LINK_PARENT_LABEL_NOTE,
+  LINK_PARENT_LABEL_NOTE,
+  PAUSE_PARENT_LABEL_NOTE,
+  ACCOUNT_LINK_LABEL_NOTE,
   normalizeEnableAssetLinksArgs,
+  parseAssetLinkTarget,
   planEnableAssetLinks,
   buildEnableAssetLinksDryRun,
   labelParentOf,
@@ -795,6 +799,59 @@ export class GoogleAdsManager {
       return labelName;
     } catch (e: any) {
       console.error(`[WARN] autoLabelCreated(${assetType}) failed for '${labelName}': ${e.message}`);
+      return null;
+    }
+  }
+
+  /**
+   * Attach `labelName` (default: today's claude-MM-DD-YY) to campaigns or ad
+   * groups, skipping any that already carry it. An asset link created PAUSED
+   * and enabled the same day labels the same parent twice, and Google refuses
+   * a label a resource already has, which would fail the whole attach. If the
+   * read of existing labels fails, it attaches to all, as autoLabelCreated
+   * does. Best-effort: returns the label name once the attach went through,
+   * null when there was nothing to label or the attach failed. Only exact
+   * customers/{cid}/campaigns/{id} or .../adGroups/{id} names are kept, so
+   * they are safe inside the GAQL string.
+   */
+  private async labelParentsOnce(
+    customerId: string,
+    resourceNames: string[],
+    kind: "campaign" | "ad_group",
+    labelName: string = this.todayClaudeLabel(),
+  ): Promise<string | null> {
+    const shape = kind === "campaign" ? /^customers\/\d+\/campaigns\/\d+$/ : /^customers\/\d+\/adGroups\/\d+$/;
+    const parents = [...new Set(resourceNames ?? [])].filter((rn) => shape.test(rn));
+    if (parents.length === 0) return null;
+    const table = kind === "campaign" ? "campaign_label" : "ad_group_label";
+    try {
+      const labelRN = await this.ensureLabelExists(customerId, labelName);
+      let alreadyLabeled = new Set<string>();
+      if (/^customers\/\d+\/labels\/\d+$/.test(labelRN)) {
+        try {
+          const rows = await withResilience(
+            () =>
+              this.getCustomer(customerId).query(`
+                SELECT ${table}.${kind}
+                FROM ${table}
+                WHERE ${table}.label = '${labelRN}'
+                  AND ${table}.${kind} IN (${parents.map((p) => `'${p}'`).join(", ")})
+              `),
+            `labelParentsOnce.${table}`
+          );
+          alreadyLabeled = new Set((rows as any[]).map((r) => String(r?.[table]?.[kind] ?? "")));
+        } catch (e: any) {
+          console.error(`[WARN] labelParentsOnce(${kind}) could not read existing labels, attaching to all: ${e.message}`);
+        }
+      }
+      const missing = parents.filter((p) => !alreadyLabeled.has(p));
+      if (missing.length > 0) {
+        if (kind === "campaign") await this.labelCampaigns(customerId, missing, labelRN);
+        else await this.labelAdGroups(customerId, missing, labelRN);
+      }
+      return labelName;
+    } catch (e: any) {
+      console.error(`[WARN] labelParentsOnce(${kind}) failed for '${labelName}': ${e.message}`);
       return null;
     }
   }
@@ -3503,6 +3560,17 @@ export class GoogleAdsManager {
     const PAUSED = enums.AssetLinkStatus.PAUSED;
     const result = { customer_id: cleanId, paused: { customer_asset: 0, campaign_asset: 0, ad_group_asset: 0 } };
 
+    // An asset link cannot carry a label: each level's campaigns or ad groups
+    // are labeled once its pause lands. Names that do not parse exactly are
+    // paused but not labeled.
+    const parentsOf = (names: string[], kind: "campaign" | "ad_group"): string[] =>
+      names
+        .map((rn) => parseAssetLinkTarget(rn))
+        .map((t) => ("error" in t ? null : labelParentOf(t)))
+        .filter((p): p is { kind: "campaign" | "ad_group"; resource_name: string } => p?.kind === kind)
+        .map((p) => p.resource_name);
+    const labels: Array<string | null> = [];
+
     if (byLevel.customer_asset.length > 0) {
       const ops = byLevel.customer_asset.map(rn => ({ resource_name: rn, status: PAUSED }));
       await withResilience(
@@ -3518,6 +3586,7 @@ export class GoogleAdsManager {
         "pauseAssetLinks.campaignAssets"
       );
       result.paused.campaign_asset = ops.length;
+      labels.push(await this.labelParentsOnce(customerId, parentsOf(byLevel.campaign_asset, "campaign"), "campaign"));
     }
     if (byLevel.ad_group_asset.length > 0) {
       const ops = byLevel.ad_group_asset.map(rn => ({ resource_name: rn, status: PAUSED }));
@@ -3526,9 +3595,15 @@ export class GoogleAdsManager {
         "pauseAssetLinks.adGroupAssets"
       );
       result.paused.ad_group_asset = ops.length;
+      labels.push(await this.labelParentsOnce(customerId, parentsOf(byLevel.ad_group_asset, "ad_group"), "ad_group"));
     }
 
-    return result;
+    const hasParentLevel = labels.length > 0;
+    return {
+      ...result,
+      audit_label: hasParentLevel && labels.every(Boolean) ? labels[0] : null,
+      audit_label_note: hasParentLevel ? PAUSE_PARENT_LABEL_NOTE : ACCOUNT_LINK_LABEL_NOTE,
+    };
   }
 
   /**
@@ -3643,8 +3718,8 @@ export class GoogleAdsManager {
     ];
     const campaignParents = parents("campaign");
     const adGroupParents = parents("ad_group");
-    const campaignLabel = campaignParents.length ? await this.autoLabelCreated(customerId, campaignParents, "campaign") : null;
-    const adGroupLabel = adGroupParents.length ? await this.autoLabelCreated(customerId, adGroupParents, "ad_group") : null;
+    const campaignLabel = campaignParents.length ? await this.labelParentsOnce(customerId, campaignParents, "campaign") : null;
+    const adGroupLabel = adGroupParents.length ? await this.labelParentsOnce(customerId, adGroupParents, "ad_group") : null;
     for (const r of enabled) {
       r.audit_label = r.level === "campaign_asset" ? campaignLabel : r.level === "ad_group_asset" ? adGroupLabel : null;
     }
@@ -4064,6 +4139,12 @@ export class GoogleAdsManager {
 
     const results = (result as any).results || [];
     const resourceNames: string[] = results.map((r: any) => r.resource_name).filter(Boolean);
+    // The create is atomic, so every campaign in the call got its link.
+    const audit_label = await this.labelParentsOnce(
+      customerId,
+      args.campaign_ids.map(id => `customers/${cleanId}/campaigns/${id}`),
+      "campaign"
+    );
 
     return {
       customer_id: cleanId,
@@ -4073,6 +4154,8 @@ export class GoogleAdsManager {
       campaigns_linked: args.campaign_ids.length,
       status: "PAUSED",
       resource_names: resourceNames,
+      audit_label,
+      audit_label_note: LINK_PARENT_LABEL_NOTE,
       enable_path: ENABLE_PATH,
     };
   }
@@ -4082,9 +4165,11 @@ export class GoogleAdsManager {
   // ============================================
 
   /**
-   * Current ENABLED ad-group links of one field type, per ad group, plus the
-   * ad group and campaign names. REMOVED ad groups are excluded (cannot take
-   * a new link); PAUSED ad groups are included. Read-only.
+   * Current ENABLED and PAUSED ad-group links of one field type, per ad
+   * group, plus the ad group and campaign names. A PAUSED link still exists,
+   * so creating it again fails as a duplicate; a REMOVED link does not count.
+   * REMOVED ad groups are excluded (cannot take a new link); PAUSED ad groups
+   * are included. Read-only.
    */
   async getAdGroupAssetState(customerId: string, adGroupIds: string[], fieldType: string): Promise<AdGroupAssetState[]> {
     const customer = this.getCustomer(customerId);
@@ -4111,6 +4196,7 @@ export class GoogleAdsManager {
         ad_group_name: r.ad_group?.name ?? "",
         campaign_name: r.campaign?.name ?? "",
         enabled_asset_ids: [],
+        paused_asset_ids: [],
       });
     }
     if (states.size === 0) return [];
@@ -4120,19 +4206,23 @@ export class GoogleAdsManager {
     const linkRows = await withResilience(
       () =>
         customer.query(`
-          SELECT ad_group_asset.ad_group, ad_group_asset.asset
+          SELECT ad_group_asset.ad_group, ad_group_asset.asset, ad_group_asset.status
           FROM ad_group_asset
           WHERE ad_group_asset.ad_group IN (${agResources})
             AND ad_group_asset.field_type = '${fieldType}'
-            AND ad_group_asset.status = 'ENABLED'
+            AND ad_group_asset.status IN ('ENABLED', 'PAUSED')
         `),
       "getAdGroupAssetState.adGroupAssets"
     );
     for (const r of linkRows as any[]) {
       const agId = String(r.ad_group_asset?.ad_group ?? "").split("/").pop() ?? "";
       const assetId = String(r.ad_group_asset?.asset ?? "").split("/").pop() ?? "";
+      const raw = r.ad_group_asset?.status;
+      const status = typeof raw === "number" ? (enums.AssetLinkStatus as any)[raw] : String(raw ?? "");
       const st = states.get(agId);
-      if (st && assetId && !st.enabled_asset_ids.includes(assetId)) st.enabled_asset_ids.push(assetId);
+      if (!st || !assetId) continue;
+      const bucket = status === "ENABLED" ? st.enabled_asset_ids : status === "PAUSED" ? st.paused_asset_ids : null;
+      if (bucket && !bucket.includes(assetId)) bucket.push(assetId);
     }
     return [...states.values()];
   }
@@ -4141,6 +4231,8 @@ export class GoogleAdsManager {
     asset_id: string;
     ad_group_ids: string[];
     field_type: string;
+    /** Label for the ad groups linked; defaults to today's claude-MM-DD-YY. */
+    audit_label?: string;
   }) {
     const customer = this.getCustomer(customerId);
     const cleanId = customerId.replace(/-/g, "");
@@ -4173,7 +4265,14 @@ export class GoogleAdsManager {
     );
     const results = (result as any).results || [];
     const resourceNames: string[] = results.map((r: any) => r.resource_name).filter(Boolean);
-    return { customer_id: cleanId, asset_resource_name: assetResource, resource_names: resourceNames };
+    // The create is atomic, so every ad group in the call got its link.
+    const audit_label = await this.labelParentsOnce(
+      customerId,
+      args.ad_group_ids.map(id => `customers/${cleanId}/adGroups/${id}`),
+      "ad_group",
+      args.audit_label
+    );
+    return { customer_id: cleanId, asset_resource_name: assetResource, resource_names: resourceNames, audit_label };
   }
 
   // ============================================
@@ -4275,6 +4374,8 @@ export class GoogleAdsManager {
       status: "PAUSED",
       resource_name: resourceName,
       resource_names: resourceName ? [resourceName] : [],
+      audit_label: null,
+      audit_label_note: ACCOUNT_LINK_LABEL_NOTE,
       enable_path: ENABLE_PATH,
     };
   }
