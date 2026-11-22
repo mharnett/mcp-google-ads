@@ -328,6 +328,7 @@ import {
   GoogleAdsServiceError,
   classifyError,
 } from "./errors.js";
+import { authErrorHint } from "./authHint.js";
 
 import { withResilience, safeResponse, logger } from "./resilience.js";
 import { backfillOmittedBooleans } from "./backfillDefaults.js";
@@ -7908,8 +7909,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (error instanceof GoogleAdsAuthError) {
-      response.action_required = "Re-authenticate: check refresh token in macOS Keychain. Token may be expired or revoked.";
-      response.hint = "Run: security find-generic-password -a google-ads-drak -s GOOGLE_ADS_REFRESH_TOKEN -w";
+      Object.assign(response, authErrorHint(process.env));
     } else if (error instanceof GoogleAdsRateLimitError) {
       response.retry_after_ms = error.retryAfterMs;
       response.action_required = `Rate limited. Retry after ${Math.ceil(error.retryAfterMs / 1000)} seconds.`;
