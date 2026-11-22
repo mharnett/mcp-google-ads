@@ -33,9 +33,9 @@ const TOOL = "google_ads_link_asset_to_ad_group";
 
 function state(over: Partial<AdGroupAssetState> = {}): AdGroupAssetState {
   return {
-    ad_group_id: "185247350836",
-    ad_group_name: "Acme - Acme",
-    campaign_name: "Brand - NAM",
+    ad_group_id: "40",
+    ad_group_name: "Example ad group",
+    campaign_name: "Example campaign",
     enabled_asset_ids: [],
     paused_asset_ids: [],
     ...over,
@@ -44,12 +44,12 @@ function state(over: Partial<AdGroupAssetState> = {}): AdGroupAssetState {
 
 describe("normalizeLinkAssetToAdGroupArgs", () => {
   it("defaults to dry-run", () => {
-    const r = normalizeLinkAssetToAdGroupArgs({ asset_id: "428556399972", ad_group_ids: ["185247350836"], field_type: "SITELINK" });
+    const r = normalizeLinkAssetToAdGroupArgs({ asset_id: "999", ad_group_ids: ["40"], field_type: "SITELINK" });
     expect("error" in r).toBe(false);
     if ("error" in r) return;
     expect(r.confirm).toBe(false);
     expect(r.field_type).toBe("SITELINK");
-    expect(r.ad_group_ids).toEqual(["185247350836"]);
+    expect(r.ad_group_ids).toEqual(["40"]);
   });
 
   it("confirm: true applies", () => {
@@ -95,7 +95,7 @@ describe("assessAdGroupAssetCoverage", () => {
     expect(a.resulting_enabled_count).toBe(1);
     expect(a.warning).toMatch(/fewer than 4/);
     expect(a.warning).toMatch(/campaign-level sitelinks/);
-    expect(a.warning).toMatch(/Acme - Acme/);
+    expect(a.warning).toMatch(/Example ad group/);
   });
 
   it("3 existing + 1 new = 4: no warning", () => {
@@ -158,7 +158,7 @@ describe("runLinkAssetToAdGroup", () => {
       .mockResolvedValueOnce(after);
     // The manager labels the ad groups it linked and returns the label it attached.
     const link = vi.fn().mockImplementation(async (a: { audit_label: string }) => ({
-      resource_names: ["customers/9876543210/adGroupAssets/185247350836~999~SITELINK"],
+      resource_names: ["customers/9876543210/adGroupAssets/40~999~SITELINK"],
       audit_label: a.audit_label,
     }));
     return { getState, link, now: () => new Date("2026-10-23T19:00:00Z") };
@@ -167,12 +167,12 @@ describe("runLinkAssetToAdGroup", () => {
   it("dry run reads state, lists the ad group by name, never links", async () => {
     const d = deps([state()]);
     const out: any = await runLinkAssetToAdGroup(
-      { customer_id: "9876543210", asset_id: "999", ad_group_ids: ["185247350836"], field_type: "SITELINK", confirm: false },
+      { customer_id: "9876543210", asset_id: "999", ad_group_ids: ["40"], field_type: "SITELINK", confirm: false },
       d,
     );
     expect(d.link).not.toHaveBeenCalled();
     expect(out.dry_run).toBe(true);
-    expect(out.ad_groups[0].ad_group_name).toBe("Acme - Acme");
+    expect(out.ad_groups[0].ad_group_name).toBe("Example ad group");
     expect(out.ad_groups[0].resulting_enabled_count).toBe(1);
     expect(out.warnings).toHaveLength(1);
     expect(out.pause_path).toMatch(/google_ads_pause_asset_links/);
@@ -186,13 +186,13 @@ describe("runLinkAssetToAdGroup", () => {
   it("confirm links only the ad groups not already linked, PAUSED, and reports what enabling would leave", async () => {
     const d = deps([state(), state({ ad_group_id: "2", ad_group_name: "Other", enabled_asset_ids: ["999", "1", "2", "3"] })]);
     const out: any = await runLinkAssetToAdGroup(
-      { customer_id: "9876543210", asset_id: "999", ad_group_ids: ["185247350836", "2"], field_type: "SITELINK", confirm: true },
+      { customer_id: "9876543210", asset_id: "999", ad_group_ids: ["40", "2"], field_type: "SITELINK", confirm: true },
       d,
     );
     expect(d.link).toHaveBeenCalledTimes(1);
     // The label goes on the ad groups it links: today's Pacific claude-MM-DD-YY.
     expect(d.link.mock.calls[0][0]).toEqual({
-      asset_id: "999", ad_group_ids: ["185247350836"], field_type: "SITELINK", audit_label: "claude-10-23-26",
+      asset_id: "999", ad_group_ids: ["40"], field_type: "SITELINK", audit_label: "claude-10-23-26",
     });
     // A read-back of ENABLED links cannot see a PAUSED link, so there is none.
     expect(d.getState).toHaveBeenCalledTimes(1);
@@ -200,7 +200,7 @@ describe("runLinkAssetToAdGroup", () => {
     expect(out.status).toBe("PAUSED");
     expect(out.linked).toBe(1);
     expect(out.skipped_already_linked).toEqual(["2"]);
-    const linked = out.ad_groups.find((a: any) => a.ad_group_id === "185247350836");
+    const linked = out.ad_groups.find((a: any) => a.ad_group_id === "40");
     expect(linked.link_status).toBe("PAUSED");
     expect(linked.current_enabled_count).toBe(0);
     expect(linked.resulting_enabled_count).toBe(1);
@@ -249,7 +249,7 @@ describe("runLinkAssetToAdGroup", () => {
   it("confirm with nothing to link does not call the API", async () => {
     const d = deps([state({ enabled_asset_ids: ["999", "1", "2", "3"] })]);
     const out: any = await runLinkAssetToAdGroup(
-      { asset_id: "999", ad_group_ids: ["185247350836"], field_type: "SITELINK", confirm: true },
+      { asset_id: "999", ad_group_ids: ["40"], field_type: "SITELINK", confirm: true },
       d,
     );
     expect(d.link).not.toHaveBeenCalled();
