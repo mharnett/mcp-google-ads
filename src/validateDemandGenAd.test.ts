@@ -219,7 +219,7 @@ describe("isDemandGenAdGroup — accepts campaign channel_type as canonical chec
     // parent campaign's advertising_channel_type (DEMAND_GEN = 14) is the
     // authoritative signal — DG campaigns can only contain DG ad groups.
     const row = {
-      ad_group: { id: 194364862223, type: undefined },
+      ad_group: { id: 777, type: undefined },
       campaign: { advertising_channel_type: 14 },
     };
     expect(isDemandGenAdGroup(row)).toBe(true);
@@ -274,8 +274,8 @@ describe("normalizeCallToAction — maps enum names to Google display text", () 
 describe("buildDemandGenAdPayload — call_to_action_text uses display text", () => {
   it("sends 'Learn more' when input call_to_action is LEARN_MORE", () => {
     const payload = buildDemandGenAdPayload({
-      customer_id_clean: "9639325299",
-      ad_group_id: "194364862223",
+      customer_id_clean: "1234567890",
+      ad_group_id: "777",
       input: {
         final_urls: ["https://example.com/"],
         business_name: "Example",

@@ -4,7 +4,7 @@ import {
   planRecommendationSubscriptionChanges,
 } from "./recommendationSubscriptionUpdate.js";
 
-const CID = "4948252953";
+const CID = "1234567890";
 
 describe("recommendationTypeEnum", () => {
   it("maps the two RSA types to their API enum values", () => {
