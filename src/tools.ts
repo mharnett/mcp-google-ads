@@ -1723,7 +1723,7 @@ export const tools: Tool[] = [
   },
   {
     name: "google_ads_link_asset_to_campaign",
-    description: "Link an existing asset to one or more campaigns by field type. Supports SITELINK, CALLOUT, STRUCTURED_SNIPPET, and LEAD_FORM. Create the asset first (e.g. with google_ads_create_sitelink or google_ads_create_lead_form_asset), then use this to attach it to campaigns. Links are created PAUSED and do not serve until google_ads_enable_asset_links enables the returned resource_names. An asset link cannot carry a label, so each campaign it linked is labeled claude-MM-DD-YY. DRY-RUN BY DEFAULT: omit `confirm` or pass `confirm: false` to preview.",
+    description: "Link an existing asset to one or more campaigns by field type. Supports SITELINK, CALLOUT, STRUCTURED_SNIPPET, and LEAD_FORM. Create the asset first (e.g. with google_ads_create_sitelink or google_ads_create_lead_form_asset), then use this to attach it to campaigns. Links are created PAUSED and do not serve until google_ads_enable_asset_links enables the returned resource_names. Reads each campaign first and reports its name; a campaign id that is not found (or is REMOVED) is refused on confirm. Campaigns that already have the asset linked, ENABLED or PAUSED, are skipped and reported with the link's status (existing_link_status), so re-running a staged link does not fail as a duplicate; enable a PAUSED one with google_ads_enable_asset_links. An asset link cannot carry a label, so each campaign it linked is labeled claude-MM-DD-YY. DRY-RUN BY DEFAULT: omit `confirm` or pass `confirm: false` to preview.",
     inputSchema: {
       additionalProperties: false,
       type: "object",
