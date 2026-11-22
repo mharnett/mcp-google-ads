@@ -153,27 +153,37 @@ describe("runLinkAssetToAdGroup", () => {
     expect(out.ad_groups[0].resulting_enabled_count).toBe(1);
     expect(out.warnings).toHaveLength(1);
     expect(out.pause_path).toMatch(/google_ads_pause_asset_links/);
+    // The link it would create is PAUSED: the count is what the ad group
+    // has once google_ads_enable_asset_links turns it on.
+    expect(out.message).toMatch(/PAUSED/);
+    expect(out.enable_path).toMatch(/google_ads_enable_asset_links/);
+    expect(out.warnings[0]).toMatch(/once .*enabled/);
   });
 
-  it("confirm links only the ad groups not already linked, then reads back", async () => {
-    const d = deps(
-      [state(), state({ ad_group_id: "2", ad_group_name: "Other", enabled_asset_ids: ["999", "1", "2", "3"] })],
-      [state({ enabled_asset_ids: ["999"] }), state({ ad_group_id: "2", ad_group_name: "Other", enabled_asset_ids: ["999", "1", "2", "3"] })],
-    );
+  it("confirm links only the ad groups not already linked, PAUSED, and reports what enabling would leave", async () => {
+    const d = deps([state(), state({ ad_group_id: "2", ad_group_name: "Other", enabled_asset_ids: ["999", "1", "2", "3"] })]);
     const out: any = await runLinkAssetToAdGroup(
       { customer_id: "9876543210", asset_id: "999", ad_group_ids: ["185247350836", "2"], field_type: "SITELINK", confirm: true },
       d,
     );
     expect(d.link).toHaveBeenCalledTimes(1);
     expect(d.link.mock.calls[0][0]).toEqual({ asset_id: "999", ad_group_ids: ["185247350836"], field_type: "SITELINK" });
-    expect(d.getState).toHaveBeenCalledTimes(2);
+    // A read-back of ENABLED links cannot see a PAUSED link, so there is none.
+    expect(d.getState).toHaveBeenCalledTimes(1);
     expect(out.success).toBe(true);
+    expect(out.status).toBe("PAUSED");
     expect(out.linked).toBe(1);
     expect(out.skipped_already_linked).toEqual(["2"]);
-    // Read-back counts come from the second read, not arithmetic.
-    expect(out.ad_groups.find((a: any) => a.ad_group_id === "185247350836").enabled_count).toBe(1);
+    const linked = out.ad_groups.find((a: any) => a.ad_group_id === "185247350836");
+    expect(linked.link_status).toBe("PAUSED");
+    expect(linked.current_enabled_count).toBe(0);
+    expect(linked.resulting_enabled_count).toBe(1);
+    expect(out.ad_groups.find((a: any) => a.ad_group_id === "2").link_status).toBe("ENABLED");
+    // The under-4 warning still fires, for the moment the link is enabled.
     expect(out.warnings).toHaveLength(1);
-    // Every returned link is pausable through google_ads_pause_asset_links.
+    expect(out.warnings[0]).toMatch(/once .*enabled/);
+    expect(out.enable_path).toMatch(/google_ads_enable_asset_links/);
+    // Every returned link can be enabled or paused by resource name.
     for (const rn of out.resource_names) {
       const p = parseAssetLinkResourceName(rn);
       expect("error" in p ? p.error : p.level).toBe("ad_group_asset");

@@ -199,6 +199,7 @@ export const WRITE_TOOL_GUARDS: Readonly<Record<string, WriteToolGuardSpec>> = {
   google_ads_pause_keywords: {},
   google_ads_enable_keywords: {},
   google_ads_pause_asset_links: {},
+  google_ads_enable_asset_links: {},
   google_ads_remove_items: {},
   google_ads_remove_shared_negatives: {},
   google_ads_remove_campaign_negatives: {},

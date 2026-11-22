@@ -2,6 +2,8 @@
 // Extracted so input validation and resource-name parsing are testable
 // without hitting the Google Ads API.
 
+import { ENABLE_PATH } from "./assetLinkEnable.js";
+
 export interface AssetUrlUpdate {
   /** Current final URLs of the asset; the update is refused if they differ. */
   expected_old?: string[];
@@ -508,6 +510,8 @@ export interface LinkAssetToCustomerDryRun {
   customer_id: string;
   asset_id: string;
   field_type: CustomerAssetFieldType;
+  status: "PAUSED";
+  enable_path: string;
 }
 
 export function normalizeLinkAssetToCustomerArgs(raw: Record<string, unknown> | undefined): LinkAssetToCustomerArgs | { error: string } {
@@ -540,10 +544,12 @@ export function normalizeLinkAssetToCustomerArgs(raw: Record<string, unknown> | 
 export function buildLinkAssetToCustomerDryRun(args: LinkAssetToCustomerArgs): LinkAssetToCustomerDryRun {
   return {
     dry_run: true,
-    message: "DRY RUN. Nothing linked. Pass confirm: true to actually link the asset at the customer (account) level.",
+    message: "DRY RUN. Nothing linked. Pass confirm: true to link the asset at the customer (account) level, PAUSED.",
     customer_id: args.customer_id ?? "",
     asset_id: args.asset_id,
     field_type: args.field_type,
+    status: "PAUSED",
+    enable_path: ENABLE_PATH,
   };
 }
 
