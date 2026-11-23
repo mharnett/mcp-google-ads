@@ -331,6 +331,8 @@ import {
 import { authErrorHint } from "./authHint.js";
 
 import { withResilience, safeResponse, logger } from "./resilience.js";
+import { withRequestLog } from "./requestLog.js";
+import { authCheckStampPath, startupAuthCheck } from "./authCheckStamp.js";
 import { backfillOmittedBooleans } from "./backfillDefaults.js";
 import {
   resolveCredentials,
@@ -504,7 +506,9 @@ export class GoogleAdsManager {
       customerOpts.login_customer_id = mccId.replace(/-/g, "");
     }
 
-    return this.api.Customer(customerOpts);
+    // Every call on this customer leaves one line in the per-request log
+    // (requestLog.ts), so a quota burst can be traced to its caller.
+    return withRequestLog((hooks) => this.api.Customer(customerOpts, hooks));
   }
 
   // List all campaigns for a customer
@@ -7932,15 +7936,41 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 });
 
 // Start server
-async function main() {
-  // Startup health check: verify credentials work with a lightweight API call
-  try {
-    const firstClient = Object.values(getConfig().clients)[0];
-    if (firstClient) {
-      const customer = getAdsManager().getCustomer(firstClient.customer_id);
+/**
+ * Startup health check: one lightweight query proves the credentials work.
+ * Skipped when a passing check is stamped in the last 30 minutes
+ * (authCheckStamp.ts): every Claude session start launches this server twice,
+ * and the check was ~2 SearchStream calls per session against the quota.
+ */
+export async function runStartupAuthCheck(
+  config: Config,
+  manager: () => Pick<GoogleAdsManager, "getCustomer">,
+  opts: { stampDir?: string; now?: () => Date } = {},
+): Promise<"skipped" | "checked" | "no-client"> {
+  const firstClient = Object.values(config.clients)[0];
+  if (!firstClient) return "no-client";
+  const login = firstClient.direct_access
+    ? undefined
+    : firstClient.mcc_customer_id || config.google_ads.mcc_customer_id;
+  const outcome = await startupAuthCheck({
+    stampPath: authCheckStampPath(firstClient.customer_id, login, opts.stampDir),
+    now: opts.now,
+    check: async () => {
+      const customer = manager().getCustomer(firstClient.customer_id);
       await withResilience(() => customer.query(`SELECT customer.id FROM customer LIMIT 1`), "startup.authCheck");
-      logger.info({ customerId: firstClient.customer_id, clientName: firstClient.name }, "Auth verified: successfully queried account");
-    }
+    },
+  });
+  if (outcome === "skipped") {
+    logger.info({ customerId: firstClient.customer_id }, "Auth check skipped: one passed in the last 30 minutes");
+  } else {
+    logger.info({ customerId: firstClient.customer_id, clientName: firstClient.name }, "Auth verified: successfully queried account");
+  }
+  return outcome;
+}
+
+async function main() {
+  try {
+    await runStartupAuthCheck(getConfig(), getAdsManager);
   } catch (err: any) {
     const classified = classifyError(err);
     if (classified instanceof GoogleAdsAuthError) {

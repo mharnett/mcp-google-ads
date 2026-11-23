@@ -29,6 +29,9 @@ const paths = envPaths("mcp-google-ads", { suffix: "nodejs" });
 
 export const configDir = paths.config;
 export const credentialsFilePath = path.join(paths.config, "credentials.json");
+// Per-user cache dir (macOS: ~/Library/Caches/mcp-google-ads-nodejs/): the
+// startup auth-check stamp lives here.
+export const cacheDir = paths.cache;
 
 // ============================================
 // BROWSER OPEN
