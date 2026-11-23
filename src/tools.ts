@@ -1158,7 +1158,11 @@ export const tools: Tool[] = [
         logo_image_asset_ids: {
           type: "array",
           items: { type: "string" },
-          description: "Optional 1:1 logo image asset IDs.",
+          description: "Optional 1:1 logo image asset IDs. Before the create, each logo's asset name is read; a name that reads as a photo of a person (whole words man, woman, person, holding, phone or portrait, camelCase split) refuses the create, as does a logo id not found in the account. Nothing is created on a refusal.",
+        },
+        allow_person_photo_logos: {
+          type: "boolean",
+          description: "Skip the logo name check above (default false). Use only when a flagged logo really is a brand mark.",
         },
         video_asset_ids: {
           type: "array",
