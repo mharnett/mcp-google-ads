@@ -18,6 +18,13 @@
 
 * google_ads_update_demand_gen_multi_asset_ad now edits headlines and descriptions IN PLACE through AdService (same ad ID, status and history), the edit the Google Ads UI makes. It used AdGroupAdService, which answers IMMUTABLE_FIELD for any nested ad field, and its description told callers to rebuild the ad (new ID, lost history, paused auto-generated video siblings). Checked with validate_only on a live Demand Gen multi-asset ad: unchanged copy is refused with IMMUTABLE_FIELD on the old path and accepted through AdService. Adds `validate_only`; validates the resulting full copy, so a headlines-only edit no longer fails for missing descriptions; labels every linked ad group ad; refuses `long_headlines` (not an API field on multi-asset ads, so it was silently dropped) and pinned headlines (Demand Gen does not pin); refuses non-multi-asset ads.
 
+## [1.15.0](https://github.com/mharnett/mcp-google-ads/compare/v1.14.0...v1.15.0) (2026-11-23)
+
+
+### Features
+
+* one log line per Google Ads API call; startup auth check at most every 30 min ([#110](https://github.com/mharnett/mcp-google-ads/issues/110)) ([a98ddac](https://github.com/mharnett/mcp-google-ads/commit/a98ddac8186aa0e0216b3a8bda450f427c790be3))
+
 ## [1.14.0](https://github.com/mharnett/mcp-google-ads/compare/v1.13.0...v1.14.0) (2026-11-22)
 
 
