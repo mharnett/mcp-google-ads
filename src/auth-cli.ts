@@ -37,6 +37,7 @@ import {
 import { classifyError, GoogleAdsAuthError } from "./errors.js";
 import { findFreeLoopbackPort, openBrowser } from "./platform.js";
 import { logger, withResilience } from "./resilience.js";
+import { loggedCall, withRequestLog } from "./requestLog.js";
 import { dirname, join } from "path";
 import { loadOAuthScopeFromFile } from "./oauthScope.js";
 import {
@@ -321,7 +322,7 @@ async function exchangeCodeForTokens(
 // ACCOUNT ENUMERATION
 // ============================================
 
-async function enumerateAccounts(
+export async function enumerateAccounts(
   api: GoogleAdsApi,
   refreshToken: string,
 ): Promise<AccessibleAccount[]> {
@@ -329,7 +330,10 @@ async function enumerateAccounts(
   // These are TOP-LEVEL: MCCs and any direct-access client accounts. Sub-accounts
   // under an MCC are not included — we fetch those via customer_client below.
   const listed = await withResilience(
-    () => api.listAccessibleCustomers(refreshToken),
+    () =>
+      loggedCall({ method: "CustomerService.ListAccessibleCustomers", customer_id: "" }, () =>
+        api.listAccessibleCustomers(refreshToken),
+      ),
     "auth.listAccessibleCustomers",
   );
 
@@ -349,7 +353,7 @@ async function enumerateAccounts(
   for (const id of topLevelIds) {
     try {
       // Fetch name + manager flag for this top-level account
-      const customer = api.Customer({ customer_id: id, refresh_token: refreshToken });
+      const customer = withRequestLog((hooks) => api.Customer({ customer_id: id, refresh_token: refreshToken }, hooks));
       const rows = await withResilience(
         () => customer.query("SELECT customer.id, customer.descriptive_name, customer.manager FROM customer LIMIT 1"),
         `auth.fetchCustomer[${id}]`,
@@ -362,11 +366,16 @@ async function enumerateAccounts(
 
       // If MCC, enumerate its non-manager children (single-level drill)
       if (isManager) {
-        const mccCustomer = api.Customer({
-          customer_id: id,
-          refresh_token: refreshToken,
-          login_customer_id: id,
-        });
+        const mccCustomer = withRequestLog((hooks) =>
+          api.Customer(
+            {
+              customer_id: id,
+              refresh_token: refreshToken,
+              login_customer_id: id,
+            },
+            hooks,
+          ),
+        );
         try {
           const children = await withResilience(
             () =>
