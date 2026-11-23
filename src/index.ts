@@ -343,6 +343,7 @@ import {
 } from "./credentials.js";
 import { onPosixSignal } from "./platform.js";
 import { escapeGaqlString, requireGaqlDate, requireNumericId, requireOneOf, sanitizeNumericId } from "./gaqlSanitize.js";
+import { exactInsightId } from "./searchTermInsightId.js";
 
 /**
  * Result fields for a create whose entity cannot carry a label. The client
@@ -5564,9 +5565,10 @@ export class GoogleAdsManager {
     const safeStartDate = escapeGaqlString(options.startDate);
     const safeEndDate = escapeGaqlString(options.endDate);
 
-    // Current period - get categories with metrics
+    // Current period - get categories with metrics. resource_name carries the
+    // exact category id: the parsed int64 `id` loses its low digits past 2^53.
     const currentQuery =
-      `SELECT campaign_search_term_insight.campaign_id, campaign_search_term_insight.category_label, campaign_search_term_insight.id, metrics.clicks, metrics.impressions, metrics.conversions, metrics.conversions_value FROM campaign_search_term_insight WHERE campaign_search_term_insight.campaign_id = '` + safeCampaignId + `' AND segments.date BETWEEN '` + safeStartDate + `' AND '` + safeEndDate + `'`;
+      `SELECT campaign_search_term_insight.campaign_id, campaign_search_term_insight.category_label, campaign_search_term_insight.id, campaign_search_term_insight.resource_name, metrics.clicks, metrics.impressions, metrics.conversions, metrics.conversions_value FROM campaign_search_term_insight WHERE campaign_search_term_insight.campaign_id = '` + safeCampaignId + `' AND segments.date BETWEEN '` + safeStartDate + `' AND '` + safeEndDate + `'`;
 
     const currentResults = await withResilience(() => customer.query(currentQuery), "getSearchTermInsights.current");
 
@@ -5597,7 +5599,7 @@ export class GoogleAdsManager {
     const currentByCategory: Record<string, any> = {};
     for (const row of currentResults) {
       const label = row.campaign_search_term_insight?.category_label || "unknown";
-      const id = row.campaign_search_term_insight?.id;
+      const id = exactInsightId(row.campaign_search_term_insight);
       if (!currentByCategory[label]) {
         currentByCategory[label] = { id, clicks: 0, impressions: 0, conversions: 0, conversions_value: 0 };
       }
@@ -5659,14 +5661,27 @@ export class GoogleAdsManager {
   }) {
     const customer = this.getCustomer(customerId);
     const safeCampId = sanitizeNumericId(options.campaignId);
-    const safeInsId = sanitizeNumericId(options.insightId);
+    const rawInsightId: unknown = options.insightId;
+    if (typeof rawInsightId === "number" && !Number.isSafeInteger(rawInsightId)) {
+      throw new Error(
+        `insight_id must be passed as a string: ${rawInsightId} is past 2^53 and has already lost its low digits. ` +
+          `Use the insight_id string google_ads_search_term_insights returned.`,
+      );
+    }
+    const safeInsId = sanitizeNumericId(String(rawInsightId ?? ""));
     const safeStart = escapeGaqlString(options.startDate);
     const safeEnd = escapeGaqlString(options.endDate);
 
     const query =
-      `SELECT campaign_search_term_insight.campaign_id, campaign_search_term_insight.category_label, campaign_search_term_insight.id, segments.search_term, metrics.clicks, metrics.impressions, metrics.conversions, metrics.conversions_value FROM campaign_search_term_insight WHERE campaign_search_term_insight.campaign_id = '` + safeCampId + `' AND campaign_search_term_insight.id = '` + safeInsId + `' AND segments.date BETWEEN '` + safeStart + `' AND '` + safeEnd + `'`;
+      `SELECT campaign_search_term_insight.campaign_id, campaign_search_term_insight.category_label, campaign_search_term_insight.id, campaign_search_term_insight.resource_name, segments.search_term, metrics.clicks, metrics.impressions, metrics.conversions, metrics.conversions_value FROM campaign_search_term_insight WHERE campaign_search_term_insight.campaign_id = '` + safeCampId + `' AND campaign_search_term_insight.id = '` + safeInsId + `' AND segments.date BETWEEN '` + safeStart + `' AND '` + safeEnd + `'`;
 
     const result = await withResilience(() => customer.query(query), "getSearchTermInsightTerms");
+    // Every row matched id = safeInsId; echo the exact digits, never the parsed
+    // (rounded) int64.
+    for (const row of result as any[]) {
+      const insight = row?.campaign_search_term_insight;
+      if (insight) insight.id = exactInsightId(insight) ?? safeInsId;
+    }
     return safeResponse(result, "getSearchTermInsightTerms");
   }
 
