@@ -151,6 +151,7 @@ import {
   isDemandGenAdGroup,
   type DemandGenAdInput,
 } from "./validateDemandGenAd.js";
+import { logoAssetNamesQuery, logoNameRefusal } from "./logoAssetNames.js";
 import {
   resolveDgPolicy,
   buildAssetAutomationSettings,
@@ -1386,6 +1387,8 @@ export class GoogleAdsManager {
       labels?: string[];
       /** Not an API field on multi-asset ads; passed through only so this can refuse it loudly. */
       long_headlines?: string[];
+      /** Skip the logo name check (logoAssetNames.ts). */
+      allow_person_photo_logos?: boolean;
     }
   ) {
     // Refused rather than dropped, as in updateDemandGenMultiAssetAd: the
@@ -1439,6 +1442,25 @@ export class GoogleAdsManager {
       throw new Error(
         `Ad group ${input.ad_group_id} is not a Demand Gen ad group (ad_group.type='${agType}', campaign.advertising_channel_type='${cType}'). It must belong to a DEMAND_GEN campaign.`
       );
+    }
+
+    // Logo names, before anything is created. The tool input carries logo
+    // asset ids only, so a PreToolUse hook can't tell a brand mark from a photo
+    // of a person; this read can (logoAssetNames.ts). A failed read refuses:
+    // it is never taken to mean the names are fine.
+    const logoIds = input.logo_image_asset_ids ?? [];
+    if (logoIds.length && !input.allow_person_photo_logos) {
+      const gaql = logoAssetNamesQuery(logoIds);
+      let logoRows: any[];
+      try {
+        logoRows = await withResilience(() => customer.query(gaql), "createDemandGenMultiAssetAd.logoAssetNames");
+      } catch (e: any) {
+        throw new Error(
+          `Demand Gen ad not created: could not read the logo assets' names (${e.message}), so the person-photo logo check could not run. Retry, or pass allow_person_photo_logos=true to create without the check.`
+        );
+      }
+      const refusal = logoNameRefusal(logoIds, logoRows ?? []);
+      if (refusal) throw new Error(refusal);
     }
 
     const payload = buildDemandGenAdPayload({
@@ -7531,6 +7553,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             long_headlines: args?.long_headlines as string[] | undefined,
             descriptions: args?.descriptions as string[],
             labels: args?.labels as string[] | undefined,
+            allow_person_photo_logos: args?.allow_person_photo_logos === true,
           });
           return {
             content: [{
