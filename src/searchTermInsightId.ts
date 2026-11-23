@@ -15,7 +15,7 @@ const INSIGHT_RESOURCE = /\/campaignSearchTermInsights\/\d+~(\d+)$/;
 export function exactInsightId(insight: { resource_name?: unknown; id?: unknown } | null | undefined): string | null {
   const rn = insight?.resource_name;
   if (typeof rn === "string") {
-    const m = INSIGHT_RESOURCE.exec(rn);
+    const m = rn.match(INSIGHT_RESOURCE);
     if (m) return m[1];
   }
   const id = insight?.id;
