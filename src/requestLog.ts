@@ -16,6 +16,13 @@
 //   validate_only  true for a dry-run mutate
 //   status         "ok" | "error" | "sent" ("sent": a stream, logged when opened)
 //   error          short error code or class name when status is "error", else null
+//   resources      what a successful, non-validate_only mutate wrote: one
+//                  { operation, resource_name } per operation whose result
+//                  names a resource (operation: "create" | "update" |
+//                  "remove"). null on reads, service calls, errors and
+//                  validate_only. Read by the write-identity audit
+//                  (quality-control cron/unauthorized_change_sweep.py) as an
+//                  independent record to hold change_event against.
 //
 // Destination:
 //   GOOGLE_ADS_REQUEST_LOG_PATH set     -> that file
@@ -52,9 +59,15 @@ export const REQUEST_LOG_FIELDS = [
   "validate_only",
   "status",
   "error",
+  "resources",
 ] as const;
 
 export type RequestStatus = "ok" | "error" | "sent";
+
+export interface WrittenResource {
+  operation: string;
+  resource_name: string;
+}
 
 export interface RequestFields {
   method: string;
@@ -63,6 +76,7 @@ export interface RequestFields {
   validate_only: boolean;
   status: RequestStatus;
   error?: string | null;
+  resources?: WrittenResource[] | null;
 }
 
 export type RequestLogDestination = { kind: "file"; path: string } | { kind: "stream" };
@@ -130,6 +144,7 @@ export function logGoogleAdsRequest(fields: RequestFields): void {
       validate_only: fields.validate_only,
       status: fields.status,
       error: fields.status === "error" ? fields.error ?? "Error" : null,
+      resources: fields.resources ?? null,
     });
   } catch {
     // Logging never fails the caller.
@@ -155,6 +170,60 @@ export function errorCode(err: unknown): string {
 }
 
 type Log = (fields: RequestFields) => void;
+
+const OPERATION_KEYS = ["create", "update", "remove"] as const;
+
+function typedOperation(op: any): string {
+  if (typeof op?.operation === "string" && op.operation) return op.operation;
+  for (const k of OPERATION_KEYS) if (op?.[k] != null) return k;
+  return "unknown";
+}
+
+/** The resource name inside one GoogleAdsService.mutate response entry ({ campaign_result: { resource_name } }). */
+function mutateResultName(entry: any): string | null {
+  if (!entry || typeof entry !== "object") return null;
+  for (const key of Object.keys(entry)) {
+    const rn = entry[key]?.resource_name;
+    if (typeof rn === "string" && rn) return rn;
+  }
+  return null;
+}
+
+/**
+ * What a successful mutate wrote, from its onMutationEnd hook arguments: one
+ * entry per operation whose result names a resource. A partial-failure
+ * operation comes back with an empty result and is left out. Never throws.
+ */
+export function writtenResources(a: any): WrittenResource[] {
+  const out: WrittenResource[] = [];
+  try {
+    if (a?.isServiceCall) {
+      const ops = a?.mutation?.operations;
+      const results = a?.response?.results;
+      if (!Array.isArray(results)) return out;
+      results.forEach((r: any, i: number) => {
+        const rn = r?.resource_name;
+        if (typeof rn === "string" && rn) {
+          out.push({ operation: typedOperation(Array.isArray(ops) ? ops[i] : undefined), resource_name: rn });
+        }
+      });
+      return out;
+    }
+    const mutations = a?.mutations;
+    const responses = a?.response?.mutate_operation_responses;
+    if (!Array.isArray(responses)) return out;
+    responses.forEach((r: any, i: number) => {
+      const rn = mutateResultName(r);
+      if (!rn) return;
+      // google-ads-api defaults a mutateResources operation to "create".
+      const op = Array.isArray(mutations) ? mutations[i]?.operation : undefined;
+      out.push({ operation: typeof op === "string" && op ? op : "create", resource_name: rn });
+    });
+  } catch {
+    // an unexpected response shape never fails the mutate
+  }
+  return out;
+}
 
 function opCount(list: unknown): number {
   return Array.isArray(list) ? list.length : 1;
@@ -206,6 +275,7 @@ export function requestLogHooks(
       validate_only: validateOnly,
       status,
       error: error === undefined ? null : errorCode(error),
+      resources: status === "ok" && !validateOnly ? writtenResources(a) : null,
     });
   };
   const service = (a: any, status: RequestStatus, error?: unknown) => {
