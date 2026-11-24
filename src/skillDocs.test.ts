@@ -6,12 +6,20 @@ import { tools } from "./tools.js";
 import { WRITE_TOOLS } from "./writeGate.js";
 
 // Skills under skills/<name>/SKILL.md are runnable playbooks built on this
-// server. Their promise is that every check is backed by a READ-ONLY tool
-// call, so a skill must never name a tool that doesn't exist or that writes.
+// server. A skill must never name a tool that doesn't exist, and every
+// numbered check must be backed by a tool call. A skill is read-only and
+// must not name a tool that writes, unless its frontmatter declares
+// `writes: true` under metadata; such a skill must say that writes need
+// GOOGLE_ADS_MCP_WRITE=true.
 
 const SKILLS_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "skills");
 const TOOL_REF = /\bgoogle_ads_[a-z_]+\b/g;
 const CHECK_HEADING = /^### (\d+\.\d+) /;
+
+/** True when a SKILL.md frontmatter block declares `writes: true` (nested under metadata). */
+function declaresWrites(frontmatter: string): boolean {
+  return /^metadata:$/m.test(frontmatter) && /^[ \t]+writes: true[ \t]*$/m.test(frontmatter);
+}
 
 function skillFiles(): string[] {
   if (!existsSync(SKILLS_DIR)) return [];
@@ -50,11 +58,26 @@ describe("bundled skills", () => {
     );
   });
 
+  it("ships the google-ads-safe-changes skill", () => {
+    expect(skillFiles().map((f) => basename(dirname(f)))).toContain(
+      "google-ads-safe-changes",
+    );
+  });
+
+  it("reads `writes: true` only from the metadata block", () => {
+    expect(declaresWrites("name: x\nmetadata:\n  version: 1.0.0\n  writes: true")).toBe(true);
+    expect(declaresWrites("name: x\nmetadata:\n  writes: false")).toBe(false);
+    expect(declaresWrites("name: x\nmetadata:\n  version: 1.0.0")).toBe(false);
+    expect(declaresWrites("name: x\nwrites: true")).toBe(false);
+  });
+
   const registered = new Set(tools.map((t) => t.name));
 
   for (const file of skillFiles()) {
     const name = basename(dirname(file));
     const text = readFileSync(file, "utf8");
+    const frontmatter = text.match(/^---\n([\s\S]*?)\n---\n/)?.[1] ?? "";
+    const writes = declaresWrites(frontmatter);
 
     describe(name, () => {
       it("frontmatter name matches the directory and has a description", () => {
@@ -70,9 +93,19 @@ describe("bundled skills", () => {
         expect(refs.filter((r) => !registered.has(r))).toEqual([]);
       });
 
-      it("names only read-only tools", () => {
-        expect(toolRefs(text).filter((r) => WRITE_TOOLS.has(r))).toEqual([]);
-      });
+      if (writes) {
+        it("says write tools need GOOGLE_ADS_MCP_WRITE=true", () => {
+          expect(text).toContain("GOOGLE_ADS_MCP_WRITE=true");
+        });
+
+        it("names a write tool, or it should not declare writes", () => {
+          expect(toolRefs(text).filter((r) => WRITE_TOOLS.has(r)).length).toBeGreaterThan(0);
+        });
+      } else {
+        it("names only read-only tools", () => {
+          expect(toolRefs(text).filter((r) => WRITE_TOOLS.has(r))).toEqual([]);
+        });
+      }
 
       it("backs every numbered check with a tool call", () => {
         const sections = checkSections(text);
