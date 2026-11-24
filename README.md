@@ -67,11 +67,12 @@ GOOGLE_ADS_REFRESH_TOKEN = "YOUR_REFRESH_TOKEN"
 
 ## Skills
 
-`skills/` holds runnable playbooks built on this server's read-only tools. To use one in Claude Code, copy its folder into `~/.claude/skills/`.
+`skills/` holds runnable playbooks built on this server's tools. To use one in Claude Code, copy its folder into `~/.claude/skills/`.
 
-- **[google-ads-program-audit](skills/google-ads-program-audit/SKILL.md)**: audits a stalled B2B Google Ads program, setup before assets, and ends in a stated theory of what to change next.
+- **[google-ads-program-audit](skills/google-ads-program-audit/SKILL.md)**: audits a stalled B2B Google Ads program, setup before assets, and ends in a stated theory of what to change next. Read-only.
+- **[google-ads-safe-changes](skills/google-ads-safe-changes/SKILL.md)**: how an agent changes an account through this server without anything going live by accident: write mode, PAUSED creates, approval before enabling, dry-run `confirm`, the 20% budget and bid ceiling, `expected_old` and the lead-form gate.
 
-`src/skillDocs.test.ts` fails if a skill names a tool this server doesn't register or a tool that writes.
+`src/skillDocs.test.ts` fails if a skill names a tool this server doesn't register, or names a tool that writes without declaring `writes: true` in its frontmatter metadata. A skill that declares it must say that writes need `GOOGLE_ADS_MCP_WRITE=true`.
 
 ## Setup
 
