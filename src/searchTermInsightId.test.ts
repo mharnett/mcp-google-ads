@@ -126,6 +126,39 @@ describe("google_ads_search_term_insights keeps category ids exact", () => {
   });
 });
 
+describe("insight_terms selects what Google requires beside segments.search_term", () => {
+  // Live on 2026-11-24 (Forcepoint, 1.16.0), Google refused every drill-down with
+  // search_term_insight_error 4: "'segments.search_term' can only be selected
+  // along with 'segments.search_subcategory'". The stubs above accept any GAQL,
+  // so the drill-down test passed on a query Google rejects. This stub enforces
+  // Google's rule.
+  function googleRule(gaql: string) {
+    const selected = gaql.slice(0, gaql.indexOf(" FROM "));
+    if (selected.includes("segments.search_term") && !selected.includes("segments.search_subcategory")) {
+      throw new Error("'segments.search_term' can only be selected along with 'segments.search_subcategory'.");
+    }
+  }
+
+  it("selects segments.search_subcategory and returns each term's subcategory", async () => {
+    stubSearch((gaql) => {
+      googleRule(gaql);
+      return [
+        restRow(gaql, CATEGORY_ID, "best dlp solution", {
+          segments: { searchSubcategory: "dlp tools", searchTerm: "top dlp tools" },
+        }),
+      ];
+    });
+    const terms: any = await manager().getSearchTermInsightTerms(CID, {
+      campaignId: CAMPAIGN,
+      insightId: CATEGORY_ID,
+      startDate: "2026-11-01",
+      endDate: "2026-11-21",
+    });
+    expect(terms).toHaveLength(1);
+    expect(terms[0].segments).toEqual({ search_subcategory: "dlp tools", search_term: "top dlp tools" });
+  });
+});
+
 describe("exactInsightId", () => {
   it("reads the id from the resource name, not the rounded number", () => {
     expect(

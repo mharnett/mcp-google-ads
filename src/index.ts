@@ -5672,8 +5672,10 @@ export class GoogleAdsManager {
     const safeStart = escapeGaqlString(options.startDate);
     const safeEnd = escapeGaqlString(options.endDate);
 
+    // Google refuses segments.search_term unless segments.search_subcategory is
+    // selected beside it (search_term_insight_error 4).
     const query =
-      `SELECT campaign_search_term_insight.campaign_id, campaign_search_term_insight.category_label, campaign_search_term_insight.id, campaign_search_term_insight.resource_name, segments.search_term, metrics.clicks, metrics.impressions, metrics.conversions, metrics.conversions_value FROM campaign_search_term_insight WHERE campaign_search_term_insight.campaign_id = '` + safeCampId + `' AND campaign_search_term_insight.id = '` + safeInsId + `' AND segments.date BETWEEN '` + safeStart + `' AND '` + safeEnd + `'`;
+      `SELECT campaign_search_term_insight.campaign_id, campaign_search_term_insight.category_label, campaign_search_term_insight.id, campaign_search_term_insight.resource_name, segments.search_subcategory, segments.search_term, metrics.clicks, metrics.impressions, metrics.conversions, metrics.conversions_value FROM campaign_search_term_insight WHERE campaign_search_term_insight.campaign_id = '` + safeCampId + `' AND campaign_search_term_insight.id = '` + safeInsId + `' AND segments.date BETWEEN '` + safeStart + `' AND '` + safeEnd + `'`;
 
     const result = await withResilience(() => customer.query(query), "getSearchTermInsightTerms");
     // Every row matched id = safeInsId; echo the exact digits, never the parsed
