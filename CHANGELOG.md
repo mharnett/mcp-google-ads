@@ -18,6 +18,19 @@
 
 * google_ads_update_demand_gen_multi_asset_ad now edits headlines and descriptions IN PLACE through AdService (same ad ID, status and history), the edit the Google Ads UI makes. It used AdGroupAdService, which answers IMMUTABLE_FIELD for any nested ad field, and its description told callers to rebuild the ad (new ID, lost history, paused auto-generated video siblings). Checked with validate_only on a live Demand Gen multi-asset ad: unchanged copy is refused with IMMUTABLE_FIELD on the old path and accepted through AdService. Adds `validate_only`; validates the resulting full copy, so a headlines-only edit no longer fails for missing descriptions; labels every linked ad group ad; refuses `long_headlines` (not an API field on multi-asset ads, so it was silently dropped) and pinned headlines (Demand Gen does not pin); refuses non-multi-asset ads.
 
+## [1.16.0](https://github.com/mharnett/mcp-google-ads/compare/v1.15.0...v1.16.0) (2026-11-24)
+
+
+### Features
+
+* mutate log lines name each written resource; insight ids stay exact strings ([#112](https://github.com/mharnett/mcp-google-ads/issues/112)) ([e60a1fe](https://github.com/mharnett/mcp-google-ads/commit/e60a1fe42bbbbaa0f3a3db6108d9bd42c6b54343))
+* **skills:** google-ads-safe-changes, how an agent changes an account safely ([#115](https://github.com/mharnett/mcp-google-ads/issues/115)) ([84cb810](https://github.com/mharnett/mcp-google-ads/commit/84cb8105e99ef9e69468698d7626107bd7de9b78))
+
+
+### Bug Fixes
+
+* **demand-gen:** read logo asset names before the create and refuse person-photo logos ([#113](https://github.com/mharnett/mcp-google-ads/issues/113)) ([f2cc0a1](https://github.com/mharnett/mcp-google-ads/commit/f2cc0a1ad6b1f489ec1abebe951041d6c870ad2e))
+
 ## [1.15.0](https://github.com/mharnett/mcp-google-ads/compare/v1.14.0...v1.15.0) (2026-11-23)
 
 
