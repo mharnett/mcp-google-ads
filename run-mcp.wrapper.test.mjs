@@ -124,7 +124,13 @@ describe("run-mcp.sh Keychain item selection", () => {
 // GOOGLE_ADS_REFRESH_TOKEN_SERVICE / _ACCOUNT. They only reach the server if
 // run-mcp.sh exports them; a plain shell assignment does not. Same stubs as
 // above, with a `node` that prints the two names instead of the token.
-describe("run-mcp.sh exports the Keychain item it read (names only) to the server", () => {
+//
+// Skipped on Windows: on windows-latest the stub `node` is not the one bash
+// runs, so the server prints nothing and both cases fail (weekly run
+// 2026-11-23, release PR #114). run-mcp.sh is the macOS launcher and is not in
+// the npm package's `files`, so Windows users never run it; Linux and macOS
+// still cover this block.
+describe.skipIf(process.platform === "win32")("run-mcp.sh exports the Keychain item it read (names only) to the server", () => {
   let nodeDir;
 
   beforeAll(() => {
