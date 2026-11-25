@@ -8,19 +8,21 @@
 //   2. Claude Desktop config file exists
 //   3. Claude Desktop config parses as JSON
 //   4. google-ads registered in mcpServers
-//   5. Credentials file exists
-//   6. Credentials file has required fields (refresh_token, customer_id)
-//   7. customer_id is a leaf account (warns if it equals mcc_customer_id)
+//   5. GOOGLE_ADS_DEVELOPER_TOKEN set in that entry's env
+//   6. Credentials file exists
+//   7. Credentials file has required fields (refresh_token, customer_id)
+//   8. customer_id is a leaf account (warns if it equals mcc_customer_id)
+//   9. Installed version is the latest on npm
 //
 // Collect-all semantics: every check runs regardless of earlier failures,
 // because the user wants the full picture on a single run, not one-error-
 // at-a-time debugging.
 
 import { existsSync, readFileSync } from "fs";
-import { dirname, join } from "path";
+import { basename, dirname, join } from "path";
 import { fileURLToPath } from "url";
-import { credentialsFilePath } from "./credentials.js";
-import { resolveDefaultConfigPath } from "./install-cli.js";
+import { API_ACCESS_URL, credentialsFilePath } from "./credentials.js";
+import { entryHasDeveloperToken, resolveDefaultConfigPath } from "./install-cli.js";
 
 export interface DoctorCheck {
   name: string;
@@ -88,6 +90,8 @@ export async function runDoctor(opts: DoctorOptions = {}): Promise<DoctorCheck[]
       : "not registered. Run: npx mcp-google-ads-install",
   });
 
+  checks.push(checkDeveloperToken(mcpServers["google-ads"]));
+
   const credsExist = existsSync(credsPath);
   checks.push({
     name: "credentials file exists",
@@ -134,6 +138,24 @@ export async function runDoctor(opts: DoctorOptions = {}): Promise<DoctorCheck[]
   checks.push(await checkInstalledIsLatest(opts));
 
   return checks;
+}
+
+/** Claude Desktop starts the server with the entry's env, so this shell's env says nothing about it. */
+function checkDeveloperToken(entry: unknown): DoctorCheck {
+  const name = "GOOGLE_ADS_DEVELOPER_TOKEN is set for the server";
+  if (!entry) return { name, status: "warn", detail: "google-ads is not registered — cannot check" };
+  if (entryHasDeveloperToken(entry)) return { name, status: "pass", detail: "set in mcpServers.google-ads.env" };
+  const command = String((entry as { command?: unknown }).command ?? "");
+  if (command && !/^(npx|node)(\.cmd|\.exe)?$/i.test(basename(command))) {
+    return { name, status: "warn", detail: `not in mcpServers.google-ads.env. Fine if your launcher sets it: ${command}` };
+  }
+  return {
+    name,
+    status: "fail",
+    detail:
+      "not in mcpServers.google-ads.env. The server needs a value there for any Google Ads call; " +
+      `the package does not include one. API access: ${API_ACCESS_URL}`,
+  };
 }
 
 async function checkInstalledIsLatest(opts: DoctorOptions): Promise<DoctorCheck> {

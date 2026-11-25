@@ -5,9 +5,10 @@
 // Replaces the previous single `tsc` invocation with a two-step build:
 //
 //   1. esbuild compiles src/**.ts -> dist/**.js, with build-time substitution
-//      of process.env.EMBEDDED_CLIENT_ID / CLIENT_SECRET / DEVELOPER_TOKEN
-//      via --define. At dev-time (`npm run dev` / tsx), no substitution
-//      happens and the source falls back to runtime GOOGLE_ADS_* env vars.
+//      of process.env.EMBEDDED_CLIENT_ID / CLIENT_SECRET via --define. At
+//      dev-time (`npm run dev` / tsx), no substitution happens and the source
+//      falls back to runtime GOOGLE_ADS_* env vars. No developer token is ever
+//      embedded: users bring their own (GOOGLE_ADS_DEVELOPER_TOKEN).
 //
 //   2. tsc --emitDeclarationOnly generates the .d.ts files only.
 //      esbuild doesn't produce type declarations, so we still need tsc for this.
@@ -69,7 +70,6 @@ function defineFromEnv(key) {
 const define = {
   "process.env.EMBEDDED_CLIENT_ID": defineFromEnv("EMBEDDED_CLIENT_ID"),
   "process.env.EMBEDDED_CLIENT_SECRET": defineFromEnv("EMBEDDED_CLIENT_SECRET"),
-  "process.env.EMBEDDED_DEVELOPER_TOKEN": defineFromEnv("EMBEDDED_DEVELOPER_TOKEN"),
 };
 
 const missingEmbedded = Object.entries(define)
@@ -128,6 +128,7 @@ writeFileSync(
     {
       sha,
       builtAt: new Date().toISOString(),
+      // The OAuth client id and secret, the only two values embedded.
       embeddedSecrets: missingEmbedded.length === 0,
     },
     null,

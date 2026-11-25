@@ -251,7 +251,7 @@ function loadConfig(): Config {
   }
 
   // Fall back to the priority chain in credentials.ts:
-  //   env vars > per-user credentials file (from mcp-google-ads-auth) > embedded build-time secrets
+  //   env vars > per-user credentials file (from mcp-google-ads-auth) > embedded OAuth client
   // resolveCredentials() throws a descriptive Error (pointing at the auth helper)
   // if any required value is missing — let it propagate.
   const resolved = resolveCredentials();
@@ -327,6 +327,7 @@ import {
   GoogleAdsAuthError,
   GoogleAdsRateLimitError,
   GoogleAdsServiceError,
+  MissingDeveloperTokenError,
   classifyError,
 } from "./errors.js";
 import { authErrorHint } from "./authHint.js";
@@ -449,15 +450,17 @@ export class GoogleAdsManager {
   constructor(config: Config) {
     this.config = config;
 
-    // Resolve credentials via the priority chain (env > per-user file > embedded).
+    // Resolve credentials via the priority chain (env > per-user file > embedded OAuth client).
     // resolveCredentials() throws GoogleAdsAuthError-compatible Error with a
-    // message pointing the user at `npx mcp-google-ads-auth` if anything is missing.
+    // message pointing the user at `npx mcp-google-ads-auth` if anything is missing,
+    // or at GOOGLE_ADS_DEVELOPER_TOKEN if that is.
     let resolved: ResolvedCredentials;
     try {
       resolved = resolveCredentials();
     } catch (err) {
       const msg = (err as Error).message;
       logger.error({ err: msg }, "Credential resolution failed");
+      if (err instanceof MissingDeveloperTokenError) throw err;
       throw new GoogleAdsAuthError(msg);
     }
 
@@ -7977,7 +7980,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       response.write_made = false;
     }
 
-    if (error instanceof GoogleAdsAuthError) {
+    if (error instanceof MissingDeveloperTokenError) {
+      response.action_required =
+        "Set GOOGLE_ADS_DEVELOPER_TOKEN in the server's environment, " +
+        (error.alsoMissing.length > 0 ? "run npx mcp-google-ads-auth for what else is missing, " : "") +
+        "then restart the server.";
+    } else if (error instanceof GoogleAdsAuthError) {
       Object.assign(response, authErrorHint(process.env));
     } else if (error instanceof GoogleAdsRateLimitError) {
       response.retry_after_ms = error.retryAfterMs;
@@ -8039,12 +8047,29 @@ export async function runStartupAuthCheck(
   return outcome;
 }
 
+/** The error for a missing developer token, or null when one is set. Anything else missing is the auth check's to report. */
+function missingDeveloperToken(): MissingDeveloperTokenError | null {
+  try {
+    resolveCredentials();
+  } catch (err) {
+    if (err instanceof MissingDeveloperTokenError) return err;
+  }
+  return null;
+}
+
 async function main() {
   try {
+    // Ahead of the auth check, which the skip flag and a fresh stamp turn off:
+    // this needs no call.
+    const missingToken = missingDeveloperToken();
+    if (missingToken) throw missingToken;
     await runStartupAuthCheck(getConfig(), getAdsManager);
   } catch (err: any) {
     const classified = classifyError(err);
-    if (classified instanceof GoogleAdsAuthError) {
+    if (classified instanceof MissingDeveloperTokenError) {
+      // Plain text rather than a log record: it is several lines, for a person.
+      console.error(`[startup] ${classified.message}`);
+    } else if (classified instanceof GoogleAdsAuthError) {
       logger.error({ error: classified.message }, "Auth check FAILED — MCP will start but ALL API calls will fail until auth is fixed");
     } else {
       logger.warn({ error: err.message }, "Auth check returned non-auth error (may be OK)");

@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync, chmodSync } from "fs";
 import { tmpdir, homedir } from "os";
 import { join } from "path";
-import { beforeEach, afterEach, describe, expect, it } from "vitest";
+import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { runDoctor, type DoctorCheck } from "./doctor-cli.js";
 
 // Doctor runs a fixed sequence of checks against local state and reports
@@ -172,5 +172,54 @@ describe("runDoctor — diagnostic check sequence", () => {
     const check = findCheck(result, "installed version is up to date");
     expect(check.status).toBe("pass");
     expect(check.detail).toContain("dev build");
+  });
+
+  // The server's developer token comes from its own env, which for Claude
+  // Desktop is the entry's env block. The shell running doctor proves nothing
+  // about it. Every value is made up, and none may be printed.
+  describe("developer token check", () => {
+    const NAME = "GOOGLE_ADS_DEVELOPER_TOKEN is set for the server";
+    const TOKEN = "fake-developer-token";
+
+    async function check(entry?: Record<string, unknown>): Promise<DoctorCheck> {
+      writeFileSync(cfgPath, JSON.stringify({ mcpServers: entry ? { "google-ads": entry } : {} }));
+      const result = await runDoctor({ configPath: cfgPath, credentialsPath: credsPath, installedVersion: "1.0.0", fetchLatestVersion: async () => "1.0.0" });
+      expect(JSON.stringify(result)).not.toContain(TOKEN);
+      return findCheck(result, NAME);
+    }
+
+    afterEach(() => vi.unstubAllEnvs());
+
+    it("passes when the entry's env has it", async () => {
+      expect((await check({ command: "npx", env: { GOOGLE_ADS_DEVELOPER_TOKEN: TOKEN } })).status).toBe("pass");
+    });
+
+    it.each([
+      ["no env", { command: "npx" }],
+      ["a blank value", { command: "npx", env: { GOOGLE_ADS_DEVELOPER_TOKEN: " " } }],
+      ["other variables only", { command: "npx", env: { GOOGLE_ADS_CUSTOMER_ID: "1112223333" } }],
+    ])("fails with %s, naming the variable and where to apply", async (_name, entry) => {
+      const { status, detail } = await check(entry);
+      expect(status).toBe("fail");
+      expect(detail).toContain("mcpServers.google-ads.env");
+      expect(detail).toContain("https://console.cloud.google.com/google/ads-apis/overview");
+    });
+
+    it("is not satisfied by the variable in doctor's own shell", async () => {
+      vi.stubEnv("GOOGLE_ADS_DEVELOPER_TOKEN", TOKEN);
+      expect((await check({ command: "npx" })).status).toBe("fail");
+    });
+
+    it("only warns for a launcher script, which may set the variable itself", async () => {
+      const { status, detail } = await check({ command: "/opt/example/run-mcp.sh" });
+      expect(status).toBe("warn");
+      expect(detail).toContain("/opt/example/run-mcp.sh");
+    });
+
+    it("warns that it cannot check when google-ads is not registered", async () => {
+      const { status, detail } = await check();
+      expect(status).toBe("warn");
+      expect(detail).toMatch(/cannot check/);
+    });
   });
 });

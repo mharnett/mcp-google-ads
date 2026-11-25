@@ -47,7 +47,7 @@
 
 **Gotchas hit, for next time:**
 - Cloud Identity Free users have **no Gmail**, so the Ads invitation can't be received at that address. Route the invite elsewhere (Workspace default routing) or use an address with a mailbox.
-- `dist/auth-cli.js` on an `embedded=false` build requires `GOOGLE_ADS_CLIENT_ID` / `CLIENT_SECRET` / `DEVELOPER_TOKEN` in env — source them from the `google-ads-mcp` Keychain account first.
+- `dist/auth-cli.js` on an `embedded=false` build requires `GOOGLE_ADS_CLIENT_ID` / `CLIENT_SECRET` in env, and any build needs `GOOGLE_ADS_DEVELOPER_TOKEN` to list accounts — source them from the `google-ads-mcp` Keychain account first.
 - The CLI auto-opens the default browser (signed in as the admin user). Paste the printed consent URL into an incognito window instead, or you silently mint an admin token into the read-only slot.
 - `credentials.json` and the Keychain hold **different** tokens by design (two credential paths). Back up `credentials.json` before running the CLI and fingerprint it after restoring.
 

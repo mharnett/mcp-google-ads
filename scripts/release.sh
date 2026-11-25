@@ -2,9 +2,9 @@
 # ============================================
 # release.sh  —  local npm publish with Keychain-sourced OAuth creds
 # ============================================
-# Builds + publishes mcp-google-ads to npm with the OAuth client ID, client
-# secret, and Google Ads developer token pulled from macOS Keychain and
-# injected into dist/ at build time via esbuild --define.
+# Builds + publishes mcp-google-ads to npm with the OAuth client ID and client
+# secret pulled from macOS Keychain and injected into dist/ at build time via
+# esbuild --define.
 #
 # This is the Mac-local alternative to the GitHub Actions publish workflow
 # (.github/workflows/publish.yml), which reads the same values from GitHub
@@ -23,7 +23,6 @@
 # Prerequisites (one-time setup on this Mac):
 #   security add-generic-password -a google-ads-mcp -s GOOGLE_ADS_CLIENT_ID     -w "<value>"
 #   security add-generic-password -a google-ads-mcp -s GOOGLE_ADS_CLIENT_SECRET -w "<value>"
-#   security add-generic-password -a google-ads-mcp -s GOOGLE_ADS_DEVELOPER_TOKEN -w "<value>"
 #   npm login   (must be run once so `npm publish` has a valid token)
 
 set -euo pipefail
@@ -54,8 +53,7 @@ lookup() {
 echo "==> Pulling OAuth credentials from macOS Keychain..."
 EMBEDDED_CLIENT_ID="$(lookup GOOGLE_ADS_CLIENT_ID)"
 EMBEDDED_CLIENT_SECRET="$(lookup GOOGLE_ADS_CLIENT_SECRET)"
-EMBEDDED_DEVELOPER_TOKEN="$(lookup GOOGLE_ADS_DEVELOPER_TOKEN)"
-export EMBEDDED_CLIENT_ID EMBEDDED_CLIENT_SECRET EMBEDDED_DEVELOPER_TOKEN
+export EMBEDDED_CLIENT_ID EMBEDDED_CLIENT_SECRET
 
 echo "==> Running npm ci..."
 npm ci

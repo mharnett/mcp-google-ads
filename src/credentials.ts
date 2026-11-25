@@ -4,14 +4,17 @@
 // Priority order for resolving credentials at runtime (12-factor style —
 // explicit env overrides always win over implicit file storage):
 //
-//   1. config.json (existing multi-client deployments — unchanged for backwards compat)
-//   2. GOOGLE_ADS_* env vars (explicit override — wins if set)
-//   3. Per-user credentials file at env-paths config dir (written by mcp-google-ads-auth)
-//   4. EMBEDDED_* constants (client_id, client_secret, developer_token only — from build-time injection)
+//   1. GOOGLE_ADS_* env vars (explicit override — wins if set)
+//   2. Per-user credentials file at env-paths config dir (written by mcp-google-ads-auth):
+//      refresh_token, customer_id and mcc_customer_id only
+//   3. EMBEDDED_* constants (client_id and client_secret only — from build-time injection)
+//
+// The developer token has one source, GOOGLE_ADS_DEVELOPER_TOKEN: it is neither
+// stored nor embedded. config.json maps clients; the server reads no credential from it.
 //
 // This ordering ensures:
 //   - Existing dev machines with env vars keep working (no forced migration)
-//   - New end users who run `npx mcp-google-ads-auth` get a zero-config Claude Desktop setup
+//   - End users who run `npx mcp-google-ads-auth` only have to add a developer token
 //   - The published npm package ships with embedded OAuth client credentials so users
 //     never need to create their own Google Cloud project
 //
@@ -28,11 +31,8 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync } from "fs";
 import path from "path";
-import {
-  EMBEDDED_CLIENT_ID,
-  EMBEDDED_CLIENT_SECRET,
-  EMBEDDED_DEVELOPER_TOKEN,
-} from "./embedded-secrets.js";
+import { EMBEDDED_CLIENT_ID, EMBEDDED_CLIENT_SECRET } from "./embedded-secrets.js";
+import { MissingDeveloperTokenError } from "./errors.js";
 import { configDir, credentialsFilePath } from "./platform.js";
 import { logger } from "./resilience.js";
 
@@ -60,6 +60,38 @@ export interface ResolvedCredentials {
 
 const envTrimmed = (key: string): string =>
   (process.env[key] || "").trim().replace(/^["']|["']$/g, "");
+
+// ============================================
+// DEVELOPER TOKEN
+// ============================================
+
+/** Where Google grants API access since it sunset developer tokens (2026-09-09). */
+export const API_ACCESS_URL = "https://console.cloud.google.com/google/ads-apis/overview";
+
+/** The developer token, or "" when the environment has none. There is no other source. */
+export function developerToken(): string {
+  return envTrimmed("GOOGLE_ADS_DEVELOPER_TOKEN").trim();
+}
+
+/** What to tell someone whose environment has no developer token. */
+export function missingDeveloperTokenMessage(): string {
+  return [
+    `GOOGLE_ADS_DEVELOPER_TOKEN is not set, so no Google Ads API call can be made.`,
+    `Nothing is wrong with the installed package: it does not come with a developer token.`,
+    ``,
+    `Set GOOGLE_ADS_DEVELOPER_TOKEN in the server's environment (the "env" block of your`,
+    `MCP client's config), then restart the server:`,
+    `  - If you have a developer token, use it. It is in the API Center of your Google Ads`,
+    `    manager account.`,
+    `  - If you don't, Google no longer issues them for the Google Ads API. Since 9 September`,
+    `    2026 it grants access to the Google Cloud project that owns your OAuth client, and`,
+    `    says it ignores the token's value, so a placeholder of 10 or more characters should`,
+    `    do. Apply for API access at`,
+    `    ${API_ACCESS_URL}`,
+    `Google's explanation:`,
+    `    https://developers.google.com/google-ads/api/docs/api-policy/developer-token`,
+  ].join("\n");
+}
 
 // ============================================
 // FILE I/O
@@ -119,10 +151,10 @@ export function writeStoredCredentials(
 export function resolveCredentials(
   credsFilePath: string = credentialsFilePath,
 ): ResolvedCredentials {
-  // Client ID / Secret / Dev Token: env override > embedded
+  // Client ID / Secret: env override > embedded. Developer token: env only.
   const client_id = envTrimmed("GOOGLE_ADS_CLIENT_ID") || EMBEDDED_CLIENT_ID;
   const client_secret = envTrimmed("GOOGLE_ADS_CLIENT_SECRET") || EMBEDDED_CLIENT_SECRET;
-  const developer_token = envTrimmed("GOOGLE_ADS_DEVELOPER_TOKEN") || EMBEDDED_DEVELOPER_TOKEN;
+  const developer_token = developerToken();
 
   // Refresh token / Customer ID: env override > file
   // Explicit env vars always win so a developer can point at a different
@@ -142,10 +174,13 @@ export function resolveCredentials(
   const missing: string[] = [];
   if (!client_id) missing.push("client_id");
   if (!client_secret) missing.push("client_secret");
-  if (!developer_token) missing.push("developer_token");
   if (!refresh_token) missing.push("refresh_token");
   if (!customer_id) missing.push("customer_id");
 
+  if (!developer_token) {
+    const rest = missing.length > 0 ? `\n\n${buildMissingCredentialsMessage(missing, Boolean(stored), "Also missing")}` : "";
+    throw new MissingDeveloperTokenError(missingDeveloperTokenMessage() + rest, missing);
+  }
   if (missing.length > 0) {
     throw new Error(buildMissingCredentialsMessage(missing, Boolean(stored)));
   }
@@ -161,10 +196,14 @@ export function resolveCredentials(
   };
 }
 
-function buildMissingCredentialsMessage(missing: string[], hasFile: boolean): string {
+function buildMissingCredentialsMessage(
+  missing: string[],
+  hasFile: boolean,
+  lead = "Missing Google Ads credentials",
+): string {
   const runAuth = "npx mcp-google-ads-auth";
   const lines: string[] = [
-    `Missing Google Ads credentials: ${missing.join(", ")}.`,
+    `${lead}: ${missing.join(", ")}.`,
     ``,
     `To get started, run:`,
     `    ${runAuth}`,

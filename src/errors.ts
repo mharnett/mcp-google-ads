@@ -9,6 +9,18 @@ export class GoogleAdsAuthError extends Error {
   }
 }
 
+/**
+ * GOOGLE_ADS_DEVELOPER_TOKEN is not set (credentials.ts writes the message).
+ * An auth error, but not a rejected sign-in: no one should be told to
+ * re-authenticate for it.
+ */
+export class MissingDeveloperTokenError extends GoogleAdsAuthError {
+  constructor(message: string, public readonly alsoMissing: string[]) {
+    super(message);
+    this.name = "MissingDeveloperTokenError";
+  }
+}
+
 export class GoogleAdsRateLimitError extends Error {
   constructor(
     public readonly retryAfterMs: number,
@@ -88,6 +100,8 @@ function extractErrorMessage(error: any): string {
 }
 
 export function classifyError(error: any): Error {
+  if (error instanceof MissingDeveloperTokenError) return error;
+
   const message = extractErrorMessage(error);
   const code = error?.errors?.[0]?.error_code;
   const status = error?.status;
