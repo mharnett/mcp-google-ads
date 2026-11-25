@@ -27,6 +27,7 @@
 // All auth errors fail fast (invalid_grant, 401, 403) per the repo-wide
 // resilience contract — only network/5xx/rate-limit transients are retried.
 
+import { randomBytes } from "crypto";
 import { realpathSync } from "fs";
 import { GoogleAdsApi } from "google-ads-api";
 import http from "http";
@@ -663,10 +664,8 @@ export async function run(argv: string[] = process.argv.slice(2)): Promise<void>
 }
 
 function randomState(): string {
-  const bytes = new Uint8Array(16);
-  // globalThis.crypto is available on Node 18+ without import
-  (globalThis.crypto as Crypto).getRandomValues(bytes);
-  return Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("");
+  // Not globalThis.crypto: Node 18 has none.
+  return randomBytes(16).toString("hex");
 }
 
 // ============================================

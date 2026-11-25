@@ -187,6 +187,15 @@ describe("mcp-google-ads-auth with a developer token in the env", () => {
   });
 });
 
+describe("mcp-google-ads-auth on Node 18", () => {
+  it("signs in where there is no global crypto", async () => {
+    vi.stubGlobal("crypto", undefined);
+    vi.stubEnv("GOOGLE_ADS_DEVELOPER_TOKEN", "fake-developer-token");
+    expect(await auth()).toBe("returned");
+    expect(readStoredCredentials()).toMatchObject({ refresh_token: "fake-new-refresh", customer_id: "1112223333" });
+  });
+});
+
 describe("mcp-google-ads-auth without an OAuth client", () => {
   it("stops before the browser and asks for the client id and secret only", async () => {
     vi.stubEnv("GOOGLE_ADS_CLIENT_ID", "");
