@@ -20,4 +20,4 @@ In the private report, the useful details are the version, the tool or command, 
 ## What I assume
 
 - **A single-user Mac.** I build this for one person running it on their own Mac, or on another computer only they use. The server runs as you, over stdio, and can read what you can. Anyone able to run programs under your account can use your credentials and turn writes on. The gate is there to stop accidental changes, not someone with that access.
-- **Your own platform credentials.** You connect the server to an account you control, and the platform decides what that login can do. The gate limits this server's tools, not the login: a leaked token or key works without the server. If you only need to read, a read-only login is the stronger limit.
+- **Your own platform login.** You connect the server to an account you control, and the platform decides what that login can do. The gate limits this server's tools, not the login: a leaked token or key works without the server. If you only need to read, a read-only login is the stronger limit.
