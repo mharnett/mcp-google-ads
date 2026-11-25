@@ -620,7 +620,10 @@ export class GoogleAdsManager {
     return safeResponse(result, "listAds");
   }
 
-  // List pending changes (paused items with claude- label)
+  // List pending changes (paused items with claude- label). The API joins
+  // `label` only to the *_label resources, so each query starts from one:
+  // label.name FROM campaign (or ad_group, ad_group_ad) is refused. An item
+  // carrying two claude- labels comes back once per label.
   async listPendingChanges(customerId: string) {
     const customer = this.getCustomer(customerId);
 
@@ -633,7 +636,7 @@ export class GoogleAdsManager {
         campaign.name,
         campaign.status,
         label.name
-      FROM campaign
+      FROM campaign_label
       WHERE campaign.status = 'PAUSED'
         AND label.name LIKE 'claude-%'
     `),
@@ -650,7 +653,7 @@ export class GoogleAdsManager {
         ad_group.status,
         campaign.name,
         label.name
-      FROM ad_group
+      FROM ad_group_label
       WHERE ad_group.status = 'PAUSED'
         AND label.name LIKE 'claude-%'
     `),
@@ -669,14 +672,36 @@ export class GoogleAdsManager {
         ad_group.name,
         campaign.name,
         label.name
-      FROM ad_group_ad
+      FROM ad_group_ad_label
       WHERE ad_group_ad.status = 'PAUSED'
         AND label.name LIKE 'claude-%'
     `),
       "listPendingChanges.ads"
     );
 
-    return safeResponse({ campaigns, adGroups, ads }, "listPendingChanges");
+    // Get paused keywords with claude label. google_ads_enable_keywords takes
+    // the criterion resource name.
+    const keywords = await withResilience(
+      () =>
+        customer.query(`
+      SELECT
+        ad_group_criterion.resource_name,
+        ad_group_criterion.criterion_id,
+        ad_group_criterion.keyword.text,
+        ad_group_criterion.keyword.match_type,
+        ad_group_criterion.status,
+        ad_group.name,
+        campaign.name,
+        label.name
+      FROM ad_group_criterion_label
+      WHERE ad_group_criterion.status = 'PAUSED'
+        AND ad_group_criterion.type = 'KEYWORD'
+        AND label.name LIKE 'claude-%'
+    `),
+      "listPendingChanges.keywords"
+    );
+
+    return safeResponse({ campaigns, adGroups, ads, keywords }, "listPendingChanges");
   }
 
   // Create a label

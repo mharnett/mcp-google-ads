@@ -107,8 +107,8 @@ create the link PAUSED with it.
 
 ### 2.5 Show the user what is pending
 
-`google_ads_list_pending_changes` lists PAUSED campaigns, ad groups and ads
-that carry a `claude-` label. It does not list keywords or asset links; report
+`google_ads_list_pending_changes` lists PAUSED campaigns, ad groups, ads and
+keywords that carry a `claude-` label. It does not list asset links; report
 those from the create results. Give the user the name of each item, and ask
 them to review it in the Google Ads UI or Editor.
 
