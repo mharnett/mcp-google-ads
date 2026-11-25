@@ -8006,12 +8006,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
  * Skipped when a passing check is stamped in the last 30 minutes
  * (authCheckStamp.ts): every Claude session start launches this server twice,
  * and the check was ~2 SearchStream calls per session against the quota.
+ * MCP_GOOGLE_ADS_SKIP_STARTUP_CHECK=1 turns it off, for tests that start the
+ * server with fake credentials.
  */
 export async function runStartupAuthCheck(
   config: Config,
   manager: () => Pick<GoogleAdsManager, "getCustomer">,
-  opts: { stampDir?: string; now?: () => Date } = {},
+  opts: { stampDir?: string; now?: () => Date; env?: Record<string, string | undefined> } = {},
 ): Promise<"skipped" | "checked" | "no-client"> {
+  if ((opts.env ?? process.env).MCP_GOOGLE_ADS_SKIP_STARTUP_CHECK === "1") {
+    logger.info("Auth check skipped: MCP_GOOGLE_ADS_SKIP_STARTUP_CHECK=1");
+    return "skipped";
+  }
   const firstClient = Object.values(config.clients)[0];
   if (!firstClient) return "no-client";
   const login = firstClient.direct_access
