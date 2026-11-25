@@ -9,8 +9,8 @@ import { jailSpawnedServers } from "../tests/helpers/jailSpawnedServers.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DIST = path.resolve(__dirname, "..", "dist");
 
-// Every process the harness starts below inherits this: no real credentials,
-// and no network. The startup auth check used to reach Google's token endpoint
+// Processes this file starts itself inherit this: no real credentials, and no
+// network. The startup auth check used to reach Google's token endpoint
 // with the fake credentials in startupEnv.
 const jail = jailSpawnedServers(DIST);
 afterAll(() => jail.restore());
@@ -56,17 +56,10 @@ registerMcpTests({
   startupEnv,
 });
 
-describe("the servers the harness started", () => {
-  it("ran in the jail, and none tried to connect anywhere or look up a host", () => {
-    const events = jail.events();
-    const servers = events.filter((e) => e.event === "start" && e.script === "index.js" && !/--(help|version)/.test(e.args.join(" ")));
-    expect(
-      servers.length,
-      "no server start was recorded, so this proves nothing. If the harness now builds its own env for the servers it starts (0.3.0 does, with a jail of its own), drop this block and jailSpawnedServers.",
-    ).toBeGreaterThanOrEqual(4);
-    expect(events.filter((e) => e.event === "attempt")).toEqual([]);
-  });
-
+// Harness 0.3.x starts its servers from a staged copy in a hermetic env with its
+// own network jail, so this repo's jail (rooted at dist/) no longer sees them.
+// The control below still proves this repo's jail refuses the startup check.
+describe("the startup check under this repo's jail", () => {
   it("control: without the skip flag the startup check tries Google's token endpoint, and the jail refuses it", () => {
     const log = jail.newLog("control");
     const { MCP_GOOGLE_ADS_SKIP_STARTUP_CHECK: _flag, ...checkOn } = startupEnv;
