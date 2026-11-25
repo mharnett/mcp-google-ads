@@ -128,6 +128,25 @@ describe("runStartupAuthCheck (the main() startup path)", () => {
     expect(f.queries).toHaveLength(2);
   });
 
+  it("MCP_GOOGLE_ADS_SKIP_STARTUP_CHECK=1 skips the query and writes no stamp", async () => {
+    const f = fakes();
+    const opts = { stampDir: dir, now: () => T0 };
+    await expect(
+      runStartupAuthCheck(f.config, () => f.manager as any, { ...opts, env: { MCP_GOOGLE_ADS_SKIP_STARTUP_CHECK: "1" } }),
+    ).resolves.toBe("skipped");
+    expect(f.opened).toEqual([]);
+    expect(existsSync(authCheckStampPath("123-456-7890", "999-888-7777", dir))).toBe(false);
+  });
+
+  it.each(["", "0", "false"])("MCP_GOOGLE_ADS_SKIP_STARTUP_CHECK=%j does not skip it", async (value) => {
+    const f = fakes();
+    const opts = { stampDir: dir, now: () => T0 };
+    await expect(
+      runStartupAuthCheck(f.config, () => f.manager as any, { ...opts, env: { MCP_GOOGLE_ADS_SKIP_STARTUP_CHECK: value } }),
+    ).resolves.toBe("checked");
+    expect(f.queries).toHaveLength(1);
+  });
+
   it("no configured client means no query and no stamp", async () => {
     const f = fakes();
     f.config.clients = {};

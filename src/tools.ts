@@ -57,7 +57,7 @@ export const tools: Tool[] = [
   },
   {
     name: "google_ads_list_pending_changes",
-    description: "List all pending changes (paused items with claude- label) awaiting review",
+    description: "List all pending changes awaiting review: PAUSED campaigns, ad groups, ads and keywords with a claude- label",
     inputSchema: {
       additionalProperties: false,
       type: "object",

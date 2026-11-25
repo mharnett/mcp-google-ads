@@ -1,6 +1,6 @@
 # MCP Google Ads Server
 
-An MCP (Model Context Protocol) server for the Google Ads API with built-in safeguards for review before changes go live. Production-proven with MCC (Manager Account) support, 86 tools for campaign management, reporting, and optimization. v1.2.0 adds Demand Gen campaign creation end-to-end.
+An MCP (Model Context Protocol) server for the Google Ads API with built-in safeguards for review before changes go live. Production-proven with MCC (Manager Account) support, 87 tools for campaign management, reporting, and optimization. v1.2.0 adds Demand Gen campaign creation end-to-end.
 
 ## Quick install
 
@@ -197,6 +197,7 @@ Alternatively, set credentials via environment variables (these override `config
 | `GOOGLE_ADS_MCP_OVERRIDE_SLACK_TOKEN` / `GOOGLE_ADS_MCP_OVERRIDE_SLACK_CHANNEL` | No | Slack bot token + channel id; when both are set each override posts via `chat.postMessage` and the webhook is skipped. `run-mcp.sh` sets these to the drak bot and #drak-ops. |
 | `GOOGLE_ADS_REQUEST_LOG_PATH` | No | JSONL file for the per-request log: one line per Google Ads API call (UTC time, caller, host, pid, method, customer id, operation count, `validate_only`, status, and for a successful mutate the operation and resource name of each resource it wrote). Never tokens, headers, request bodies or GAQL. Default: `~/Library/Logs/google-ads-requests.jsonl` on macOS (rotated to `.1` at 20 MB); stderr on Linux, Windows, CI and Railway. The caller is `DRAK_JOB`, else `RAILWAY_SERVICE_NAME`, else the script name. |
 | `GOOGLE_ADS_MCP_ALWAYS_LOAD` | No | Comma-separated tool names to mark as always-loaded, e.g. `google_ads_get_client_context,google_ads_gaql_query`. Default: unset (no tool is marked). |
+| `MCP_GOOGLE_ADS_SKIP_STARTUP_CHECK` | No | Set to `1` to skip the auth query the server makes at startup. For tests that start it with fake credentials. |
 
 ### Always-loaded tools
 
@@ -261,7 +262,9 @@ Restart Claude Code.
 5. Claude enables (requires your approval prompt)
 ```
 
-### Available Tools (41)
+### Available Tools (87)
+
+The tables below describe 41 of the 87. `src/tools.ts` has every tool, with its full description and arguments.
 
 #### Context & Discovery
 | Tool | Description |
@@ -269,7 +272,7 @@ Restart Claude Code.
 | `google_ads_get_client_context` | Detect which account from working directory |
 | `google_ads_list_campaigns` | List all campaigns with status and metrics |
 | `google_ads_list_ad_groups` | List ad groups in a campaign |
-| `google_ads_list_pending_changes` | Show paused items with claude- label |
+| `google_ads_list_pending_changes` | Show PAUSED campaigns, ad groups, ads and keywords with a claude- label |
 | `google_ads_list_conversion_actions` | List conversion actions |
 
 #### Campaign Management
