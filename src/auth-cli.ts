@@ -20,6 +20,10 @@
 //      to env-paths config file with mode 0600.
 //   9. Tell the user to restart Claude Desktop.
 //
+// Only steps 5-7 call the Google Ads API, so only they need a developer token
+// (GOOGLE_ADS_DEVELOPER_TOKEN). Without one the CLI still signs in and saves
+// the result, then says what is missing and exits 2.
+//
 // All auth errors fail fast (invalid_grant, 401, 403) per the repo-wide
 // resilience contract — only network/5xx/rate-limit transients are retried.
 
@@ -28,12 +32,16 @@ import { GoogleAdsApi } from "google-ads-api";
 import http from "http";
 import promptsImport from "prompts";
 import { URL, fileURLToPath } from "url";
-import { writeStoredCredentials, credentialsFilePath, CREDENTIALS_FILE_VERSION, type StoredCredentials } from "./credentials.js";
 import {
-  EMBEDDED_CLIENT_ID,
-  EMBEDDED_CLIENT_SECRET,
-  EMBEDDED_DEVELOPER_TOKEN,
-} from "./embedded-secrets.js";
+  CREDENTIALS_FILE_VERSION,
+  credentialsFilePath,
+  developerToken,
+  missingDeveloperTokenMessage,
+  readStoredCredentials,
+  writeStoredCredentials,
+  type StoredCredentials,
+} from "./credentials.js";
+import { EMBEDDED_CLIENT_ID, EMBEDDED_CLIENT_SECRET } from "./embedded-secrets.js";
 import { classifyError, GoogleAdsAuthError } from "./errors.js";
 import { findFreeLoopbackPort, openBrowser } from "./platform.js";
 import { logger, withResilience } from "./resilience.js";
@@ -529,6 +537,45 @@ async function pickAccount(
 }
 
 // ============================================
+// NO DEVELOPER TOKEN
+// ============================================
+
+/**
+ * Save a completed sign-in whose accounts cannot be listed, and say why. The
+ * account is the --customer-id one, else the one an earlier run saved, else
+ * none; nothing here checks that this Google login can open it.
+ */
+function saveSignInOnly(refreshToken: string, customerId?: string): void {
+  const previous = readStoredCredentials();
+  const account = previous && (!customerId || previous.customer_id === customerId) ? previous : null;
+  const id = customerId ?? account?.customer_id ?? "";
+  writeStoredCredentials({
+    version: CREDENTIALS_FILE_VERSION,
+    refresh_token: refreshToken,
+    customer_id: id,
+    customer_name: account?.customer_name,
+    mcc_customer_id: account?.mcc_customer_id ?? null,
+    obtained_at: new Date().toISOString(),
+    scopes: [OAUTH_SCOPE],
+  });
+
+  const name = account?.customer_name ? `${account.customer_name} (${id})` : id;
+  process.stderr.write(
+    [
+      "",
+      `Signed in. Saved to: ${credentialsFilePath}`,
+      ...(id ? [`Account: ${name}, not checked against this sign-in.`] : []),
+      "",
+      missingDeveloperTokenMessage(),
+      "",
+      "Listing your Google Ads accounts is such a call. To choose one, set the variable in this",
+      "shell too and run npx mcp-google-ads-auth again.",
+      "",
+    ].join("\n"),
+  );
+}
+
+// ============================================
 // MAIN
 // ============================================
 
@@ -542,13 +589,12 @@ export async function run(argv: string[] = process.argv.slice(2)): Promise<void>
   // Resolve OAuth client creds (env override > embedded)
   const clientId = process.env.GOOGLE_ADS_CLIENT_ID?.trim() || EMBEDDED_CLIENT_ID;
   const clientSecret = process.env.GOOGLE_ADS_CLIENT_SECRET?.trim() || EMBEDDED_CLIENT_SECRET;
-  const developerToken = process.env.GOOGLE_ADS_DEVELOPER_TOKEN?.trim() || EMBEDDED_DEVELOPER_TOKEN;
 
-  if (!clientId || !clientSecret || !developerToken) {
+  if (!clientId || !clientSecret) {
     process.stderr.write(
       "This build of mcp-google-ads was published without embedded OAuth credentials.\n" +
-        "Set GOOGLE_ADS_CLIENT_ID, GOOGLE_ADS_CLIENT_SECRET, and GOOGLE_ADS_DEVELOPER_TOKEN\n" +
-        "in your environment before running this command.\n",
+        "Set GOOGLE_ADS_CLIENT_ID and GOOGLE_ADS_CLIENT_SECRET in your environment before\n" +
+        "running this command.\n",
     );
     process.exit(2);
   }
@@ -572,12 +618,18 @@ export async function run(argv: string[] = process.argv.slice(2)): Promise<void>
         "to this app — revoke access at https://myaccount.google.com/permissions and try again.",
     );
   }
+
+  const developer_token = developerToken();
+  if (!developer_token) {
+    saveSignInOnly(tokens.refresh_token, args.customerId);
+    process.exit(2);
+  }
   process.stderr.write("Tokens received. Fetching accessible Google Ads accounts...\n");
 
   const api = new GoogleAdsApi({
     client_id: clientId,
     client_secret: clientSecret,
-    developer_token: developerToken,
+    developer_token,
   });
 
   const accounts = await enumerateAccounts(api, tokens.refresh_token);

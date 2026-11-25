@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   readStoredCredentials,
   writeStoredCredentials,
@@ -7,6 +7,7 @@ import {
   CREDENTIALS_FILE_VERSION,
   type StoredCredentials,
 } from "./credentials.js";
+import { MissingDeveloperTokenError } from "./errors.js";
 import { mkdtempSync, rmSync, existsSync, writeFileSync, readFileSync, statSync } from "fs";
 import path from "path";
 import os from "os";
@@ -136,7 +137,9 @@ describe("resolveCredentials priority chain", () => {
 
   it("throws with a helpful message when nothing is configured", () => {
     const p = freshPath();
-    expect(() => resolveCredentials(p)).toThrow(/Missing Google Ads credentials/);
+    expect(() => resolveCredentials(p)).toThrow(/^GOOGLE_ADS_DEVELOPER_TOKEN is not set/);
+    // npm publish runs this with EMBEDDED_CLIENT_ID / _SECRET set, so those two may not be missing.
+    expect(() => resolveCredentials(p)).toThrow(/Also missing: (client_id, client_secret, )?refresh_token, customer_id\./);
     expect(() => resolveCredentials(p)).toThrow(/npx mcp-google-ads-auth/);
   });
 
@@ -271,12 +274,12 @@ describe("validateResolvedCredentials", () => {
 // ============================================
 // Regression: developer token still resolved
 // ============================================
-// Baseline: as of 2026-09-14, the developer_token header is still required
-// and sent on all Google Ads API calls. This test documents the current behavior.
-// Google stated the header is optional until H1 2027 removal.
-// Ref: src/credentials.ts:125, src/auth-cli.ts:536
+// google-ads-api 24 sends a developer-token header on every call, so the server
+// needs a value. Google sunset developer tokens on 2026-09-09 and will reject
+// the header in a later API version. GOOGLE_ADS_DEVELOPER_TOKEN is the only
+// source: nothing is embedded and nothing is stored.
 
-describe("developer token resolution (Cloud-project baseline, H1 2027 migration pending)", () => {
+describe("developer token resolution", () => {
   const freshPath = () => path.join(tmpDir, `creds-${Math.random().toString(36).slice(2)}.json`);
 
   it("includes developer_token in resolved credentials from env var", () => {
@@ -299,17 +302,74 @@ describe("developer token resolution (Cloud-project baseline, H1 2027 migration 
     expect(resolved.developer_token).toBe("test-dev-token-with-spaces");
   });
 
-  it("requires developer_token to be present, throwing with helpful message if missing", () => {
-    process.env.GOOGLE_ADS_CLIENT_ID = "x".repeat(30);
-    process.env.GOOGLE_ADS_CLIENT_SECRET = "x".repeat(30);
-    // Explicitly not setting GOOGLE_ADS_DEVELOPER_TOKEN (and it won't have embedded value)
-    process.env.GOOGLE_ADS_REFRESH_TOKEN = "x".repeat(30);
-    process.env.GOOGLE_ADS_CUSTOMER_ID = "1234567890";
+  function setAllBut(...unset: string[]): void {
+    for (const key of ENV_KEYS) process.env[key] = key.endsWith("CUSTOMER_ID") ? "1234567890" : "x".repeat(30);
+    for (const key of unset) delete process.env[key];
+  }
+  function missing(file = freshPath()): MissingDeveloperTokenError {
     try {
-      resolveCredentials(freshPath());
-      throw new Error("Expected resolveCredentials to throw for missing developer_token");
+      resolveCredentials(file);
     } catch (err) {
-      expect((err as Error).message).toContain("developer_token");
+      expect(err).toBeInstanceOf(MissingDeveloperTokenError);
+      return err as MissingDeveloperTokenError;
+    }
+    throw new Error("Expected resolveCredentials to throw for a missing developer token");
+  }
+
+  it("only the developer token missing: names the variable and where to apply, and does not send anyone to the auth helper", () => {
+    setAllBut("GOOGLE_ADS_DEVELOPER_TOKEN");
+    const { message, alsoMissing } = missing();
+    expect(message).toMatch(/^GOOGLE_ADS_DEVELOPER_TOKEN is not set/);
+    expect(message).toContain("https://console.cloud.google.com/google/ads-apis/overview");
+    expect(message).not.toMatch(/mcp-google-ads-auth|Also missing|credentials file/);
+    expect(alsoMissing).toEqual([]);
+  });
+
+  it("a complete credentials file is not called incomplete: it never holds the token", () => {
+    setAllBut("GOOGLE_ADS_DEVELOPER_TOKEN", "GOOGLE_ADS_REFRESH_TOKEN", "GOOGLE_ADS_CUSTOMER_ID");
+    const file = freshPath();
+    writeStoredCredentials(
+      { version: CREDENTIALS_FILE_VERSION, refresh_token: "x".repeat(30), customer_id: "1234567890", obtained_at: "2026-01-01T00:00:00Z", scopes: [] },
+      file,
+    );
+    expect(missing(file).message).not.toMatch(/credentials file|mcp-google-ads-auth/);
+    process.env.GOOGLE_ADS_DEVELOPER_TOKEN = "fake-developer-token";
+    expect(resolveCredentials(file)).toMatchObject({ developer_token: "fake-developer-token", source: "file" });
+  });
+
+  it("the sign-in missing too: one message covers both", () => {
+    setAllBut("GOOGLE_ADS_DEVELOPER_TOKEN", "GOOGLE_ADS_REFRESH_TOKEN", "GOOGLE_ADS_CUSTOMER_ID");
+    const { message, alsoMissing } = missing();
+    expect(message).toMatch(/^GOOGLE_ADS_DEVELOPER_TOKEN is not set/);
+    expect(message).toContain("Also missing: refresh_token, customer_id.");
+    expect(message).toContain("npx mcp-google-ads-auth");
+    expect(alsoMissing).toEqual(["refresh_token", "customer_id"]);
+  });
+
+  it("a blank or quoted-blank value counts as not set", () => {
+    setAllBut("GOOGLE_ADS_DEVELOPER_TOKEN");
+    for (const blank of ["   ", '""', '" "']) {
+      process.env.GOOGLE_ADS_DEVELOPER_TOKEN = blank;
+      missing();
+    }
+  });
+
+  it("other credentials missing but not the token: the message does not mention it", () => {
+    setAllBut("GOOGLE_ADS_REFRESH_TOKEN");
+    expect(() => resolveCredentials(freshPath())).toThrow(/Missing Google Ads credentials: refresh_token/);
+    expect(() => resolveCredentials(freshPath())).not.toThrow(/DEVELOPER_TOKEN/);
+  });
+
+  it("EMBEDDED_DEVELOPER_TOKEN in the env is not a source", async () => {
+    setAllBut("GOOGLE_ADS_DEVELOPER_TOKEN");
+    vi.stubEnv("EMBEDDED_DEVELOPER_TOKEN", "fake-embedded-developer-token");
+    vi.resetModules();
+    try {
+      const fresh = await import("./credentials.js");
+      expect(() => fresh.resolveCredentials(freshPath())).toThrow(/^GOOGLE_ADS_DEVELOPER_TOKEN is not set/);
+    } finally {
+      vi.unstubAllEnvs();
+      vi.resetModules();
     }
   });
 });

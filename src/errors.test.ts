@@ -3,11 +3,19 @@ import {
   GoogleAdsAuthError,
   GoogleAdsRateLimitError,
   GoogleAdsServiceError,
+  MissingDeveloperTokenError,
   classifyError,
   validateCredentials,
 } from "./errors.js";
 
 describe("classifyError", () => {
+  it("passes a missing developer token through as it is, whatever its message says", () => {
+    // "refresh token" in a message is what sends other errors to "Re-authenticate".
+    const error = new MissingDeveloperTokenError("GOOGLE_ADS_DEVELOPER_TOKEN is not set. Not the refresh token.", []);
+    expect(classifyError(error)).toBe(error);
+    expect(error).toBeInstanceOf(GoogleAdsAuthError);
+  });
+
   it("classifies 401 status as GoogleAdsAuthError", () => {
     const error = { status: 401, message: "Unauthorized" };
     const result = classifyError(error);

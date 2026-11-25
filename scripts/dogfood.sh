@@ -147,9 +147,9 @@ cat > "${SANDBOX}/mcp_probe.mjs" <<'PROBE_EOF'
 import { spawn } from "node:child_process";
 
 const bin = process.argv[2];
-// Server requires client_id / client_secret / developer_token — normally
-// injected at build time via release.sh's esbuild --define. For dogfood
-// against a plain `npm run build`, inject test values via env. We never
+// Server requires client_id / client_secret (normally injected at build time
+// via release.sh's esbuild --define) and the user's own developer_token. For
+// dogfood against a plain `npm run build`, inject test values via env. We never
 // authenticate (tools/list is pre-auth), so the values can be stubs.
 const env = {
   ...process.env,

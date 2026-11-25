@@ -7,7 +7,7 @@ An MCP (Model Context Protocol) server for the Google Ads API with built-in safe
 Claude Code, one line (replace the placeholder values with your own; see [Setup](#setup) for how to get them):
 
 ```bash
-claude mcp add --env GOOGLE_ADS_DEVELOPER_TOKEN=YOUR_DEVELOPER_TOKEN --env GOOGLE_ADS_CLIENT_ID=YOUR_CLIENT_ID --env GOOGLE_ADS_CLIENT_SECRET=YOUR_CLIENT_SECRET --env GOOGLE_ADS_REFRESH_TOKEN=YOUR_REFRESH_TOKEN --transport stdio mcp-google-ads -- npx -y mcp-google-ads
+claude mcp add --env GOOGLE_ADS_DEVELOPER_TOKEN=YOUR_DEVELOPER_TOKEN --env GOOGLE_ADS_CLIENT_ID=YOUR_CLIENT_ID --env GOOGLE_ADS_CLIENT_SECRET=YOUR_CLIENT_SECRET --env GOOGLE_ADS_REFRESH_TOKEN=YOUR_REFRESH_TOKEN --env GOOGLE_ADS_CUSTOMER_ID=YOUR_CUSTOMER_ID --transport stdio mcp-google-ads -- npx -y mcp-google-ads
 ```
 
 The server starts read-only. Set `GOOGLE_ADS_MCP_WRITE=true` to expose tools that change an account; new items are always created PAUSED.
@@ -27,7 +27,8 @@ Add this to `~/Library/Application Support/Claude/claude_desktop_config.json` (m
         "GOOGLE_ADS_DEVELOPER_TOKEN": "YOUR_DEVELOPER_TOKEN",
         "GOOGLE_ADS_CLIENT_ID": "YOUR_CLIENT_ID",
         "GOOGLE_ADS_CLIENT_SECRET": "YOUR_CLIENT_SECRET",
-        "GOOGLE_ADS_REFRESH_TOKEN": "YOUR_REFRESH_TOKEN"
+        "GOOGLE_ADS_REFRESH_TOKEN": "YOUR_REFRESH_TOKEN",
+        "GOOGLE_ADS_CUSTOMER_ID": "YOUR_CUSTOMER_ID"
       }
     }
   }
@@ -51,6 +52,7 @@ GOOGLE_ADS_DEVELOPER_TOKEN = "YOUR_DEVELOPER_TOKEN"
 GOOGLE_ADS_CLIENT_ID = "YOUR_CLIENT_ID"
 GOOGLE_ADS_CLIENT_SECRET = "YOUR_CLIENT_SECRET"
 GOOGLE_ADS_REFRESH_TOKEN = "YOUR_REFRESH_TOKEN"
+GOOGLE_ADS_CUSTOMER_ID = "YOUR_CUSTOMER_ID"
 ```
 
 </details>
@@ -79,7 +81,8 @@ GOOGLE_ADS_REFRESH_TOKEN = "YOUR_REFRESH_TOKEN"
 ### 1. Google Ads API Access
 
 You need:
-- A Google Ads **Developer Token** (apply at [Google Ads API Center](https://developers.google.com/google-ads/api/docs/get-started/dev-token))
+- **API access** for a Google Cloud project. Enable the Google Ads API in it, then apply for Explorer access on its [Google Ads API Overview](https://console.cloud.google.com/google/ads-apis/overview) page. Google sets your access level and daily quota by the project that owns your OAuth client.
+- A **developer token**, in `GOOGLE_ADS_DEVELOPER_TOKEN`. The server sends one with every call and does not come with one. If you have one, use it; it is in your manager account's API Center. If you don't, Google [stopped issuing them for this API on 9 September 2026](https://developers.google.com/google-ads/api/docs/api-policy/developer-token) and says it ignores the value, so a placeholder of 10 or more characters should do.
 - **OAuth credentials** (Client ID & Secret from Google Cloud Console)
 - A **Refresh Token** for your MCC account
 
@@ -112,7 +115,7 @@ the Ads data. On success the helper prints one line to stdout:
 GOOGLE_ADS_REFRESH_TOKEN=1//0a...
 ```
 
-Set that value in your environment (or `config.json`, below). The OAuth scope
+Set that value in your environment. The OAuth scope
 requested is read from `config.json` (`oauth.scope`), falling back to
 `config.example.json`, so the helper and the running server always request the
 same scope. This MCP requests only the minimum scope it needs:
@@ -147,7 +150,7 @@ npm run build
 cp config.example.json config.json
 ```
 
-Edit `config.json` with your credentials:
+Edit `config.json` to map your clients to folders. The server reads no credentials from it; those come from the environment (next section).
 
 ```json
 {
@@ -155,10 +158,6 @@ Edit `config.json` with your credentials:
     "scope": "https://www.googleapis.com/auth/adwords"
   },
   "google_ads": {
-    "developer_token": "YOUR_DEVELOPER_TOKEN",
-    "client_id": "YOUR_CLIENT_ID.apps.googleusercontent.com",
-    "client_secret": "YOUR_CLIENT_SECRET",
-    "refresh_token": "YOUR_REFRESH_TOKEN",
     "mcc_customer_id": "123-456-7890"
   },
   "clients": {
@@ -183,14 +182,22 @@ Edit `config.json` with your credentials:
 
 ### Environment Variables
 
-Alternatively, set credentials via environment variables (these override `config.json`):
+Each credential comes from the first of these that has it:
+
+1. The environment variables below.
+2. The file `npx mcp-google-ads-auth` saves when you sign in with it: refresh token, customer ID and MCC customer ID.
+3. The npm package's built-in OAuth client: client ID and secret. A build from source has none.
+
+The developer token has only the first. Without one the server starts and lists its tools, and every Google Ads API call fails.
 
 | Variable | Required | Description |
 |---|---|---|
-| `GOOGLE_ADS_DEVELOPER_TOKEN` | Yes | Google Ads API developer token |
-| `GOOGLE_ADS_CLIENT_ID` | Yes | OAuth 2.0 client ID |
-| `GOOGLE_ADS_CLIENT_SECRET` | Yes | OAuth 2.0 client secret |
-| `GOOGLE_ADS_REFRESH_TOKEN` | Yes | OAuth 2.0 refresh token |
+| `GOOGLE_ADS_DEVELOPER_TOKEN` | Yes | Developer token (see [Google Ads API Access](#1-google-ads-api-access)) |
+| `GOOGLE_ADS_CLIENT_ID` | From source: yes. npm package: recommended | OAuth 2.0 client ID. Your own client gives you your own project's access level and quota. A refresh token works only with the client that issued it, so set these together. |
+| `GOOGLE_ADS_CLIENT_SECRET` | With `GOOGLE_ADS_CLIENT_ID` | OAuth 2.0 client secret |
+| `GOOGLE_ADS_REFRESH_TOKEN` | Yes, unless saved | OAuth 2.0 refresh token |
+| `GOOGLE_ADS_CUSTOMER_ID` | Yes, unless saved | Default Google Ads account, 10 digits |
+| `GOOGLE_ADS_MCC_CUSTOMER_ID` | No | Manager account to reach that account through |
 | `GOOGLE_ADS_MCP_WRITE` | No | Set to `true` to expose mutating tools (create/update/pause/enable/remove/apply). Default: read-only. |
 | `GOOGLE_ADS_MCP_OVERRIDE_LOG` | No | JSONL file that records every `confirm_large_change` override (timestamp, tool, entity, old -> new, reason). Default: `overrides.jsonl` in the per-user config directory. |
 | `GOOGLE_ADS_MCP_OVERRIDE_WEBHOOK_URL` | No | Slack-compatible incoming webhook; each override also posts one line here. A missing or failing webhook never fails the write. |
@@ -442,9 +449,12 @@ No server restart needed — config is read on each request.
 - Make sure you're in a folder that matches one of your `clients` entries
 - Check that the folder path in config.json matches exactly
 
-### "Developer token not approved"
-- New developer tokens need approval from Google
-- Use a test account while waiting for approval
+### "GOOGLE_ADS_DEVELOPER_TOKEN is not set"
+- Set it in the server's environment and restart the server (see [Google Ads API Access](#1-google-ads-api-access))
+
+### "Cloud project not approved for production" (`ACTION_NOT_PERMITTED` on API v24 and earlier)
+- The Google Cloud project that owns your OAuth client has Test access
+- Apply for Explorer access on its [Google Ads API Overview](https://console.cloud.google.com/google/ads-apis/overview) page, or use a test account
 
 ### "Authentication failed"
 - Refresh token may be expired — regenerate it

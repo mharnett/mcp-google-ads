@@ -7,7 +7,7 @@
 // credentials." (v1.2.1 accident). Fail fast before esbuild --define can
 // bake in empty strings.
 
-const required = ["EMBEDDED_CLIENT_ID", "EMBEDDED_CLIENT_SECRET", "EMBEDDED_DEVELOPER_TOKEN"];
+const required = ["EMBEDDED_CLIENT_ID", "EMBEDDED_CLIENT_SECRET"];
 const missing = required.filter((k) => !process.env[k]);
 
 if (missing.length > 0) {

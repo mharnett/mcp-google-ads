@@ -1,8 +1,8 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { beforeEach, afterEach, describe, expect, it } from "vitest";
-import { installIntoConfig } from "./install-cli.js";
+import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
+import { installIntoConfig, run } from "./install-cli.js";
 
 // Test the config mutation function directly (no spawn, no stdin).
 // The CLI wrapper just calls this with resolved paths.
@@ -103,5 +103,51 @@ describe("installIntoConfig — Claude Desktop config merging", () => {
     const parsed = JSON.parse(readFileSync(cfg, "utf8"));
     const env = parsed.mcpServers["google-ads"].env || {};
     expect(env.GOOGLE_ADS_CUSTOMER_ID).toBe("1112223333");
+  });
+
+  // The entry's env is where a Claude Desktop user keeps the developer token,
+  // so re-running the installer must not drop it.
+  it("keeps the env of an existing google-ads entry", () => {
+    const env = { GOOGLE_ADS_DEVELOPER_TOKEN: "fake-developer-token", GOOGLE_ADS_MCP_WRITE: "true" };
+    writeFileSync(cfg, JSON.stringify({ mcpServers: { "google-ads": { command: "node", args: ["/old/index.js"], env } } }));
+    installIntoConfig({ configPath: cfg });
+    expect(JSON.parse(readFileSync(cfg, "utf8")).mcpServers["google-ads"]).toEqual({ command: "npx", args: ["-y", "mcp-google-ads@latest"], env });
+    installIntoConfig({ configPath: cfg, customerId: "111-222-3333" });
+    expect(JSON.parse(readFileSync(cfg, "utf8")).mcpServers["google-ads"].env).toEqual({ ...env, GOOGLE_ADS_CUSTOMER_ID: "1112223333" });
+  });
+
+  it.each([["a string", "oops"], ["a list", ["oops"]], ["null", null]])("an existing env that is %s is replaced, not spread", (_name, env) => {
+    writeFileSync(cfg, JSON.stringify({ mcpServers: { "google-ads": { command: "npx", env } } }));
+    installIntoConfig({ configPath: cfg });
+    expect(JSON.parse(readFileSync(cfg, "utf8")).mcpServers["google-ads"].env).toBeUndefined();
+  });
+
+  describe("next steps", () => {
+    async function printed(): Promise<string> {
+      let out = "";
+      const spy = vi.spyOn(process.stdout, "write").mockImplementation((chunk: unknown) => {
+        out += String(chunk);
+        return true;
+      });
+      try {
+        await run(["--config", cfg]);
+      } finally {
+        spy.mockRestore();
+      }
+      return out;
+    }
+
+    it("ask for the developer token when the entry has none", async () => {
+      const out = await printed();
+      expect(out).toMatch(/GOOGLE_ADS_DEVELOPER_TOKEN.*mcpServers\.google-ads\.env/s);
+      expect(out).toContain(cfg);
+    });
+
+    it("do not, when it is already there, and never print it", async () => {
+      writeFileSync(cfg, JSON.stringify({ mcpServers: { "google-ads": { env: { GOOGLE_ADS_DEVELOPER_TOKEN: "fake-developer-token" } } } }));
+      const out = await printed();
+      expect(out).not.toMatch(/GOOGLE_ADS_DEVELOPER_TOKEN|fake-developer-token/);
+      expect(out).toMatch(/Reopen Claude Desktop/);
+    });
   });
 });

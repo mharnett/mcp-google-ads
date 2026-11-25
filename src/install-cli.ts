@@ -7,7 +7,8 @@
 //   2. Read it (or start empty); parse as JSON; refuse to clobber invalid JSON.
 //   3. Ensure mcpServers.google-ads = { command: "npx", args: ["-y", "mcp-google-ads@latest"], env: ... }.
 //      All other keys (theme, sibling MCPs, unrelated top-level config) are
-//      preserved byte-for-byte via object spread.
+//      preserved byte-for-byte via object spread, and so is an existing
+//      google-ads entry's env: that is where the user's developer token lives.
 //   4. Write back with 2-space indent + trailing newline.
 //
 // Idempotent: running twice yields identical content. Safe to re-run after
@@ -41,7 +42,19 @@ type ConfigShape = {
   [key: string]: unknown;
 };
 
-export function installIntoConfig(opts: InstallOptions = {}): { path: string; existed: boolean } {
+/** The env block of a mcpServers entry, or {} when it has none worth keeping. */
+export function entryEnv(entry: unknown): Record<string, unknown> {
+  const env = (entry as { env?: unknown } | null | undefined)?.env;
+  return env && typeof env === "object" && !Array.isArray(env) ? (env as Record<string, unknown>) : {};
+}
+
+/** Whether an entry's env sets a developer token. Presence only: the value is never returned. */
+export function entryHasDeveloperToken(entry: unknown): boolean {
+  const value = entryEnv(entry).GOOGLE_ADS_DEVELOPER_TOKEN;
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+export function installIntoConfig(opts: InstallOptions = {}): { path: string; existed: boolean; hasDeveloperToken: boolean } {
   const configPath = opts.configPath ?? resolveDefaultConfigPath();
   const existed = existsSync(configPath);
 
@@ -71,8 +84,12 @@ export function installIntoConfig(opts: InstallOptions = {}): { path: string; ex
     command: "npx",
     args: ["-y", "mcp-google-ads@latest"],
   };
-  if (normalizedCustomerId) {
-    entry.env = { GOOGLE_ADS_CUSTOMER_ID: normalizedCustomerId };
+  const env = {
+    ...entryEnv(config.mcpServers?.["google-ads"]),
+    ...(normalizedCustomerId ? { GOOGLE_ADS_CUSTOMER_ID: normalizedCustomerId } : {}),
+  };
+  if (Object.keys(env).length > 0) {
+    entry.env = env;
   }
 
   const nextConfig: ConfigShape = {
@@ -84,7 +101,7 @@ export function installIntoConfig(opts: InstallOptions = {}): { path: string; ex
   };
 
   writeFileSync(configPath, JSON.stringify(nextConfig, null, 2) + "\n", { mode: 0o644 });
-  return { path: configPath, existed };
+  return { path: configPath, existed, hasDeveloperToken: entryHasDeveloperToken(entry) };
 }
 
 function parseArgs(argv: string[]): InstallOptions & { help: boolean } {
@@ -126,15 +143,19 @@ export async function run(argv: string[] = process.argv.slice(2)): Promise<void>
   }
 
   const result = installIntoConfig(args);
+  const steps = [
+    ...(result.hasDeveloperToken ? [] : ["Add GOOGLE_ADS_DEVELOPER_TOKEN to mcpServers.google-ads.env in that file."]),
+    "Fully quit Claude Desktop (Cmd+Q on macOS, not just close the window).",
+    "Reopen Claude Desktop.",
+    "If you haven't authenticated yet, run: npx mcp-google-ads-auth",
+  ];
   process.stdout.write(
     [
       "",
       `✓ ${result.existed ? "Updated" : "Created"}: ${result.path}`,
       "",
       "Next steps:",
-      "  1. Fully quit Claude Desktop (Cmd+Q on macOS, not just close the window).",
-      "  2. Reopen Claude Desktop.",
-      '  3. If you haven\'t authenticated yet, run: npx mcp-google-ads-auth',
+      ...steps.map((step, i) => `  ${i + 1}. ${step}`),
       "",
     ].join("\n"),
   );
