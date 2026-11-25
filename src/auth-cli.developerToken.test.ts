@@ -41,7 +41,8 @@ vi.mock("./platform.js", async (importOriginal) => {
       const redirect = new URL(asked.get("redirect_uri")!);
       redirect.searchParams.set("code", "fake-code");
       redirect.searchParams.set("state", asked.get("state")!);
-      http.get(redirect, { agent: false }, (res) => res.resume());
+      // IPv4, where the CLI listens. Browsers fall back to it; Node 18 does not.
+      http.get(redirect, { agent: false, family: 4 }, (res) => res.resume());
     },
   };
 });
