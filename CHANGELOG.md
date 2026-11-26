@@ -18,6 +18,15 @@
 
 * google_ads_update_demand_gen_multi_asset_ad now edits headlines and descriptions IN PLACE through AdService (same ad ID, status and history), the edit the Google Ads UI makes. It used AdGroupAdService, which answers IMMUTABLE_FIELD for any nested ad field, and its description told callers to rebuild the ad (new ID, lost history, paused auto-generated video siblings). Checked with validate_only on a live Demand Gen multi-asset ad: unchanged copy is refused with IMMUTABLE_FIELD on the old path and accepted through AdService. Adds `validate_only`; validates the resulting full copy, so a headlines-only edit no longer fails for missing descriptions; labels every linked ad group ad; refuses `long_headlines` (not an API field on multi-asset ads, so it was silently dropped) and pinned headlines (Demand Gen does not pin); refuses non-multi-asset ads.
 
+## [1.16.2](https://github.com/mharnett/mcp-google-ads/compare/v1.16.1...v1.16.2) (2026-11-26)
+
+
+### Bug Fixes
+
+* answer initialize before the startup auth check finishes ([#127](https://github.com/mharnett/mcp-google-ads/issues/127)) ([1b4b487](https://github.com/mharnett/mcp-google-ads/commit/1b4b4878db2b30657771ed4f8f010dac38fcf8ba))
+* list paused keywords as pending changes; keep harness-started servers off the network ([#121](https://github.com/mharnett/mcp-google-ads/issues/121)) ([fcce16f](https://github.com/mharnett/mcp-google-ads/commit/fcce16f05d12ebfd6fe56bef7ef049480dc26fb6))
+* report totals and page google_ads_list_pending_changes ([#128](https://github.com/mharnett/mcp-google-ads/issues/128)) ([42273f9](https://github.com/mharnett/mcp-google-ads/commit/42273f910057fd83abfa8dc46d2df13c409a2e24))
+
 ## [1.16.1](https://github.com/mharnett/mcp-google-ads/compare/v1.16.0...v1.16.1) (2026-11-24)
 
 
