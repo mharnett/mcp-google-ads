@@ -331,7 +331,14 @@ import {
 } from "./errors.js";
 import { authErrorHint } from "./authHint.js";
 
-import { withResilience, safeResponse, logger } from "./resilience.js";
+import { MAX_RESPONSE_SIZE, withResilience, safeResponse, logger } from "./resilience.js";
+import {
+  PENDING_SECTIONS,
+  pagePendingChanges,
+  parsePendingChangesArgs,
+  type PendingChangesArgs,
+  type PendingSection,
+} from "./pendingChangesPage.js";
 import { withRequestLog } from "./requestLog.js";
 import { authCheckStampPath, startupAuthCheck } from "./authCheckStamp.js";
 import { backfillOmittedBooleans } from "./backfillDefaults.js";
@@ -624,13 +631,11 @@ export class GoogleAdsManager {
   // `label` only to the *_label resources, so each query starts from one:
   // label.name FROM campaign (or ad_group, ad_group_ad) is refused. An item
   // carrying two claude- labels comes back once per label.
-  async listPendingChanges(customerId: string) {
+  async listPendingChanges(customerId: string, args: PendingChangesArgs = { offset: 0 }) {
     const customer = this.getCustomer(customerId);
-
-    // Get paused campaigns with claude label
-    const campaigns = await withResilience(
-      () =>
-        customer.query(`
+    const queries: Record<PendingSection, string> = {
+      // Paused campaigns with claude label
+      campaigns: `
       SELECT
         campaign.id,
         campaign.name,
@@ -639,14 +644,9 @@ export class GoogleAdsManager {
       FROM campaign_label
       WHERE campaign.status = 'PAUSED'
         AND label.name LIKE 'claude-%'
-    `),
-      "listPendingChanges.campaigns"
-    );
-
-    // Get paused ad groups with claude label
-    const adGroups = await withResilience(
-      () =>
-        customer.query(`
+    `,
+      // Paused ad groups with claude label
+      adGroups: `
       SELECT
         ad_group.id,
         ad_group.name,
@@ -656,34 +656,25 @@ export class GoogleAdsManager {
       FROM ad_group_label
       WHERE ad_group.status = 'PAUSED'
         AND label.name LIKE 'claude-%'
-    `),
-      "listPendingChanges.adGroups"
-    );
-
-    // Get paused ads with claude label
-    const ads = await withResilience(
-      () =>
-        customer.query(`
+    `,
+      // Paused ads with claude label
+      ads: `
       SELECT
         ad_group_ad.ad.id,
         ad_group_ad.ad.type,
         ad_group_ad.status,
         ad_group_ad.policy_summary.approval_status,
+        ad_group.id,
         ad_group.name,
         campaign.name,
         label.name
       FROM ad_group_ad_label
       WHERE ad_group_ad.status = 'PAUSED'
         AND label.name LIKE 'claude-%'
-    `),
-      "listPendingChanges.ads"
-    );
-
-    // Get paused keywords with claude label. google_ads_enable_keywords takes
-    // the criterion resource name.
-    const keywords = await withResilience(
-      () =>
-        customer.query(`
+    `,
+      // Paused keywords with claude label. google_ads_enable_keywords takes
+      // the criterion resource name.
+      keywords: `
       SELECT
         ad_group_criterion.resource_name,
         ad_group_criterion.criterion_id,
@@ -697,11 +688,19 @@ export class GoogleAdsManager {
       WHERE ad_group_criterion.status = 'PAUSED'
         AND ad_group_criterion.type = 'KEYWORD'
         AND label.name LIKE 'claude-%'
-    `),
-      "listPendingChanges.keywords"
-    );
+    `,
+    };
 
-    return safeResponse({ campaigns, adGroups, ads, keywords }, "listPendingChanges");
+    const queried: Partial<Record<PendingSection, any[]>> = {};
+    for (const section of args.entityType ? [args.entityType] : PENDING_SECTIONS) {
+      queried[section] = await withResilience(
+        () => customer.query(queries[section]),
+        `listPendingChanges.${section}`
+      );
+    }
+
+    // Pages itself: safeResponse would halve each list and drop the totals.
+    return pagePendingChanges(queried, args, MAX_RESPONSE_SIZE);
   }
 
   // Create a label
@@ -5945,7 +5944,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "google_ads_list_pending_changes": {
         const customerId = args?.customer_id as string || "";
-        const pending = await getAdsManager().listPendingChanges(customerId);
+        const pendingArgs = parsePendingChangesArgs(args);
+        const pending = await getAdsManager().listPendingChanges(customerId, pendingArgs);
         return {
           content: [{
             type: "text",

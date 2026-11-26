@@ -46,7 +46,7 @@ export const logger = pino(
 // SAFE RESPONSE (Response Size Limiting)
 // ============================================
 
-const MAX_RESPONSE_SIZE = 200_000; // 200KB
+export const MAX_RESPONSE_SIZE = 200_000; // 200KB
 
 function truncateArraysRecursively(obj: any, depth: number = 0): boolean {
   if (depth > 30) return false; // Prevent infinite recursion

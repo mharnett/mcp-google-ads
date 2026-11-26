@@ -57,12 +57,23 @@ export const tools: Tool[] = [
   },
   {
     name: "google_ads_list_pending_changes",
-    description: "List all pending changes awaiting review: PAUSED campaigns, ad groups, ads and keywords with a claude- label",
+    description: "List all pending changes awaiting review: PAUSED campaigns, ad groups, ads and keywords with a claude- label. `counts` gives each section total_rows (one row per item per claude- label), total_items (distinct items) and returned_rows. If everything does not fit in one response it has truncated: true, rows per label in `labels`, and counts.<section>.next_offset for each section with more rows: that response is PARTIAL. Get the rest by calling again with entity_type and offset=next_offset until next_offset is gone; add label to narrow to one label. If a total changes between pages, start again at offset 0.",
     inputSchema: {
       additionalProperties: false,
       type: "object",
       properties: {
         customer_id: { type: "string" },
+        entity_type: {
+          type: "string",
+          enum: ["campaigns", "adGroups", "ads", "keywords"],
+          description: "Return one section only. Required with offset.",
+        },
+        offset: {
+          type: "integer",
+          minimum: 0,
+          description: "Rows of that section to skip: pass counts.<section>.next_offset from the previous response.",
+        },
+        label: { type: "string", description: "Only rows carrying this exact label name, e.g. claude-11-25-26." },
       },
     },
   },
