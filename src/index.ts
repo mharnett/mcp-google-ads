@@ -590,36 +590,6 @@ export class GoogleAdsManager {
     return safeResponse(result, "listAdGroups");
   }
 
-  // List ads with their status
-  async listAds(customerId: string, options: { campaignId?: string; adGroupId?: string; labelContains?: string }) {
-    const customer = this.getCustomer(customerId);
-    let query = `
-      SELECT
-        ad_group_ad.ad.id,
-        ad_group_ad.ad.name,
-        ad_group_ad.ad.type,
-        ad_group_ad.status,
-        ad_group_ad.policy_summary.approval_status,
-        ad_group_ad.policy_summary.review_status,
-        ad_group.id,
-        ad_group.name,
-        campaign.id,
-        campaign.name,
-        label.name
-      FROM ad_group_ad
-      WHERE ad_group_ad.status != 'REMOVED'
-    `;
-    if (options.campaignId) {
-      query += ` AND campaign.id = ${sanitizeNumericId(options.campaignId)}`;
-    }
-    if (options.adGroupId) {
-      query += ` AND ad_group.id = ${sanitizeNumericId(options.adGroupId)}`;
-    }
-    query += ` ORDER BY campaign.name, ad_group.name`;
-    const result = await withResilience(() => customer.query(query), "listAds");
-    return safeResponse(result, "listAds");
-  }
-
   // List pending changes (paused items with claude- label). The API joins
   // `label` only to the *_label resources, so each query starts from one:
   // label.name FROM campaign (or ad_group, ad_group_ad) is refused. An item
@@ -5847,9 +5817,15 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
   return { tools: buildToolList() };
 });
 
+// Settles when the startup auth check has finished, pass or fail. It never
+// rejects. Tool calls wait for it, so none runs ahead of the check;
+// initialize and tools/list do not.
+let startupCheckSettled: Promise<void> = Promise.resolve();
+
 // Handle tool calls
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
+  await startupCheckSettled;
 
   try {
     assertWriteAllowed(name);
@@ -8039,18 +8015,21 @@ export async function runStartupAuthCheck(
   return outcome;
 }
 
-async function main() {
+/** Runs the startup check and logs a failure. A failure never stops the server. */
+async function reportStartupAuthCheck(): Promise<void> {
   try {
     await runStartupAuthCheck(getConfig(), getAdsManager);
   } catch (err: any) {
     const classified = classifyError(err);
     if (classified instanceof GoogleAdsAuthError) {
-      logger.error({ error: classified.message }, "Auth check FAILED — MCP will start but ALL API calls will fail until auth is fixed");
+      logger.error({ error: classified.message }, "Auth check FAILED — ALL API calls will fail until auth is fixed");
     } else {
       logger.warn({ error: err.message }, "Auth check returned non-auth error (may be OK)");
     }
   }
+}
 
+async function main() {
   const writeMode = isWriteEnabled();
   logger.info(
     { writeEnabled: writeMode, envVar: "GOOGLE_ADS_MCP_WRITE" },
@@ -8060,6 +8039,9 @@ async function main() {
   );
 
   const transport = new StdioServerTransport();
+  // Not awaited, so a slow check cannot hold initialize. Assigned before
+  // connect, so no tool call can arrive ahead of it.
+  startupCheckSettled = reportStartupAuthCheck();
   await server.connect(transport);
   logger.info("MCP Google Ads server running");
 }
