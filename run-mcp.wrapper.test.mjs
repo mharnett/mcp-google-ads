@@ -22,6 +22,7 @@ import { fileURLToPath } from "url";
 import { mkdtempSync, writeFileSync, chmodSync, rmSync, existsSync, readFileSync } from "fs";
 import { tmpdir } from "os";
 import path from "path";
+import { realKeychainTestsEnabled } from "./tests/helpers/realKeychain.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SCRIPT = path.join(__dirname, "run-mcp.sh");
@@ -178,25 +179,19 @@ describe.skipIf(process.platform === "win32")("run-mcp.sh exports the Keychain i
 // asserts run-mcp.sh's own fail-fast loop passes for BOTH branches. The `node`
 // stub is silent (never echoes the token) so no secret can reach test output.
 //
-// Local-only by design: run-mcp.sh is Mark's private launcher and the Keychain
-// items exist only on his machine.
+// It reads real credentials, so it runs only when asked for by name (see
+// tests/helpers/realKeychain.mjs), on a machine whose Keychain holds the
+// items run-mcp.sh names:
 //
-// Gating on "is darwin && has security" was WRONG — GitHub's macos-latest
-// runners satisfy both, but their Keychain is empty, so the script fail-fasts
-// on the very first lookup (GOOGLE_ADS_DEVELOPER_TOKEN) and the test failed on
-// all three macOS jobs. The real prerequisite is "is this the machine whose
-// Keychain is supposed to hold these items", which CI never is.
+//   MCP_GOOGLE_ADS_TEST_REAL_KEYCHAIN=1 npx vitest run run-mcp.wrapper.test.mjs
+//
+// Not gated on "is darwin and not CI": that ran it in every local `npm test`.
 //
 // Deliberately NOT gated on whether the items exist. That check would skip
 // precisely when the bug this test exists to catch is present — a guard that
 // disables itself on failure is worse than no guard.
 
-const IS_LOCAL_DEV_MACHINE =
-  !process.env.CI &&
-  process.platform === "darwin" &&
-  spawnSync("command", ["-v", "security"], { shell: true }).status === 0;
-
-describe.skipIf(!IS_LOCAL_DEV_MACHINE)(
+describe.skipIf(!realKeychainTestsEnabled(process.env, process.platform))(
   "run-mcp.sh Keychain accounts resolve to real secrets",
   () => {
     let silentBinDir;
