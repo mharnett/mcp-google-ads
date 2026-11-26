@@ -272,7 +272,7 @@ The tables below describe 41 of the 87. `src/tools.ts` has every tool, with its 
 | `google_ads_get_client_context` | Detect which account from working directory |
 | `google_ads_list_campaigns` | List all campaigns with status and metrics |
 | `google_ads_list_ad_groups` | List ad groups in a campaign |
-| `google_ads_list_pending_changes` | Show PAUSED campaigns, ad groups, ads and keywords with a claude- label |
+| `google_ads_list_pending_changes` | Show PAUSED campaigns, ad groups, ads and keywords with a claude- label, with totals; a large result is paged |
 | `google_ads_list_conversion_actions` | List conversion actions |
 
 #### Campaign Management
